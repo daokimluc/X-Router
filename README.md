@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/images/banner.png" alt="AI Gateway" width="600" />
-</p>
-
 # AI Gateway — Internal AI Router & Token Saver
 
 > Never stop coding. Route requests across FREE & paid AI providers with auto-fallback, multi-account pooling, and 60-90% token savings.
