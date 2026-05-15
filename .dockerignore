@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+*.log
+secrets/*.json
+!secrets/*.example.json
+.git
+.kiro
+

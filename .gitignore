@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+dashboard-dist/
+coverage/
+*.log
+secrets/*.json
+!secrets/*.example.json
+data/
+.tmp/
+_ref/
+9Router*
+*.html
+package-lock.json
+

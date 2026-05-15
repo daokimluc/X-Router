@@ -1,0 +1,28 @@
+{
+  "name": "ai-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI Gateway - unified Fastify backend and React dashboard in a single package",
+  "bin": {
+    "ai-gateway": "./bin/ai-gateway.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "dashboard-dist/"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
+    "start": "node bin/ai-gateway.js"
+  },
+  "dependencies": {
+    "@fastify/static": "^9.1.3",
+    "fastify": "^5.8.5",
+    "pino": "^9.5.0",
+    "zod": "^3.23.8"
+  }
+}
