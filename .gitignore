@@ -12,6 +12,13 @@ data/
 .tmp/
 _ref/
 9Router*
-*.html
 package-lock.json
+PLAN.md
+README_1.md
+SECURITY_CHECKLIST.md
+DOCKER.md
+.kiro/
+PLAN.md
+README_1.md
+SECURITY_CHECKLIST.md
 
