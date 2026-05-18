@@ -16,6 +16,9 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:gateway": "cd apps/gateway && npx tsc --project tsconfig.json && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/gateway/dist',d='dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('✓ Gateway dist synced')\"",
+    "build:dashboard": "cd apps/dashboard && npm run build && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/dashboard/dist',d='dashboard-dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('✓ Dashboard dist synced')\"",
+    "build:all": "npm run build:dashboard && npm run build:gateway",
     "prepack": "npm run build",
     "start": "node bin/ai-gateway.js"
   },
@@ -23,6 +26,7 @@
     "@fastify/static": "^9.1.3",
     "fastify": "^5.8.5",
     "pino": "^9.5.0",
+    "undici": "^8.3.0",
     "zod": "^3.23.8"
   }
 }

@@ -664,7 +664,7 @@ export async function registerProviderAccountRoutes(
           const expiresAt = Date.now() + 600_000; // 10 minutes
 
           // Build authorization URL using oauthConfig from definition if available
-          const redirectUri = definition.oauthConfig?.redirectUri ?? "http://127.0.0.1:8080/oauth/callback";
+          const redirectUri = definition.oauthConfig?.redirectUri ?? "http://127.0.0.1:3100/oauth/callback";
           const authorizationEndpoint = getOAuthAuthorizationEndpoint(definition, providerType);
           const clientId = definition.oauthConfig?.clientId;
           const scope = definition.oauthConfig?.scope;

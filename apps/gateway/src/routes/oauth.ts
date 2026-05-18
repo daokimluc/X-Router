@@ -612,7 +612,7 @@ async function completeOAuthSessionCallback(
       const kiroToken = await new KiroAuthClient().exchangeAuthorizationCode({
         code,
         codeVerifier: session.codeVerifier,
-        redirectUri: "http://127.0.0.1:8080/oauth/callback",
+        redirectUri: "http://127.0.0.1:3100/oauth/callback",
         loginOption: query?.login_option
       });
       credentialPayload = {

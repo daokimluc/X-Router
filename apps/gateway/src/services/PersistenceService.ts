@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import type { ProviderAccount, ProviderAccountSecret } from "../providers/base/ProviderAccount.js";
 import type { ProviderInstance } from "../providers/base/ProviderInstance.js";
+import type { ProxyPool } from "../proxy/types.js";
 import type { ModelMapping } from "../router/ModelRegistry.js";
 import type { RoutingProfile } from "../router/RoutingProfileRegistry.js";
 import type { ConfigRevision } from "./ConfigRevisionService.js";
@@ -26,7 +27,8 @@ const persistedStateSchema = z.object({
   tokenSaver: z.any().optional(),
   teams: z.array(z.any()).optional(),
   usage: z.array(z.any()).optional(),
-  requestLogs: z.array(z.any()).optional()
+  requestLogs: z.array(z.any()).optional(),
+  proxyPools: z.array(z.any()).default([])
 });
 
 export type PersistedGatewayState = {
@@ -60,6 +62,7 @@ export type PersistedGatewayState = {
   }>;
   usage?: Array<Record<string, unknown>>;
   requestLogs?: Array<Record<string, unknown>>;
+  proxyPools?: ProxyPool[];
 };
 
 export class PersistenceService {
@@ -84,7 +87,8 @@ export class PersistenceService {
         tokenSaver: parsed.tokenSaver,
         teams: parsed.teams?.map(reviveDates),
         usage: parsed.usage,
-        requestLogs: parsed.requestLogs
+        requestLogs: parsed.requestLogs,
+        proxyPools: parsed.proxyPools.map(reviveDates)
       } as PersistedGatewayState;
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -112,7 +116,8 @@ function reviveDates<T>(value: T): T {
     "lastUsedAt",
     "lastSuccessAt",
     "lastFailureAt",
-    "cooldownUntil"
+    "cooldownUntil",
+    "lastTestedAt"
   ]) {
     const current = clone[key];
     const parsed = dateish.safeParse(current);

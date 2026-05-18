@@ -1,16 +1,24 @@
 import {
   Activity,
   AlertCircle,
+  AudioWaveform,
   BadgeCheck,
   Bot,
   BookOpen,
   Boxes,
+  Brackets,
+  Brush,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
+  ChevronUp,
   Clipboard,
   Cloud,
   ExternalLink,
   FlaskConical,
+  FolderOpen,
+  FolderSearch,
   Database,
   Gauge,
   Globe,
@@ -19,8 +27,10 @@ import {
   KeyRound,
   ListChecks,
   Lock,
+  Mic,
   Moon,
   Network,
+  Pencil,
   Plus,
   Plug,
   RefreshCw,
@@ -31,6 +41,7 @@ import {
   Shield,
   Sun,
   Terminal,
+  Timer,
   Trash2,
   Users,
   X,
@@ -41,7 +52,52 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UsagePage } from "./UsagePage";
 import { ProvidersPage } from "./ProvidersPage";
 import { TeamsPage } from "./TeamsPage";
+import { ProxyPoolsPage } from "./ProxyPoolsPage";
+import { MediaProvidersPage } from "./MediaProvidersPage";
+import { EmbeddingProvidersPage } from "./media/EmbeddingProvidersPage";
+import { ImageProvidersPage } from "./media/ImageProvidersPage";
+import { TTSProvidersPage } from "./media/TTSProvidersPage";
+import { STTProvidersPage } from "./media/STTProvidersPage";
+import { WebProvidersPage } from "./media/WebProvidersPage";
 import { useLang } from "./i18n";
+import { getKnownModels } from "./providerModels";
+
+// Provider metadata for detail page (website, API key URL, deprecation status)
+const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
+  kiro: { website: "https://kiro.dev" },
+  windsurf: { website: "https://windsurf.com" },
+  openai: { website: "https://platform.openai.com", apiKeyUrl: "https://platform.openai.com/api-keys" },
+  anthropic: { website: "https://console.anthropic.com", apiKeyUrl: "https://console.anthropic.com/settings/keys" },
+  deepseek: { website: "https://deepseek.com", apiKeyUrl: "https://platform.deepseek.com/api_keys" },
+  groq: { website: "https://groq.com", apiKeyUrl: "https://console.groq.com/keys" },
+  xai: { website: "https://x.ai", apiKeyUrl: "https://console.x.ai" },
+  mistral: { website: "https://mistral.ai", apiKeyUrl: "https://console.mistral.ai/api-keys" },
+  together_ai: { website: "https://www.together.ai", apiKeyUrl: "https://api.together.xyz/settings/api-keys" },
+  fireworks: { website: "https://fireworks.ai", apiKeyUrl: "https://fireworks.ai/account/api-keys" },
+  perplexity: { website: "https://www.perplexity.ai", apiKeyUrl: "https://www.perplexity.ai/settings/api" },
+  cerebras: { website: "https://www.cerebras.ai", apiKeyUrl: "https://cloud.cerebras.ai/platform" },
+  cohere: { website: "https://cohere.com", apiKeyUrl: "https://dashboard.cohere.com/api-keys" },
+  nebius: { website: "https://nebius.com", apiKeyUrl: "https://studio.nebius.com/settings/api-keys" },
+  siliconflow: { website: "https://cloud.siliconflow.com", apiKeyUrl: "https://cloud.siliconflow.com/account/ak" },
+  glm_zhipu: { website: "https://open.bigmodel.cn", apiKeyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
+  minimax: { website: "https://www.minimaxi.com", apiKeyUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key" },
+  kimi_moonshot: { website: "https://kimi.moonshot.cn", apiKeyUrl: "https://platform.moonshot.ai/console/api-keys" },
+  gemini: { website: "https://ai.google.dev", apiKeyUrl: "https://aistudio.google.com/app/apikey" },
+  openrouter: { website: "https://openrouter.ai", apiKeyUrl: "https://openrouter.ai/settings/keys" },
+  nvidia_nim: { website: "https://developer.nvidia.com/nim", apiKeyUrl: "https://build.nvidia.com/settings/api-keys" },
+  alibaba: { website: "https://bailian.console.aliyun.com", apiKeyUrl: "https://bailian.console.aliyun.com/?apiKey=1" },
+  volcengine_ark: { website: "https://ark.cn-beijing.volces.com", apiKeyUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" },
+  byteplus: { website: "https://console.byteplus.com/ark", apiKeyUrl: "https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey" },
+  blackbox: { website: "https://blackbox.ai", apiKeyUrl: "https://www.blackbox.ai/api-management" },
+  vercel_ai_gateway: { website: "https://vercel.com/ai-gateway", apiKeyUrl: "https://vercel.com/dashboard/~/ai-gateway" },
+  claude_code: { website: "https://claude.ai", deprecated: true },
+  codex: { website: "https://chatgpt.com/codex", deprecated: true },
+  github_copilot: { website: "https://github.com/features/copilot", deprecated: true },
+  cursor: { website: "https://cursor.com" },
+  antigravity: { website: "https://antigravity.google", deprecated: true },
+  hyperbolic: { website: "https://hyperbolic.xyz", apiKeyUrl: "https://app.hyperbolic.xyz/settings" },
+  chutes: { website: "https://chutes.ai", apiKeyUrl: "https://chutes.ai/app/api" },
+};
 
 // ─── Toast System ──────────────────────────────────────────
 type ToastItem = { id: number; type: "success" | "error" | "info"; text: string };
@@ -93,6 +149,13 @@ type PageId =
   | "requests"
   | "audit"
   | "teams"
+  | "proxyPools"
+  | "mediaProviders"
+  | "mediaEmbedding"
+  | "mediaImage"
+  | "mediaTTS"
+  | "mediaSTT"
+  | "mediaWeb"
   | "settings"
   | "docs";
 
@@ -147,6 +210,11 @@ type Account = {
     healthCheckStatus?: "healthy" | "unhealthy" | "timeout";
     healthCheckMessage?: string;
   };
+  tokenStatus?: {
+    expiresAt: string | null;
+    lastRefreshedAt: string | null;
+    credentialType: string;
+  } | null;
 };
 
 type ModelMapping = {
@@ -319,15 +387,34 @@ const pages: Array<{
   { id: "requests", label: "Request Logs", icon: ScrollText, description: "Metadata-only request log stream" },
   { id: "audit", label: "Audit Logs", icon: ListChecks, description: "Admin control-plane activity" },
   { id: "teams", label: "Teams", icon: Users, description: "Team quotas and access control" },
+  { id: "proxyPools", label: "Proxy Pools", icon: Shield, description: "HTTP proxy pools for provider connections" },
+  { id: "mediaProviders", label: "Media Providers", icon: FolderOpen, description: "Non-LLM AI service providers overview" },
+  { id: "mediaEmbedding", label: "Embedding", icon: Brackets, description: "Embedding provider configuration" },
+  { id: "mediaImage", label: "Text to Image", icon: Brush, description: "Image generation and understanding providers" },
+  { id: "mediaTTS", label: "Text To Speech", icon: AudioWaveform, description: "Text-to-speech provider configuration" },
+  { id: "mediaSTT", label: "Speech To Text", icon: Mic, description: "Speech-to-text provider configuration" },
+  { id: "mediaWeb", label: "Web Fetch & Search", icon: FolderSearch, description: "Web search and fetch provider configuration" },
   { id: "settings", label: "Settings", icon: Settings, description: "Config revisions and security controls" },
   { id: "docs", label: "Docs", icon: BookOpen, description: "Documentation and usage guides" }
 ];
 
 const pageById = new Map(pages.map((page) => [page.id, page]));
 
-const navGroups: Array<{ label: string; ids: PageId[] }> = [
+type NavGroup = {
+  label: string;
+  ids: PageId[];
+  /** Optional: if set, this group is collapsible and the parent item routes to this page */
+  parent?: PageId;
+};
+
+const navGroups: Array<NavGroup> = [
   { label: "Dashboard", ids: ["overview", "usage"] },
-  { label: "Setup", ids: ["providers", "profiles", "endpoint", "cli"] },
+  { label: "Setup", ids: ["providers", "profiles", "endpoint", "cli", "proxyPools"] },
+  {
+    label: "Media Providers",
+    parent: "mediaProviders",
+    ids: ["mediaEmbedding", "mediaImage", "mediaTTS", "mediaSTT", "mediaWeb"],
+  },
   { label: "Monitor", ids: ["requests", "audit", "playground"] },
   { label: "Admin", ids: ["teams", "settings", "docs"] }
 ];
@@ -404,10 +491,31 @@ function LoginScreen(props: { onLogin: (key: string) => void }) {
 }
 
 export function App() {
-  const [activePage, setActivePage] = useState<PageId>("overview");
+  const [activePage, setActivePageRaw] = useState<PageId>(() => {
+    const path = window.location.pathname.replace(/^\/dashboard\/?/, "").replace(/\/$/, "");
+    const match = pages.find((p) => p.id === path);
+    return match ? match.id : "overview";
+  });
+  const setActivePage = (id: PageId) => {
+    setActivePageRaw(id);
+    window.history.pushState(null, "", `/dashboard/${id}`);
+  };
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const handler = () => {
+      const path = window.location.pathname.replace(/^\/dashboard\/?/, "").replace(/\/$/, "");
+      const match = pages.find((p) => p.id === path);
+      if (match) setActivePageRaw(match.id);
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
   const [theme, setTheme] = useState<"light" | "dark">(
     () => (window.localStorage.getItem("gateway.theme") === "dark" ? "dark" : "light")
   );
+  // Sidebar collapsible group state — keyed by group.label
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [adminKey, setAdminKey] = useState(
     () => window.localStorage.getItem("gateway.adminKey") ?? ""
   );
@@ -549,26 +657,76 @@ export function App() {
         </div>
 
         <nav className="navList" aria-label="Dashboard">
-          {navGroups.map((group) => (
-            <div className="navGroup" key={group.label}>
-              <p>{t(`nav.${group.label.toLowerCase()}`)}</p>
-              {group.ids.map((id) => {
-                const page = pageById.get(id)!;
-                const Icon = page.icon;
-                return (
+          {navGroups.map((group) => {
+            // Collapsible group: has a `parent` page that acts as both the
+            // section header AND a clickable nav item. Children are shown
+            // when the parent is active OR when one of the children is active.
+            if (group.parent) {
+              const parentPage = pageById.get(group.parent)!;
+              const ParentIcon = parentPage.icon;
+              const isParentActive = activePage === group.parent;
+              const isChildActive = group.ids.some((id) => id === activePage);
+              const isExpanded = expandedGroups[group.label] ?? (isParentActive || isChildActive);
+
+              return (
+                <div className="navGroup navGroup--collapsible" key={group.label}>
                   <button
-                    key={page.id}
-                    className={page.id === activePage ? "navItem active" : "navItem"}
-                    onClick={() => setActivePage(page.id)}
-                    title={t(`page.${page.id}`)}
+                    className={`navItem navItem--parent${isParentActive ? " active" : ""}`}
+                    onClick={() => {
+                      setActivePage(group.parent!);
+                      setExpandedGroups((prev) => ({ ...prev, [group.label]: !isExpanded }));
+                    }}
+                    title={t(`page.${group.parent}`)}
                   >
-                    <Icon size={18} />
-                    <span>{t(`page.${page.id}`)}</span>
+                    <ParentIcon size={20} strokeWidth={2.2} />
+                    <span style={{ flex: 1, textAlign: "left" }}>{t(`page.${group.parent}`)}</span>
+                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </button>
-                );
-              })}
-            </div>
-          ))}
+                  {isExpanded && (
+                    <div className="navSubList">
+                      {group.ids.map((id) => {
+                        const page = pageById.get(id)!;
+                        const Icon = page.icon;
+                        return (
+                          <button
+                            key={page.id}
+                            className={`navItem navItem--child${page.id === activePage ? " active" : ""}`}
+                            onClick={() => setActivePage(page.id)}
+                            title={t(`page.${page.id}`)}
+                          >
+                            <Icon size={18} strokeWidth={2} />
+                            <span>{t(`page.${page.id}`)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // Standard non-collapsible group with header label
+            return (
+              <div className="navGroup" key={group.label}>
+                <p>{t(`nav.${group.label.toLowerCase()}`)}</p>
+                {group.ids.map((id) => {
+                  const page = pageById.get(id)!;
+                  const Icon = page.icon;
+                  return (
+                    <button
+                      key={page.id}
+                      className={page.id === activePage ? "navItem active" : "navItem"}
+                      onClick={() => setActivePage(page.id)}
+                      title={t(`page.${page.id}`)}
+                    >
+                      <Icon size={20} strokeWidth={2.2} />
+                      <span>{t(`page.${page.id}`)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </nav>
       </aside>
 
@@ -751,7 +909,7 @@ function PageContent(props: {
     case "playground":
       return <Playground models={props.data.modelMappings} profiles={props.data.routingProfiles} />;
     case "usage":
-      return <UsagePage usage={props.data.usage} providerInstances={props.data.providerInstances} />;
+      return <UsagePage usage={props.data.usage} providerInstances={props.data.providerInstances} accounts={props.data.accounts} />;
     case "requests":
       return <RequestLogs logs={props.data.requestLogs} api={props.api} refresh={props.refresh} />;
     case "audit":
@@ -760,6 +918,20 @@ function PageContent(props: {
       return <SettingsPage api={props.api} />;
     case "teams":
       return <TeamsPage api={props.api} refresh={props.refresh} />;
+    case "proxyPools":
+      return <ProxyPoolsPage api={props.api} refresh={props.refresh} />;
+    case "mediaProviders":
+      return <MediaProvidersPage api={props.api} refresh={props.refresh} />;
+    case "mediaEmbedding":
+      return <EmbeddingProvidersPage api={props.api} refresh={props.refresh} />;
+    case "mediaImage":
+      return <ImageProvidersPage api={props.api} refresh={props.refresh} />;
+    case "mediaTTS":
+      return <TTSProvidersPage api={props.api} refresh={props.refresh} />;
+    case "mediaSTT":
+      return <STTProvidersPage api={props.api} refresh={props.refresh} />;
+    case "mediaWeb":
+      return <WebProvidersPage api={props.api} refresh={props.refresh} />;
     case "docs":
       return <DocsPage />;
   }
@@ -981,22 +1153,43 @@ type ProviderCatalogItem = {
 };
 
 const providerCatalogItems: ProviderCatalogItem[] = [
-  { type: "kiro", name: "Kiro AI", group: "Free Tier Providers", supported: true },
+  // OAuth Providers
+  { type: "kiro", name: "Kiro AI", group: "OAuth Providers", supported: true },
   { type: "windsurf", name: "Windsurf", group: "OAuth Providers", supported: true },
-  { type: "codex", name: "OpenAI Codex", group: "OAuth Providers", supported: false },
   { type: "claude", name: "Claude Code", group: "OAuth Providers", supported: false },
-  { type: "antigravity", name: "Antigravity", group: "OAuth Providers", supported: false },
+  { type: "codex", name: "OpenAI Codex", group: "OAuth Providers", supported: false },
   { type: "github-copilot", name: "GitHub Copilot", group: "OAuth Providers", supported: false },
   { type: "cursor", name: "Cursor IDE", group: "OAuth Providers", supported: false },
   { type: "cline", name: "Cline", group: "OAuth Providers", supported: false },
-  { type: "qwen", name: "Qwen Code", group: "Free Tier Providers", supported: false },
-  { type: "gemini-cli", name: "Gemini CLI", group: "Free Tier Providers", supported: false },
+  { type: "kilocode", name: "Kilo Code", group: "OAuth Providers", supported: false },
+  // Free Tier Providers
+  { type: "opencode_free", name: "OpenCode Free", group: "Free Tier Providers", supported: false },
   { type: "openrouter", name: "OpenRouter", group: "Free Tier Providers", supported: false },
+  { type: "nvidia", name: "NVIDIA NIM", group: "Free Tier Providers", supported: false },
   { type: "ollama", name: "Ollama Cloud", group: "Free Tier Providers", supported: false },
+  { type: "gemini", name: "Gemini", group: "Free Tier Providers", supported: false },
+  { type: "vertex_ai", name: "Vertex AI", group: "Free Tier Providers", supported: false },
+  { type: "cloudflare", name: "Cloudflare", group: "Free Tier Providers", supported: false },
+  // API Key Providers
   { type: "openai", name: "OpenAI", group: "API Key Providers", supported: false },
   { type: "anthropic", name: "Anthropic", group: "API Key Providers", supported: false },
+  { type: "azure_openai", name: "Azure OpenAI", group: "API Key Providers", supported: false },
+  { type: "deepseek", name: "DeepSeek", group: "API Key Providers", supported: false },
+  { type: "groq", name: "Groq", group: "API Key Providers", supported: false },
+  { type: "xai", name: "xAI (Grok)", group: "API Key Providers", supported: false },
+  { type: "mistral", name: "Mistral", group: "API Key Providers", supported: false },
+  { type: "together", name: "Together AI", group: "API Key Providers", supported: false },
+  { type: "fireworks", name: "Fireworks AI", group: "API Key Providers", supported: false },
+  { type: "perplexity", name: "Perplexity", group: "API Key Providers", supported: false },
+  { type: "cerebras", name: "Cerebras", group: "API Key Providers", supported: false },
+  { type: "cohere", name: "Cohere", group: "API Key Providers", supported: false },
   { type: "kimi", name: "Kimi", group: "API Key Providers", supported: false },
-  { type: "alibaba", name: "Alibaba", group: "API Key Providers", supported: false }
+  { type: "alibaba", name: "Alibaba", group: "API Key Providers", supported: false },
+  { type: "minimax", name: "Minimax", group: "API Key Providers", supported: false },
+  { type: "siliconflow", name: "SiliconFlow", group: "API Key Providers", supported: false },
+  { type: "nebius", name: "Nebius AI", group: "API Key Providers", supported: false },
+  { type: "glm", name: "GLM Coding", group: "API Key Providers", supported: false },
+  { type: "volcengine", name: "Volcengine Ark", group: "API Key Providers", supported: false },
 ];
 
 function ProvidersPageWithDetail(props: {
@@ -1138,10 +1331,9 @@ function getErrorMessage(code: string, fallback: string): string {
 function getSupportedCredentialModes(providerType?: ProviderType): CredentialMode[] {
   if (!providerType) return ["api_key"];
   
-  // Kiro: OAuth redirects without consent screen — not usable externally.
-  // Windsurf: OAuth callback token is not a valid Cascade API key.
-  // Both only work via local import or manual token paste.
-  const noExternalOAuth = ["kiro", "windsurf"];
+  // Kiro uses device code flow (AWS Builder ID / IAM Identity Center) — show as OAuth option.
+  // Windsurf: OAuth callback token is not a valid Cascade API key — only local import.
+  const noExternalOAuth = ["windsurf"];
   
   const modes: CredentialMode[] = [];
   for (const method of providerType.authMethods) {
@@ -1160,6 +1352,73 @@ function getSupportedCredentialModes(providerType?: ProviderType): CredentialMod
   }
   
   return modes.length > 0 ? modes : ["api_key"];
+}
+
+function EditAccountModal(props: {
+  account: Account;
+  onClose: () => void;
+  onSave: (patch: { displayName?: string; maxConcurrency?: number; weight?: number }) => void;
+}) {
+  const [displayName, setDisplayName] = useState(props.account.displayName);
+  const [maxConcurrency, setMaxConcurrency] = useState(String(props.account.maxConcurrency ?? 3));
+  const [weight, setWeight] = useState("1");
+
+  return (
+    <div className="modalOverlay" role="presentation" onMouseDown={props.onClose}>
+      <div className="confirmModal editAccountModal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <div className="windowDots"><span /><span /><span /></div>
+          <h3>Edit Connection</h3>
+          <button className="iconButton" type="button" onClick={props.onClose}><X size={18} /></button>
+        </div>
+        <div className="editAccountBody">
+          <label className="formField">
+            <span>Display Name</span>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Account display name"
+            />
+          </label>
+          <label className="formField">
+            <span>Max Concurrency</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={maxConcurrency}
+              onChange={(e) => setMaxConcurrency(e.target.value)}
+            />
+          </label>
+          <label className="formField">
+            <span>Weight (for weighted routing)</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="modalFooter">
+          <button className="textButton" type="button" onClick={props.onClose}>Cancel</button>
+          <button
+            className="primaryButton"
+            type="button"
+            onClick={() => props.onSave({
+              displayName: displayName.trim() || undefined,
+              maxConcurrency: Number(maxConcurrency) || undefined,
+              weight: Number(weight) || undefined
+            })}
+          >
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AddAccountModal(props: {
@@ -1549,35 +1808,59 @@ function AddAccountModal(props: {
 
         {/* Tabs — only show for providers with multiple auth options or legacy providers */}
         {!isAzure && !isVertex && !isNoAuth && !isCustom && (<>
-        <div className="addAccTabs">
-          {hasOAuth && (
-            <button
-              type="button"
-              className={`addAccTab ${activeTab === "oauth" ? "active" : ""}`}
-              onClick={() => setActiveTab("oauth")}
-            >
-              <Globe size={14} /> {isNewOAuth ? "Connect via Browser" : "Ủy quyền OAuth"}
-            </button>
-          )}
-          {(hasRefreshToken || hasApiKey) && (
-            <button
-              type="button"
-              className={`addAccTab ${activeTab === "token" ? "active" : ""}`}
-              onClick={() => setActiveTab("token")}
-            >
-              <KeyRound size={14} /> Token / Key
-            </button>
-          )}
-          {hasLocal && (
-            <button
-              type="button"
-              className={`addAccTab ${activeTab === "local" ? "active" : ""}`}
-              onClick={() => setActiveTab("local")}
-            >
-              <Database size={14} /> Nhập từ máy
-            </button>
-          )}
-        </div>
+        {/* Auth Method Selection — card-based like 9router */}
+        {!oauthSession && (
+          <div className="addAccMethodCards">
+            <p className="addAccMethodHint">Choose your authentication method:</p>
+
+            {hasOAuth && (
+              <button
+                type="button"
+                className={`addAccMethodCard ${activeTab === "oauth" ? "addAccMethodCard--active" : ""}`}
+                onClick={() => setActiveTab("oauth")}
+              >
+                <div className="addAccMethodCardIcon"><Globe size={18} /></div>
+                <div className="addAccMethodCardBody">
+                  <strong>{props.providerType === "kiro" ? "AWS Builder ID" : isNewOAuth ? "Connect via Browser" : "OAuth Authorization"}</strong>
+                  <span>{props.providerType === "kiro"
+                    ? "Recommended for most users. Free AWS account required."
+                    : isNewOAuth
+                      ? `Authorize ${providerDisplayName} in your browser.`
+                      : "Authorize via OAuth in your browser."
+                  }</span>
+                </div>
+              </button>
+            )}
+
+            {(hasRefreshToken || hasApiKey) && (
+              <button
+                type="button"
+                className={`addAccMethodCard ${activeTab === "token" ? "addAccMethodCard--active" : ""}`}
+                onClick={() => setActiveTab("token")}
+              >
+                <div className="addAccMethodCardIcon"><KeyRound size={18} /></div>
+                <div className="addAccMethodCardBody">
+                  <strong>{hasApiKey && !hasRefreshToken ? "API Key" : "Token / API Key"}</strong>
+                  <span>{hasRefreshToken ? "Paste refresh token or API key." : "Paste your API key to connect."}</span>
+                </div>
+              </button>
+            )}
+
+            {hasLocal && (
+              <button
+                type="button"
+                className={`addAccMethodCard ${activeTab === "local" ? "addAccMethodCard--active" : ""}`}
+                onClick={() => setActiveTab("local")}
+              >
+                <div className="addAccMethodCardIcon"><Database size={18} /></div>
+                <div className="addAccMethodCardBody">
+                  <strong>Import Token</strong>
+                  <span>Paste refresh token from {props.providerType === "kiro" ? "Kiro" : "Windsurf"} IDE.</span>
+                </div>
+              </button>
+            )}
+          </div>
+        )}
 
         {errors.submit && <div className="formNotice error">{errors.submit}</div>}
 
@@ -1652,6 +1935,61 @@ function AddAccountModal(props: {
               void submitToken(e);
             }
           }}>
+            {/* Mode toggle: Single / Bulk */}
+            {!["kiro", "windsurf"].includes(props.providerType) && (
+              <div className="addAccTokenToggle">
+                <button type="button" className={tokenMode === "api_key" ? "active" : ""} onClick={() => setTokenMode("api_key")}>Single</button>
+                <button type="button" className={tokenMode === "refresh_token" ? "active" : ""} onClick={() => setTokenMode("refresh_token")}>Bulk Add</button>
+              </div>
+            )}
+
+            {/* Bulk Add mode */}
+            {!["kiro", "windsurf"].includes(props.providerType) && tokenMode === "refresh_token" && (
+              <>
+                <p className="addAccDesc">One key per line. Format: <code>name|apiKey</code> or just <code>apiKey</code> (auto-named).</p>
+                <label className="addAccField">
+                  <span>API Keys (one per line)</span>
+                  <textarea
+                    placeholder={"Production|sk-abc123...\nStaging|sk-def456...\nsk-key-only-auto-named"}
+                    value={tokenValue}
+                    onChange={(e) => setTokenValue(e.target.value)}
+                    disabled={submitting}
+                    rows={5}
+                  />
+                </label>
+                <button type="button" className="primaryButton" disabled={submitting || !tokenValue.trim()} onClick={async () => {
+                  setSubmitting(true);
+                  setErrors({});
+                  const lines = tokenValue.split("\n").map(l => l.trim()).filter(Boolean);
+                  let success = 0, failed = 0;
+                  for (let i = 0; i < lines.length; i++) {
+                    const parts = lines[i].split("|");
+                    const apiKey = parts.length >= 2 ? parts.slice(1).join("|").trim() : parts[0].trim();
+                    const displayName = parts.length >= 2 ? parts[0].trim() : `${providerDisplayName} Key ${i + 1}`;
+                    try {
+                      await props.api.post("/admin/provider-accounts", {
+                        providerType: props.providerType,
+                        displayName,
+                        credentials: { apiKey },
+                        config: {},
+                        weight: 1,
+                        maxConcurrency: 3,
+                        tags: [],
+                      });
+                      success++;
+                    } catch { failed++; }
+                  }
+                  setSubmitting(false);
+                  if (failed === 0) { props.onSuccess(); }
+                  else { setErrors({ submit: `${success} added, ${failed} failed` }); }
+                }}>
+                  {submitting ? "Adding..." : "Add All Keys"}
+                </button>
+              </>
+            )}
+
+            {/* Single mode (or kiro/windsurf) */}
+            {(["kiro", "windsurf"].includes(props.providerType) || tokenMode === "api_key") && (<>
             {props.providerType === "windsurf" && (
               <div className="addAccGetTokenHint">
                 <span>Lấy token tại:</span>
@@ -1674,16 +2012,16 @@ function AddAccountModal(props: {
               />
               {errors.label && <small className="fieldError">{errors.label}</small>}
             </label>
-            {hasRefreshToken && hasApiKey && (
+            {["kiro", "windsurf"].includes(props.providerType) && hasRefreshToken && hasApiKey && (
               <div className="addAccTokenToggle">
                 <button type="button" className={tokenMode === "refresh_token" ? "active" : ""} onClick={() => setTokenMode("refresh_token")}>Refresh Token</button>
                 <button type="button" className={tokenMode === "api_key" ? "active" : ""} onClick={() => setTokenMode("api_key")}>API Key</button>
               </div>
             )}
             <label className="addAccField">
-              <span>{tokenMode === "refresh_token" ? "Refresh Token" : "API Key"}</span>
+              <span>{["kiro", "windsurf"].includes(props.providerType) ? (tokenMode === "refresh_token" ? "Refresh Token" : "API Key") : "API Key"}</span>
               <textarea
-                placeholder={tokenMode === "refresh_token" ? "Enter refresh token" : "Enter API key"}
+                placeholder={["kiro", "windsurf"].includes(props.providerType) ? (tokenMode === "refresh_token" ? "Enter refresh token" : "Enter API key") : "sk-..."}
                 value={tokenValue}
                 onChange={(e) => setTokenValue(e.target.value)}
                 disabled={submitting}
@@ -1691,9 +2029,17 @@ function AddAccountModal(props: {
               />
               {errors.token && <small className="fieldError">{errors.token}</small>}
             </label>
+            {/* Validate button for API key providers */}
+            {!["kiro", "windsurf"].includes(props.providerType) && healthPending && (
+              <div className="addAccPolling">
+                <RefreshCw size={14} className="spin" />
+                <span>Validating connection...</span>
+              </div>
+            )}
             <button type="submit" className="primaryButton" disabled={submitting || !label.trim() || !tokenValue.trim()}>
-              {submitting ? "Đang xử lý..." : "Thêm Account"}
+              {submitting ? "Adding..." : healthPending ? "Checking..." : "Add Account"}
             </button>
+            </>)}
           </form>
         )}
 
@@ -1898,6 +2244,7 @@ function ProviderDetail(props: {
   const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState<Account | null>(null);
   const [deleteModelCandidate, setDeleteModelCandidate] = useState<ModelMapping | null>(null);
+  const [editAccountCandidate, setEditAccountCandidate] = useState<Account | null>(null);
   const [oauthLaunch, setOAuthLaunch] = useState<{
     state: string;
     authorizationUrl: string;
@@ -2053,6 +2400,32 @@ function ProviderDetail(props: {
     }
   }
 
+  async function moveAccountPriority(accountId: string, direction: "up" | "down") {
+    try {
+      await props.api.post(`/admin/v1/accounts/${accountId}/priority`, { direction });
+      await props.refresh();
+    } catch (caught) {
+      setMessage({
+        type: "error",
+        text: caught instanceof Error ? caught.message : "Could not change priority"
+      });
+    }
+  }
+
+  async function updateAccount(accountId: string, patch: { displayName?: string; maxConcurrency?: number; weight?: number }) {
+    try {
+      await props.api.patch(`/admin/v1/accounts/${accountId}`, patch);
+      setEditAccountCandidate(null);
+      setMessage({ type: "success", text: "Account updated" });
+      await props.refresh();
+    } catch (caught) {
+      setMessage({
+        type: "error",
+        text: caught instanceof Error ? caught.message : "Could not update account"
+      });
+    }
+  }
+
   async function deleteAccount(account: Account) {
     try {
       await props.api.delete(`/admin/v1/accounts/${account.id}`);
@@ -2183,6 +2556,24 @@ function ProviderDetail(props: {
     }
   }
 
+  async function testCustomModel2(publicModel: string) {
+    try {
+      setMessage({ type: "success", text: `Testing ${publicModel}...` });
+      const result = await props.api.post<AccountTestResult>(`/admin/v1/provider-instances/${instance.id}/test-model`, {
+        model: publicModel,
+        prompt: "Health check. Reply with ok.",
+        maxTokens: 64
+      });
+      setTestResult(result);
+      setMessage({
+        type: result.ok ? "success" : "error",
+        text: result.ok ? `✓ ${publicModel} OK` : `✗ ${publicModel}: ${result.error?.message ?? "failed"}`
+      });
+    } catch (caught) {
+      setMessage({ type: "error", text: caught instanceof Error ? caught.message : "Test failed" });
+    }
+  }
+
   async function addModel(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalized = modelId.trim();
@@ -2230,6 +2621,31 @@ function ProviderDetail(props: {
         </div>
       </header>
 
+      {/* Provider Info Banner — website link + API key URL */}
+      {(() => {
+        const meta = PROVIDER_META[props.provider.type];
+        if (!meta) return null;
+        return (
+          <div className="providerInfoBanner">
+            {meta.website && (
+              <a href={meta.website} target="_blank" rel="noreferrer" className="providerInfoLink">
+                <ExternalLink size={13} /> {meta.website.replace(/^https?:\/\//, "")}
+              </a>
+            )}
+            {meta.apiKeyUrl && (
+              <a href={meta.apiKeyUrl} target="_blank" rel="noreferrer" className="providerInfoLink providerInfoLink--key">
+                <KeyRound size={13} /> Get API Key
+              </a>
+            )}
+            {meta.deprecated && (
+              <span className="providerInfoDeprecated">
+                <AlertCircle size={13} /> Deprecated — may be restricted or banned
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       {message ? <div className={message.type === "success" ? "formNotice success" : "formNotice error"}>{message.text}</div> : null}
 
       {/* Quick Stats */}
@@ -2275,10 +2691,36 @@ function ProviderDetail(props: {
               const isUnhealthy = account.metadata?.healthCheckStatus === "unhealthy" || (account.status === "cooldown" && account.runtime.consecutiveFailures > 0);
               const isExpired = account.runtime.lastError?.toLowerCase().includes("expired") || account.runtime.lastError?.toLowerCase().includes("token");
               const healthTooltip = account.metadata?.healthCheckMessage ?? account.runtime.lastError ?? "";
+              const tokenExpiry = account.tokenStatus?.expiresAt ? new Date(account.tokenStatus.expiresAt) : null;
+              const tokenTimeLeft = tokenExpiry ? tokenExpiry.getTime() - Date.now() : null;
+              const tokenIsExpired = tokenTimeLeft !== null && tokenTimeLeft <= 0;
+              const tokenIsExpiringSoon = tokenTimeLeft !== null && tokenTimeLeft > 0 && tokenTimeLeft < 10 * 60 * 1000;
+              const lastRefreshed = account.tokenStatus?.lastRefreshedAt ? new Date(account.tokenStatus.lastRefreshedAt) : null;
               return (
               <div className="connectionRow" key={account.id}>
-                <div className="connectionRowIndex">#{index + 1}</div>
-                <div>
+                {/* Priority arrows */}
+                <div className="connectionRowPriority">
+                  <button
+                    className="priorityArrow"
+                    type="button"
+                    disabled={index === 0}
+                    title="Move up (higher priority)"
+                    onClick={() => void moveAccountPriority(account.id, "up")}
+                  >
+                    <ChevronUp size={14} />
+                  </button>
+                  <span className="connectionRowIndex">#{index + 1}</span>
+                  <button
+                    className="priorityArrow"
+                    type="button"
+                    disabled={index === props.accounts.length - 1}
+                    title="Move down (lower priority)"
+                    onClick={() => void moveAccountPriority(account.id, "down")}
+                  >
+                    <ChevronDown size={14} />
+                  </button>
+                </div>
+                <div className="connectionRowInfo">
                   <strong>{account.displayName}</strong>
                   <span>
                     <StatusBadge status={account.status} label={account.status} />
@@ -2294,8 +2736,32 @@ function ProviderDetail(props: {
                     )}
                     {account.runtime.totalRequests > 0 && <span className="connectionReqCount">{account.runtime.totalRequests.toLocaleString()} reqs</span>}
                   </span>
+                  {/* Token status line */}
+                  {account.tokenStatus && account.tokenStatus.credentialType !== "api_key" && (
+                    <span className="tokenStatusLine">
+                      {tokenIsExpired ? (
+                        <span className="tokenBadge tokenBadge--expired" title={`Expired ${tokenExpiry?.toLocaleString()}`}>
+                          <Timer size={11} /> Token expired
+                        </span>
+                      ) : tokenIsExpiringSoon ? (
+                        <span className="tokenBadge tokenBadge--warning" title={`Expires ${tokenExpiry?.toLocaleString()}`}>
+                          <Timer size={11} /> Expires in {Math.ceil((tokenTimeLeft ?? 0) / 60000)}m
+                        </span>
+                      ) : tokenExpiry ? (
+                        <span className="tokenBadge tokenBadge--ok" title={`Expires ${tokenExpiry.toLocaleString()}`}>
+                          <Timer size={11} /> {formatTokenTimeLeft(tokenTimeLeft!)}
+                        </span>
+                      ) : null}
+                      {lastRefreshed && (
+                        <span className="tokenRefreshTime" title={`Last refreshed: ${lastRefreshed.toLocaleString()}`}>
+                          <RefreshCw size={10} /> {formatRelativeTime(lastRefreshed)}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </div>
                 <div className="connectionActions">
+                  <button className="iconButton" type="button" title="Edit connection" onClick={() => setEditAccountCandidate(account)}><Pencil size={14} /></button>
                   <button className="iconTextButton" type="button" onClick={() => void testAccount(account)}><FlaskConical size={16} /> {t("common.test")}</button>
                   <label className="switchControl">
                     <input type="checkbox" checked={account.status !== "disabled"} onChange={(event) => void setAccountEnabled(account, event.target.checked)} />
@@ -2341,8 +2807,11 @@ function ProviderDetail(props: {
                   <code>{model.publicModel}</code>
                   <span>{formatModelLabel(model.upstreamModel)}</span>
                 </div>
-                <button className="iconButton compact" type="button" title="Copy model id" onClick={() => void navigator.clipboard.writeText(model.publicModel)}>
+                <button className="iconButton compact" type="button" title="Copy model id" onClick={() => { void navigator.clipboard.writeText(model.publicModel); setMessage({ type: "success", text: `Copied: ${model.publicModel}` }); }}>
                   <Clipboard size={15} />
+                </button>
+                <button className="iconButton compact" type="button" title="Test model" onClick={() => void testCustomModel2(model.publicModel)} disabled={props.accounts.filter(a => a.status === "active").length === 0}>
+                  <FlaskConical size={15} />
                 </button>
                 <button className="iconButton compact danger" type="button" title={t("common.delete")} onClick={() => setDeleteModelCandidate(model)}>
                   <X size={15} />
@@ -2368,6 +2837,48 @@ function ProviderDetail(props: {
             </div>
           </div>
         )}
+
+        {/* Known Models Catalog (like 9router) */}
+        {(() => {
+          const knownModels = getKnownModels(props.provider.type);
+          const addedModelIds = new Set(props.models.map(m => m.upstreamModel));
+          const notAdded = knownModels.filter(m => !addedModelIds.has(m.id));
+          if (notAdded.length === 0) return null;
+          return (
+            <div className="knownModelsSection">
+              <p className="knownModelsLabel">Known models for {props.provider.name}:</p>
+              <div className="knownModelsChips">
+                {notAdded.map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className="knownModelChip"
+                    title={`Add ${m.name}`}
+                    onClick={async () => {
+                      try {
+                        await props.api.post("/admin/v1/model-mappings", {
+                          id: `model_${props.provider.type}_${m.id.replace(/[^a-zA-Z0-9]+/g, "_")}`,
+                          publicModel: m.id,
+                          providerInstanceId: instance.id,
+                          providerType: props.provider.type,
+                          upstreamModel: m.id,
+                          enabled: true,
+                          capabilities: ["chat", "streaming"]
+                        });
+                        setMessage({ type: "success", text: `Added ${m.name}` });
+                        await props.refresh();
+                      } catch {
+                        setMessage({ type: "error", text: `Failed to add ${m.name}` });
+                      }
+                    }}
+                  >
+                    <Plus size={12} /> {m.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </section>
 
       {testResult ? (
@@ -2441,6 +2952,15 @@ function ProviderDetail(props: {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {/* Edit Account Modal */}
+      {editAccountCandidate ? (
+        <EditAccountModal
+          account={editAccountCandidate}
+          onClose={() => setEditAccountCandidate(null)}
+          onSave={(patch) => void updateAccount(editAccountCandidate.id, patch)}
+        />
       ) : null}
 
       {addAccountModalOpen ? (
@@ -7136,6 +7656,27 @@ function formatLimit(used = 0, limit = 0): string {
   return limit > 0 ? `${used}/${limit}` : `${used}/unlimited`;
 }
 
+function formatTokenTimeLeft(ms: number): string {
+  if (ms <= 0) return "Expired";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m left`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m left`;
+  const days = Math.floor(hours / 24);
+  return `${days}d left`;
+}
+
+function formatRelativeTime(date: Date): string {
+  const diff = Date.now() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function makeAccountId(providerType: string): string {
   return `account_${providerType}_${Date.now().toString(36)}`;
 }
@@ -7397,6 +7938,9 @@ function defaultOAuthEndpoint(providerType: string): string {
 function defaultOAuthRedirectUri(providerType: string): string {
   if (providerType === "kiro") {
     return "http://localhost:3128";
+  }
+  if (providerType === "codex") {
+    return "http://127.0.0.1:1455/auth/callback";
   }
 
   return providerType === "windsurf"

@@ -598,9 +598,9 @@ const claudeCode: ProviderTypeDefinition = {
   category: "oauth_subscription",
   oauthConfig: {
     authorizationEndpoint: "https://claude.ai/oauth/authorize",
-    tokenEndpoint: "https://claude.ai/oauth/token",
-    clientId: "claude-code-client",
-    scope: "openid profile",
+    tokenEndpoint: "https://api.anthropic.com/v1/oauth/token",
+    clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    scope: "org:create_api_key user:profile user:inference",
     redirectUri: "/oauth/callback",
   },
 };
@@ -608,7 +608,7 @@ const claudeCode: ProviderTypeDefinition = {
 const githubCopilot: ProviderTypeDefinition = {
   type: "github_copilot",
   displayName: "GitHub Copilot",
-  adapterName: "OAuthPKCEAdapter",
+  adapterName: "GitHubCopilotAdapter",
   authMethods: ["oauth"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
@@ -628,8 +628,8 @@ const githubCopilot: ProviderTypeDefinition = {
   oauthConfig: {
     authorizationEndpoint: "https://github.com/login/oauth/authorize",
     tokenEndpoint: "https://github.com/login/oauth/access_token",
-    clientId: "github-copilot-client",
-    scope: "copilot",
+    clientId: "Iv1.b507a08c87ecfe98",
+    scope: "read:user",
     redirectUri: "/oauth/callback",
   },
 };
@@ -655,10 +655,10 @@ const cursor: ProviderTypeDefinition = {
   },
   category: "oauth_subscription",
   oauthConfig: {
-    authorizationEndpoint: "https://cursor.com/oauth/authorize",
-    tokenEndpoint: "https://cursor.com/oauth/token",
+    authorizationEndpoint: "https://www.cursor.com/loginDeepControl",
+    tokenEndpoint: "https://api2.cursor.sh/auth/full_stripe_profile",
     clientId: "cursor-client",
-    scope: "openid",
+    scope: "openid profile",
     redirectUri: "/oauth/callback",
   },
 };
@@ -666,13 +666,16 @@ const cursor: ProviderTypeDefinition = {
 const codex: ProviderTypeDefinition = {
   type: "codex",
   displayName: "Codex",
-  adapterName: "OAuthPKCEAdapter",
+  adapterName: "CodexAdapter",
   authMethods: ["oauth"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
   configSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      baseUrl: { type: "string", default: "https://chatgpt.com/backend-api/codex" },
+      chatCompletionsPath: { type: "string", default: "/responses" },
+    },
   },
   credentialSchema: {
     type: "object",
@@ -683,19 +686,25 @@ const codex: ProviderTypeDefinition = {
     required: ["accessToken"],
   },
   category: "oauth_subscription",
+  defaultBaseUrl: "https://chatgpt.com/backend-api/codex",
   oauthConfig: {
-    authorizationEndpoint: "https://auth.openai.com/authorize",
+    authorizationEndpoint: "https://auth.openai.com/oauth/authorize",
     tokenEndpoint: "https://auth.openai.com/oauth/token",
-    clientId: "codex-client",
-    scope: "openid profile",
-    redirectUri: "/oauth/callback",
+    clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
+    scope: "openid profile email offline_access",
+    redirectUri: "http://127.0.0.1:1455/auth/callback",
+    extraParams: {
+      id_token_add_organizations: "true",
+      codex_cli_simplified_flow: "true",
+      originator: "codex_cli_rs"
+    }
   },
 };
 
 const antigravity: ProviderTypeDefinition = {
   type: "antigravity",
   displayName: "Antigravity",
-  adapterName: "OAuthPKCEAdapter",
+  adapterName: "AntigravityAdapter",
   authMethods: ["oauth"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
@@ -713,12 +722,39 @@ const antigravity: ProviderTypeDefinition = {
   },
   category: "oauth_subscription",
   oauthConfig: {
-    authorizationEndpoint: "https://antigravity.dev/oauth/authorize",
-    tokenEndpoint: "https://antigravity.dev/oauth/token",
-    clientId: "antigravity-client",
-    scope: "openid",
+    authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenEndpoint: "https://oauth2.googleapis.com/token",
+    clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+    clientSecret: "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",
+    scope: "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
     redirectUri: "/oauth/callback",
   },
+};
+
+const kilocode: ProviderTypeDefinition = {
+  type: "kilocode",
+  displayName: "Kilo Code",
+  adapterName: "OAuthPKCEAdapter",
+  authMethods: ["oauth"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: {} },
+  credentialSchema: { type: "object", properties: { accessToken: { type: "string" }, refreshToken: { type: "string" } }, required: ["accessToken"] },
+  category: "oauth_subscription",
+  oauthConfig: { authorizationEndpoint: "https://api.kilo.ai/api/device-auth/codes", tokenEndpoint: "https://api.kilo.ai/api/device-auth/codes", clientId: "kilocode-client", scope: "openid", redirectUri: "/oauth/callback" },
+};
+
+const cline: ProviderTypeDefinition = {
+  type: "cline",
+  displayName: "Cline",
+  adapterName: "OAuthPKCEAdapter",
+  authMethods: ["oauth"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: {} },
+  credentialSchema: { type: "object", properties: { accessToken: { type: "string" }, refreshToken: { type: "string" } }, required: ["accessToken"] },
+  category: "oauth_subscription",
+  oauthConfig: { authorizationEndpoint: "https://api.cline.bot/api/v1/auth/authorize", tokenEndpoint: "https://api.cline.bot/api/v1/auth/token", clientId: "cline-client", scope: "openid", redirectUri: "/oauth/callback" },
 };
 
 // ============================================================================
@@ -744,6 +780,182 @@ const opencodeFree: ProviderTypeDefinition = {
     properties: {},
   },
   category: "free",
+  defaultBaseUrl: "https://opencode.ai",
+};
+
+// ============================================================================
+// Phase 2: Missing API Key Providers (from 9router)
+// ============================================================================
+
+const alibaba: ProviderTypeDefinition = {
+  type: "alibaba",
+  displayName: "Alibaba (Qwen)",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://dashscope.aliyuncs.com" }, chatCompletionsPath: { type: "string", default: "/compatible-mode/v1/chat/completions" }, modelsPath: { type: "string", default: "/compatible-mode/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://dashscope.aliyuncs.com",
+};
+
+const alibabaIntl: ProviderTypeDefinition = {
+  type: "alibaba_intl",
+  displayName: "Alibaba Intl",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://dashscope-intl.aliyuncs.com" }, chatCompletionsPath: { type: "string", default: "/compatible-mode/v1/chat/completions" }, modelsPath: { type: "string", default: "/compatible-mode/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://dashscope-intl.aliyuncs.com",
+};
+
+const volcengineArk: ProviderTypeDefinition = {
+  type: "volcengine_ark",
+  displayName: "Volcengine Ark",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ark.cn-beijing.volces.com" }, chatCompletionsPath: { type: "string", default: "/api/v3/chat/completions" }, modelsPath: { type: "string", default: "/api/v3/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://ark.cn-beijing.volces.com",
+};
+
+const byteplus: ProviderTypeDefinition = {
+  type: "byteplus",
+  displayName: "BytePlus ModelArk",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ark.ap-southeast.bytepluses.com" }, chatCompletionsPath: { type: "string", default: "/api/v3/chat/completions" }, modelsPath: { type: "string", default: "/api/v3/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://ark.ap-southeast.bytepluses.com",
+};
+
+const blackbox: ProviderTypeDefinition = {
+  type: "blackbox",
+  displayName: "Blackbox AI",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.blackbox.ai" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.blackbox.ai",
+};
+
+const vercelAiGateway: ProviderTypeDefinition = {
+  type: "vercel_ai_gateway",
+  displayName: "Vercel AI Gateway",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ai-gateway.vercel.sh" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_premium",
+  defaultBaseUrl: "https://ai-gateway.vercel.sh",
+};
+
+const chutes: ProviderTypeDefinition = {
+  type: "chutes",
+  displayName: "Chutes AI",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://llm.chutes.ai" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://llm.chutes.ai",
+};
+
+const hyperbolic: ProviderTypeDefinition = {
+  type: "hyperbolic",
+  displayName: "Hyperbolic",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.hyperbolic.xyz" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.hyperbolic.xyz",
+};
+
+const cloudflareAi: ProviderTypeDefinition = {
+  type: "cloudflare_ai",
+  displayName: "Cloudflare Workers AI",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: {
+    type: "object",
+    properties: {
+      accountId: { type: "string", description: "Cloudflare Account ID" },
+      baseUrl: { type: "string", default: "https://api.cloudflare.com" },
+      chatCompletionsPath: { type: "string", default: "/client/v4/accounts/{accountId}/ai/v1/chat/completions" },
+      modelsPath: { type: "string", default: "/client/v4/accounts/{accountId}/ai/v1/models" },
+    },
+    required: ["accountId"],
+  },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.cloudflare.com",
+};
+
+const ollamaLocal: ProviderTypeDefinition = {
+  type: "ollama_local",
+  displayName: "Ollama Local",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["none"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: {
+    type: "object",
+    properties: {
+      baseUrl: { type: "string", default: "http://localhost:11434", description: "Ollama host URL" },
+      chatCompletionsPath: { type: "string", default: "/v1/chat/completions" },
+      modelsPath: { type: "string", default: "/v1/tags" },
+    },
+  },
+  credentialSchema: { type: "object", properties: {} },
+  category: "free",
+  defaultBaseUrl: "http://localhost:11434",
+};
+
+const commandcode: ProviderTypeDefinition = {
+  type: "commandcode",
+  displayName: "Command Code",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.commandcode.ai" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.commandcode.ai",
+};
+
+const opencodeGo: ProviderTypeDefinition = {
+  type: "opencode_go",
+  displayName: "OpenCode Go",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://opencode.ai" }, chatCompletionsPath: { type: "string", default: "/zen/v1/chat/completions" }, modelsPath: { type: "string", default: "/zen/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
   defaultBaseUrl: "https://opencode.ai",
 };
 
@@ -815,9 +1027,27 @@ export const providerCatalog: ProviderTypeDefinition[] = [
   cursor,
   codex,
   antigravity,
+  kilocode,
+  cline,
 
   // Free
   opencodeFree,
+
+  // Phase 2: Additional providers
+  alibaba,
+  alibabaIntl,
+  volcengineArk,
+  byteplus,
+  blackbox,
+  vercelAiGateway,
+  chutes,
+  hyperbolic,
+
+  // Phase 3: Specialized
+  cloudflareAi,
+  ollamaLocal,
+  commandcode,
+  opencodeGo,
 
   // Custom
   customProvider,

@@ -5,13 +5,42 @@ import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
 
 /**
- * Resolves the dashboard-dist directory path relative to the compiled dist location.
- * In production, the structure is:
- *   dist/plugins/dashboard.js  (this file compiled)
- *   dashboard-dist/            (sibling of dist/)
+ * Resolves the dashboard build output directory.
+ *
+ * Resolution order:
+ * 1. DASHBOARD_DIST env var (explicit override)
+ * 2. apps/dashboard/dist (monorepo: from root dist/plugins/ up to root, then into apps/)
+ * 3. ../dashboard/dist (monorepo: from apps/gateway/dist/plugins/ up to apps/)
+ * 4. dashboard-dist/ (legacy: sibling of dist/ at whatever level)
  */
+import { existsSync } from "node:fs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dashboardRoot = path.resolve(__dirname, "..", "..", "dashboard-dist");
+
+function resolveDashboardRoot(): string {
+  // 1. Explicit env override
+  if (process.env.DASHBOARD_DIST) {
+    return path.resolve(process.env.DASHBOARD_DIST);
+  }
+
+  // 2. From root dist/plugins/ → root/apps/dashboard/dist/
+  const rootMonorepoPath = path.resolve(__dirname, "..", "..", "apps", "dashboard", "dist");
+  if (existsSync(rootMonorepoPath)) {
+    return rootMonorepoPath;
+  }
+
+  // 3. From apps/gateway/dist/plugins/ → apps/dashboard/dist/
+  const gatewayMonorepoPath = path.resolve(__dirname, "..", "..", "..", "dashboard", "dist");
+  if (existsSync(gatewayMonorepoPath)) {
+    return gatewayMonorepoPath;
+  }
+
+  // 4. Legacy: dashboard-dist/ sibling of dist/
+  const legacyPath = path.resolve(__dirname, "..", "..", "dashboard-dist");
+  return legacyPath;
+}
+
+const dashboardRoot = resolveDashboardRoot();
 
 /** Matches filenames containing a content hash (8+ hex chars), e.g. main.a1b2c3d4.js */
 const HASH_PATTERN = /\.[a-f0-9]{8,}\./;

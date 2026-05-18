@@ -727,6 +727,62 @@ export async function registerProviderAccountManagementRoutes(
       }
     }
   );
+
+  // ==========================================================================
+  // POST /admin/v1/accounts/:accountId/priority — Move account priority up/down
+  // ==========================================================================
+  app.post<{ Params: { accountId: string } }>(
+    "/admin/v1/accounts/:accountId/priority",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      try {
+        const { accountId } = request.params;
+        const { direction } = z
+          .object({ direction: z.enum(["up", "down"]) })
+          .parse(request.body);
+
+        const found = findAccountPoolForAccount(app, accountId);
+        if (!found) {
+          reply.code(404);
+          return { error: { code: "account_not_found", message: `Account "${accountId}" not found` } };
+        }
+
+        const { pool } = found;
+        const accounts = pool.listAccounts();
+        const currentIndex = accounts.findIndex((a) => a.id === accountId);
+
+        if (currentIndex < 0) {
+          reply.code(404);
+          return { error: { code: "account_not_found", message: `Account "${accountId}" not found in pool` } };
+        }
+
+        const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+        if (targetIndex < 0 || targetIndex >= accounts.length) {
+          return { data: { moved: false, message: "Already at boundary" } };
+        }
+
+        // Swap priorities by swapping weights
+        const currentAccount = accounts[currentIndex];
+        const targetAccount = accounts[targetIndex];
+        const currentWeight = currentAccount.weight;
+        const targetWeight = targetAccount.weight;
+
+        pool.updateAccount(currentAccount.id, { weight: targetWeight });
+        pool.updateAccount(targetAccount.id, { weight: currentWeight });
+
+        await app.persistenceService.save(createPersistedState(app));
+
+        return { data: { moved: true, newIndex: targetIndex } };
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          reply.code(400);
+          return { error: { code: "invalid_request", message: "direction must be 'up' or 'down'" } };
+        }
+        reply.code(500);
+        return { error: { code: "internal_error", message: error instanceof Error ? error.message : "Unknown error" } };
+      }
+    }
+  );
 }
 
 // ============================================================================

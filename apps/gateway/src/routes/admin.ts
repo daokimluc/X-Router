@@ -248,7 +248,7 @@ export async function registerAdminRoutes(
     async () => {
       return {
         data: {
-          redirectUri: "http://127.0.0.1:8080/oauth/callback",
+          redirectUri: "http://127.0.0.1:3100/oauth/callback",
           kiroAuthorizationEndpoint: "https://app.kiro.dev/signin",
           redirectFrom: "KiroIDE"
         }
@@ -855,10 +855,18 @@ export async function registerAdminRoutes(
     },
     async () => {
       return {
-        data: app.providerRuntimeRegistry.listAccounts().map((account) => ({
-          ...account,
-          credentialRef: account.credentialRef ? "[REDACTED]" : undefined
-        }))
+        data: app.providerRuntimeRegistry.listAccounts().map((account) => {
+          const secret = app.secretService.getSecretForAccount(account.id);
+          return {
+            ...account,
+            credentialRef: account.credentialRef ? "[REDACTED]" : undefined,
+            tokenStatus: secret ? {
+              expiresAt: secret.expiresAt?.toISOString() ?? null,
+              lastRefreshedAt: secret.updatedAt?.toISOString() ?? null,
+              credentialType: secret.credentialType,
+            } : null,
+          };
+        })
       };
     }
   );
@@ -1162,6 +1170,26 @@ export async function registerAdminRoutes(
         : {};
       const model = resolveAccountTestModel(app, providerInstance.id, body.model);
 
+      // Auto-refresh token before test if adapter supports it
+      let finalCredentialPayload = credentialPayload;
+      if (adapter.refreshSession) {
+        try {
+          const refreshResult = await adapter.refreshSession(account, {
+            providerInstance,
+            credentialPayload
+          });
+          if (refreshResult.refreshed && refreshResult.credentialPayload && secret) {
+            app.secretService.updateSecretPayload(secret.id, refreshResult.credentialPayload);
+            finalCredentialPayload = refreshResult.credentialPayload;
+            request.log.info({ accountId: account.id }, "Token refreshed before test");
+          } else {
+            request.log.warn({ accountId: account.id, message: refreshResult.message }, "Token refresh returned non-refreshed result");
+          }
+        } catch (refreshErr) {
+          request.log.warn({ accountId: account.id, err: refreshErr }, "Token refresh failed before test");
+        }
+      }
+
       try {
         const response = await adapter.chatCompletions(
           {
@@ -1179,7 +1207,7 @@ export async function registerAdminRoutes(
             providerInstance,
             account,
             requestId: request.id,
-            credentialPayload
+            credentialPayload: finalCredentialPayload
           }
         );
 

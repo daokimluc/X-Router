@@ -124,7 +124,8 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
       scope: oauthConfig.scope,
-      state
+      state,
+      ...(oauthConfig.extraParams ?? {})
     });
 
     const authorizationUrl = `${oauthConfig.authorizationEndpoint}?${params.toString()}`;
@@ -138,6 +139,7 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
 
   /**
    * Exchange an authorization code for tokens using the PKCE code_verifier.
+   * If codeVerifier is empty, the exchange is done without PKCE (for providers like Cline).
    */
   async exchangeCode(
     code: string,
@@ -145,13 +147,24 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
     redirectUri: string,
     oauthConfig: OAuthProviderConfig
   ): Promise<OAuthTokenResponse> {
-    const body = new URLSearchParams({
+    const params: Record<string, string> = {
       grant_type: "authorization_code",
       code,
-      code_verifier: codeVerifier,
       redirect_uri: redirectUri,
       client_id: oauthConfig.clientId
-    });
+    };
+
+    // Only include code_verifier if PKCE was used (non-empty verifier)
+    if (codeVerifier) {
+      params.code_verifier = codeVerifier;
+    }
+
+    // Some providers (e.g. Google/Antigravity) require client_secret for token exchange
+    if (oauthConfig.clientSecret) {
+      params.client_secret = oauthConfig.clientSecret;
+    }
+
+    const body = new URLSearchParams(params);
 
     const response = await this.fetchImpl(oauthConfig.tokenEndpoint, {
       method: "POST",
@@ -328,7 +341,7 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
   ): Promise<NormalizedOpenAIResponse | ProviderStream> {
     const config = context.providerInstance.config as Record<string, unknown>;
     const credential = (context.credentialPayload ?? {}) as OAuthPKCECredential;
-    const baseUrl = (config.baseUrl as string) ?? "";
+    const baseUrl = (config.baseUrl as string) || context.providerInstance.baseUrl || "";
     const url = `${baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
 
     const abortController = new AbortController();
@@ -463,6 +476,8 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
     }
 
     if (status === 429) {
+      const body = await response.text().catch(() => "");
+      console.error(`[OAuthPKCE] 429 from ${baseUrl}: ${body.substring(0, 500)}`);
       const retryAfterHeader = response.headers.get("retry-after");
       const retryAfterSeconds = retryAfterHeader
         ? parseInt(retryAfterHeader, 10)

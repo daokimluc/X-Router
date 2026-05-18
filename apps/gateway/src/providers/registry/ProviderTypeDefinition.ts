@@ -25,8 +25,10 @@ export type OAuthProviderConfig = {
   authorizationEndpoint: string;
   tokenEndpoint: string;
   clientId: string;
+  clientSecret?: string;
   scope: string;
   redirectUri: string;
+  extraParams?: Record<string, string>;
 };
 
 export type ProviderTypeDefinition = {

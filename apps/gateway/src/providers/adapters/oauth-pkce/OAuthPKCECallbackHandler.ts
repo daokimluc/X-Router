@@ -214,18 +214,58 @@ export async function handleOAuthPKCECallback(
     };
   }
 
-  // 4. Find provider instance and account pool
+  // 4. Find or auto-create provider instance and account pool
   const instances = app.providerRuntimeRegistry.listProviderInstances();
-  const providerInstance = instances.find((i) => i.type === pending.providerType);
+  let providerInstance = instances.find((i) => i.type === pending.providerType);
+
+  // Auto-create provider instance if not found (like 9router — no pre-registration needed)
   if (!providerInstance) {
-    pendingOAuthStates.delete(state);
-    return {
-      success: false,
-      error: `Provider instance for "${pending.providerType}" not found. Ensure the provider is registered.`,
+    const now2 = new Date();
+    const instanceId = `provider_${pending.providerType}_main`;
+
+    // Lookup defaultBaseUrl from provider catalog definition
+    const definitions = app.providerRegistry.listProviderTypes();
+    const definition = definitions.find((d) => d.type === pending.providerType);
+    const baseUrl = definition?.defaultBaseUrl ?? "";
+
+    const newInstance = {
+      id: instanceId,
+      type: pending.providerType,
+      name: `${pending.providerType} (auto)`,
+      enabled: true,
+      baseUrl,
+      config: { baseUrl } as Record<string, unknown>,
+      defaultTimeoutMs: 60000,
+      maxRetries: 1,
+      cooldownMs: 30000,
+      accountSelectionStrategy: "least_busy" as const,
+      maxConcurrentRequests: 10,
+      maxConcurrentRequestsPerAccount: 5,
+      circuitBreaker: { enabled: true, failureThreshold: 5, cooldownMs: 30000, halfOpenMaxRequests: 1 },
+      createdAt: now2,
+      updatedAt: now2,
     };
+    app.providerRuntimeRegistry.registerProviderInstance(newInstance);
+    // Create account pool for the new instance
+    const { AccountPool } = await import("../../../account-pool/AccountPool.js");
+    app.providerRuntimeRegistry.registerAccountPool(instanceId, new AccountPool([]));
+    providerInstance = newInstance;
   }
 
-  const accountPool = app.providerRuntimeRegistry.getAccountPool(providerInstance.id);
+  // Ensure provider instance has baseUrl (may be missing for previously auto-created instances)
+  if (providerInstance && !providerInstance.baseUrl && !(providerInstance.config as Record<string, unknown>)?.baseUrl) {
+    const definitions = app.providerRegistry.listProviderTypes();
+    const definition = definitions.find((d) => d.type === pending.providerType);
+    if (definition?.defaultBaseUrl) {
+      app.providerRuntimeRegistry.updateProviderInstance(providerInstance.id, {
+        baseUrl: definition.defaultBaseUrl,
+        config: { ...(providerInstance.config ?? {}), baseUrl: definition.defaultBaseUrl }
+      });
+      providerInstance = app.providerRuntimeRegistry.getProviderInstance(providerInstance.id)!;
+    }
+  }
+
+  const accountPool = app.providerRuntimeRegistry.getAccountPool(providerInstance!.id);
   if (!accountPool) {
     pendingOAuthStates.delete(state);
     return {
@@ -269,7 +309,7 @@ export async function handleOAuthPKCECallback(
   const draft = pending.accountDraft;
   const account: ProviderAccount = {
     id: accountId,
-    providerInstanceId: providerInstance.id,
+    providerInstanceId: providerInstance!.id,
     providerType: pending.providerType,
     displayName: draft?.displayName ?? `${pending.providerType} account`,
     status: "active",
@@ -332,4 +372,177 @@ export async function handleOAuthPKCECallback(
  */
 export function isGenericOAuthPKCEState(state: string): boolean {
   return pendingOAuthStates.has(state);
+}
+
+// ============================================================================
+// Device Code Flow (for Kilocode and similar providers)
+// ============================================================================
+
+/**
+ * Pending device code flow state.
+ */
+export type PendingDeviceCodeState = {
+  providerType: string;
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  expiresAt: number;
+  interval: number;
+  createdAt: number;
+  accountDraft?: PendingOAuthState["accountDraft"];
+};
+
+const pendingDeviceCodes = new Map<string, PendingDeviceCodeState>();
+
+/**
+ * Start a device code flow for providers that use it (e.g., Kilocode).
+ * Returns the user_code and verification_uri for the user to complete.
+ */
+export async function startDeviceCodeFlow(
+  providerType: string,
+  oauthConfig?: OAuthProviderConfig,
+  accountDraft?: PendingOAuthState["accountDraft"]
+): Promise<{
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+  interval: number;
+  pollId: string;
+} | null> {
+  const config = oauthConfig ?? getOAuthProviderConfig(providerType);
+  if (!config) return null;
+
+  try {
+    const response = await fetch(config.authorizationEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        client_id: config.clientId,
+        scope: config.scope
+      })
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      device_code: string;
+      user_code: string;
+      verification_uri: string;
+      expires_in: number;
+      interval: number;
+    };
+
+    const pollId = randomUUID();
+    pendingDeviceCodes.set(pollId, {
+      providerType,
+      deviceCode: data.device_code,
+      userCode: data.user_code,
+      verificationUri: data.verification_uri,
+      expiresAt: Date.now() + data.expires_in * 1000,
+      interval: data.interval,
+      createdAt: Date.now(),
+      accountDraft
+    });
+
+    return {
+      deviceCode: data.device_code,
+      userCode: data.user_code,
+      verificationUri: data.verification_uri,
+      expiresIn: data.expires_in,
+      interval: data.interval,
+      pollId
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Poll for device code flow completion.
+ * Returns the access token when the user completes authorization.
+ */
+export async function pollDeviceCodeFlow(
+  pollId: string,
+  oauthConfig?: OAuthProviderConfig
+): Promise<{
+  status: "pending" | "completed" | "expired" | "error";
+  accessToken?: string;
+  refreshToken?: string;
+  error?: string;
+}> {
+  const pending = pendingDeviceCodes.get(pollId);
+  if (!pending) {
+    return { status: "error", error: "Unknown poll ID" };
+  }
+
+  if (Date.now() > pending.expiresAt) {
+    pendingDeviceCodes.delete(pollId);
+    return { status: "expired", error: "Device code expired" };
+  }
+
+  const config = oauthConfig ?? getOAuthProviderConfig(pending.providerType);
+  if (!config) {
+    return { status: "error", error: "No OAuth config found" };
+  }
+
+  try {
+    const response = await fetch(config.tokenEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        client_id: config.clientId,
+        device_code: pending.deviceCode,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json().catch(() => ({}))) as { error?: string };
+      if (errorData.error === "authorization_pending" || errorData.error === "slow_down") {
+        return { status: "pending" };
+      }
+      return { status: "error", error: errorData.error ?? `HTTP ${response.status}` };
+    }
+
+    const data = (await response.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      error?: string;
+    };
+
+    if (data.error) {
+      if (data.error === "authorization_pending") return { status: "pending" };
+      return { status: "error", error: data.error };
+    }
+
+    if (!data.access_token) {
+      return { status: "pending" };
+    }
+
+    pendingDeviceCodes.delete(pollId);
+    return {
+      status: "completed",
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      error: error instanceof Error ? error.message : "Poll failed"
+    };
+  }
+}
+
+/**
+ * Get pending device code state by poll ID.
+ */
+export function getPendingDeviceCode(pollId: string): PendingDeviceCodeState | undefined {
+  return pendingDeviceCodes.get(pollId);
 }

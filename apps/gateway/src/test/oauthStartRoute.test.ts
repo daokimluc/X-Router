@@ -27,7 +27,7 @@ describe("POST /admin/oauth/start", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.data).toBeDefined();
-    expect(body.data.authorizationUrl).toContain("console.anthropic.com/oauth/authorize");
+    expect(body.data.authorizationUrl).toContain("claude.ai/oauth/authorize");
     expect(body.data.state).toBeDefined();
     expect(body.data.state.length).toBeGreaterThan(0);
     expect(body.data.providerType).toBe("claude_code");
@@ -70,7 +70,7 @@ describe("POST /admin/oauth/start", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.data.authorizationUrl).toContain("cursor.sh/oauth/authorize");
+    expect(body.data.authorizationUrl).toContain("cursor.com/loginDeepControl");
 
     await app.close();
   });
@@ -89,7 +89,7 @@ describe("POST /admin/oauth/start", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.data.authorizationUrl).toContain("auth.openai.com/authorize");
+    expect(body.data.authorizationUrl).toContain("auth.openai.com/oauth/authorize");
 
     await app.close();
   });
@@ -108,7 +108,7 @@ describe("POST /admin/oauth/start", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.data.authorizationUrl).toContain("antigravity.dev/oauth/authorize");
+    expect(body.data.authorizationUrl).toContain("accounts.google.com/o/oauth2/v2/auth");
 
     await app.close();
   });

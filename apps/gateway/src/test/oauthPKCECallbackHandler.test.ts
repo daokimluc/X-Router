@@ -25,7 +25,7 @@ describe("OAuthPKCECallbackHandler", () => {
     it("generates authorization URL and stores pending state for claude_code", () => {
       const result = startOAuthPKCEFlow("claude_code");
 
-      expect(result.authorizationUrl).toContain("https://console.anthropic.com/oauth/authorize");
+      expect(result.authorizationUrl).toContain("https://claude.ai/oauth/authorize");
       expect(result.authorizationUrl).toContain("response_type=code");
       expect(result.authorizationUrl).toContain("code_challenge_method=S256");
       expect(result.state).toBeTruthy();
@@ -36,35 +36,35 @@ describe("OAuthPKCECallbackHandler", () => {
       expect(pending).toBeDefined();
       expect(pending!.providerType).toBe("claude_code");
       expect(pending!.codeVerifier).toBeTruthy();
-      expect(pending!.redirectUri).toBe("http://127.0.0.1:8080/oauth/callback");
+      expect(pending!.redirectUri).toBe("http://127.0.0.1:3100/oauth/callback");
     });
 
     it("generates authorization URL for github_copilot", () => {
       const result = startOAuthPKCEFlow("github_copilot");
 
       expect(result.authorizationUrl).toContain("https://github.com/login/oauth/authorize");
-      expect(result.authorizationUrl).toContain("scope=copilot");
+      expect(result.authorizationUrl).toContain("scope=read%3Auser");
       expect(result.state).toBeTruthy();
     });
 
     it("generates authorization URL for cursor", () => {
       const result = startOAuthPKCEFlow("cursor");
 
-      expect(result.authorizationUrl).toContain("https://cursor.sh/oauth/authorize");
+      expect(result.authorizationUrl).toContain("https://www.cursor.com/loginDeepControl");
       expect(result.state).toBeTruthy();
     });
 
     it("generates authorization URL for codex", () => {
       const result = startOAuthPKCEFlow("codex");
 
-      expect(result.authorizationUrl).toContain("https://auth.openai.com/authorize");
+      expect(result.authorizationUrl).toContain("https://auth.openai.com/oauth/authorize");
       expect(result.state).toBeTruthy();
     });
 
     it("generates authorization URL for antigravity", () => {
       const result = startOAuthPKCEFlow("antigravity");
 
-      expect(result.authorizationUrl).toContain("https://antigravity.dev/oauth/authorize");
+      expect(result.authorizationUrl).toContain("https://accounts.google.com/o/oauth2/v2/auth");
       expect(result.state).toBeTruthy();
     });
 
@@ -146,8 +146,8 @@ describe("OAuthPKCECallbackHandler", () => {
 });
 
 describe("oauthProviderConfigs", () => {
-  it("defines configs for all 5 OAuth providers", () => {
-    expect(Object.keys(oauthProviderConfigMap)).toHaveLength(5);
+  it("defines configs for all 7 OAuth providers", () => {
+    expect(Object.keys(oauthProviderConfigMap)).toHaveLength(7);
     expect(oauthProviderConfigMap).toHaveProperty("claude_code");
     expect(oauthProviderConfigMap).toHaveProperty("github_copilot");
     expect(oauthProviderConfigMap).toHaveProperty("cursor");
@@ -157,10 +157,10 @@ describe("oauthProviderConfigs", () => {
 
   it("claude_code has correct endpoints", () => {
     expect(claudeCodeOAuthConfig.authorizationEndpoint).toBe(
-      "https://console.anthropic.com/oauth/authorize"
+      "https://claude.ai/oauth/authorize"
     );
     expect(claudeCodeOAuthConfig.tokenEndpoint).toBe(
-      "https://console.anthropic.com/oauth/token"
+      "https://api.anthropic.com/v1/oauth/token"
     );
   });
 
@@ -175,16 +175,16 @@ describe("oauthProviderConfigs", () => {
 
   it("cursor has correct endpoints", () => {
     expect(cursorOAuthConfig.authorizationEndpoint).toBe(
-      "https://cursor.sh/oauth/authorize"
+      "https://www.cursor.com/loginDeepControl"
     );
     expect(cursorOAuthConfig.tokenEndpoint).toBe(
-      "https://cursor.sh/oauth/token"
+      "https://api2.cursor.sh/auth/full_stripe_profile"
     );
   });
 
   it("codex has correct endpoints", () => {
     expect(codexOAuthConfig.authorizationEndpoint).toBe(
-      "https://auth.openai.com/authorize"
+      "https://auth.openai.com/oauth/authorize"
     );
     expect(codexOAuthConfig.tokenEndpoint).toBe(
       "https://auth.openai.com/oauth/token"
@@ -193,10 +193,10 @@ describe("oauthProviderConfigs", () => {
 
   it("antigravity has correct endpoints", () => {
     expect(antigravityOAuthConfig.authorizationEndpoint).toBe(
-      "https://antigravity.dev/oauth/authorize"
+      "https://accounts.google.com/o/oauth2/v2/auth"
     );
     expect(antigravityOAuthConfig.tokenEndpoint).toBe(
-      "https://antigravity.dev/oauth/token"
+      "https://oauth2.googleapis.com/token"
     );
   });
 

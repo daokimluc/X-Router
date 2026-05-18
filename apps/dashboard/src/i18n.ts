@@ -53,6 +53,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "nav.setup": "Setup",
     "nav.monitor": "Monitor",
     "nav.admin": "Admin",
+    "nav.media providers": "Media Providers",
 
     // Page labels
     "page.overview": "Overview",
@@ -67,6 +68,13 @@ const translations: Record<Lang, Record<string, string>> = {
     "page.teams": "Teams",
     "page.settings": "Settings",
     "page.docs": "Docs",
+    "page.proxyPools": "Proxy Pools",
+    "page.mediaProviders": "Media Providers",
+    "page.mediaEmbedding": "Embedding",
+    "page.mediaImage": "Text to Image",
+    "page.mediaTTS": "Text To Speech",
+    "page.mediaSTT": "Speech To Text",
+    "page.mediaWeb": "Web Fetch & Search",
 
     // Page descriptions
     "desc.overview": "Gateway status and runtime readiness",
@@ -81,6 +89,13 @@ const translations: Record<Lang, Record<string, string>> = {
     "desc.teams": "Team quotas and access control",
     "desc.settings": "Config revisions and security controls",
     "desc.docs": "Documentation and usage guides",
+    "desc.proxyPools": "HTTP proxy pools for provider connections",
+    "desc.mediaProviders": "Non-LLM AI service providers overview",
+    "desc.mediaEmbedding": "Embedding provider configuration",
+    "desc.mediaImage": "Image generation and understanding providers",
+    "desc.mediaTTS": "Text-to-speech provider configuration",
+    "desc.mediaSTT": "Speech-to-text provider configuration",
+    "desc.mediaWeb": "Web search and fetch provider configuration",
 
     // Topbar
     "topbar.online": "Gateway online",
@@ -417,6 +432,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "nav.setup": "Thiết lập",
     "nav.monitor": "Giám sát",
     "nav.admin": "Quản trị",
+    "nav.media providers": "Media Providers",
 
     // Page labels
     "page.overview": "Tổng quan",
@@ -431,6 +447,13 @@ const translations: Record<Lang, Record<string, string>> = {
     "page.teams": "Nhóm (Teams)",
     "page.settings": "Cài đặt",
     "page.docs": "Tài liệu",
+    "page.proxyPools": "Proxy Pools",
+    "page.mediaProviders": "Media Providers",
+    "page.mediaEmbedding": "Embedding",
+    "page.mediaImage": "Text to Image",
+    "page.mediaTTS": "Text To Speech",
+    "page.mediaSTT": "Speech To Text",
+    "page.mediaWeb": "Web Fetch & Search",
 
     // Page descriptions
     "desc.overview": "Trạng thái gateway và sẵn sàng hoạt động",
@@ -445,6 +468,13 @@ const translations: Record<Lang, Record<string, string>> = {
     "desc.teams": "Hạn mức nhóm và kiểm soát truy cập",
     "desc.settings": "Phiên bản cấu hình và kiểm soát bảo mật",
     "desc.docs": "Tài liệu hướng dẫn sử dụng",
+    "desc.proxyPools": "Quản lý proxy pools cho kết nối provider",
+    "desc.mediaProviders": "Tổng quan nhà cung cấp dịch vụ AI phi-LLM",
+    "desc.mediaEmbedding": "Cấu hình provider embedding",
+    "desc.mediaImage": "Provider tạo ảnh và nhận dạng ảnh",
+    "desc.mediaTTS": "Cấu hình provider chuyển văn bản thành giọng nói",
+    "desc.mediaSTT": "Cấu hình provider chuyển giọng nói thành văn bản",
+    "desc.mediaWeb": "Cấu hình provider tìm kiếm và trích xuất web",
 
     // Topbar
     "topbar.online": "Gateway đang hoạt động",

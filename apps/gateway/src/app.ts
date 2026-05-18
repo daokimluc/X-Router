@@ -14,6 +14,12 @@ import { registerOpenAIRoutes } from "./routes/openai.js";
 import { registerReadyzRoute } from "./routes/readyz.js";
 import { registerProviderAccountRoutes } from "./routes/providerAccounts.js";
 import { registerProviderAccountManagementRoutes } from "./routes/admin/providerAccounts.js";
+import { registerProxyPoolRoutes } from "./routes/admin/proxyPools.js";
+import { registerMediaProviderRoutes } from "./routes/admin/mediaProviders.js";
+import { registerEmbeddingsRoutes } from "./routes/embeddings.js";
+import { registerImagesRoutes } from "./routes/images.js";
+import { registerAudioRoutes } from "./routes/audio.js";
+import { registerWebRoutes } from "./routes/web.js";
 import { registerDashboardPlugin } from "./plugins/dashboard.js";
 import { redactObject } from "./utils/redaction.js";
 import { createDefaultProviderRegistry } from "./providers/registry/defaultRegistry.js";
@@ -55,6 +61,10 @@ import {
 import { AddAccountLockService } from "./services/AddAccountLockService.js";
 import { IdempotencyStore } from "./services/IdempotencyStore.js";
 import { OAuthSessionStore } from "./services/OAuthSessionStore.js";
+import { ProxyPoolService } from "./proxy/ProxyPoolService.js";
+import { MediaRouter } from "./media/MediaRouter.js";
+import { MediaKindRegistry } from "./media/MediaKindRegistry.js";
+import { autoSyncMediaConfig } from "./media/autoSyncMediaConfig.js";
 
 export type AppDependencies = {
   providerRegistry?: ProviderAdapterRegistry;
@@ -96,6 +106,8 @@ declare module "fastify" {
     requestQueueService: RequestQueueService;
     teamService: TeamService;
     webhookService: WebhookService;
+    proxyPoolService: ProxyPoolService;
+    mediaRouter: MediaRouter;
   }
 }
 
@@ -227,6 +239,22 @@ export async function buildApp(
   // Webhook notifications
   const webhookService = new WebhookService();
 
+  // Proxy Pool Service
+  const proxyPoolService = new ProxyPoolService();
+  if (persistedState?.proxyPools) {
+    proxyPoolService.load(persistedState.proxyPools);
+  }
+
+  // Media Router
+  const mediaRouter = new MediaRouter(providerRuntimeRegistry, proxyPoolService, undefined, secretService);
+
+  // Auto-sync media config for provider instances that were created outside
+  // the dashboard (e.g. via OAuth auto-import) and don't have serviceKinds yet.
+  const syncedCount = autoSyncMediaConfig(providerRuntimeRegistry);
+  if (syncedCount > 0) {
+    app.log.info({ count: syncedCount }, "Auto-synced media config for provider instances");
+  }
+
   app.decorate("providerRegistry", providerRegistry);
   app.decorate("modelRegistry", modelRegistry);
   app.decorate("routingProfileRegistry", routingProfileRegistry);
@@ -259,6 +287,8 @@ export async function buildApp(
   app.decorate("requestQueueService", requestQueueService);
   app.decorate("teamService", teamService);
   app.decorate("webhookService", webhookService);
+  app.decorate("proxyPoolService", proxyPoolService);
+  app.decorate("mediaRouter", mediaRouter);
 
   app.addHook("onSend", async (request, reply, payload) => {
     if (
@@ -301,6 +331,13 @@ export async function buildApp(
   });
 
   await registerProviderAccountManagementRoutes(app, config);
+
+  await registerProxyPoolRoutes(app, config, proxyPoolService);
+  await registerMediaProviderRoutes(app, config);
+  await registerEmbeddingsRoutes(app, config);
+  await registerImagesRoutes(app, config);
+  await registerAudioRoutes(app, config);
+  await registerWebRoutes(app, config);
 
   // Register dashboard static serving AFTER all API routes to ensure API priority
   await registerDashboardPlugin(app);
@@ -362,6 +399,7 @@ function createPersistedState(app: FastifyInstance): PersistedGatewayState {
     tokenSaver: app.tokenSaverService.getSettings(),
     teams: app.teamService.list(),
     usage: app.usageService.listAll(),
-    requestLogs: app.requestLogService.listAll()
+    requestLogs: app.requestLogService.listAll(),
+    proxyPools: app.proxyPoolService.listAll()
   };
 }

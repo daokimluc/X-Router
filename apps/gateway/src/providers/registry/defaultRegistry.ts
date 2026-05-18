@@ -10,6 +10,9 @@ import { AzureOpenAIAdapter } from "../adapters/azure-openai/AzureOpenAIAdapter.
 import { VertexAIAdapter } from "../adapters/vertex-ai/VertexAIAdapter.js";
 import { OAuthPKCEAdapter } from "../adapters/oauth-pkce/OAuthPKCEAdapter.js";
 import { NoAuthAdapter } from "../adapters/no-auth/NoAuthAdapter.js";
+import { AntigravityAdapter } from "../adapters/antigravity/AntigravityAdapter.js";
+import { GitHubCopilotAdapter } from "../adapters/github-copilot/GitHubCopilotAdapter.js";
+import { CodexAdapter } from "../adapters/codex/CodexAdapter.js";
 import { providerCatalog } from "../catalog/index.js";
 import { ProviderAdapterRegistry } from "./ProviderAdapterRegistry.js";
 import type { AIProviderAdapter } from "../base/AIProviderAdapter.js";
@@ -32,6 +35,9 @@ function createAdapterMap(): Map<string, AIProviderAdapter> {
     ["VertexAIAdapter", new VertexAIAdapter()],
     ["OAuthPKCEAdapter", new OAuthPKCEAdapter()],
     ["NoAuthAdapter", new NoAuthAdapter()],
+    ["AntigravityAdapter", new AntigravityAdapter()],
+    ["GitHubCopilotAdapter", new GitHubCopilotAdapter()],
+    ["CodexAdapter", new CodexAdapter()],
   ]);
 }
 

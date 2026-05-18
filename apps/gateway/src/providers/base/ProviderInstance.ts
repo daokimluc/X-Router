@@ -1,3 +1,5 @@
+import type { MediaKind, MediaServiceConfig } from "../../media/types.js";
+
 export type AccountSelectionStrategy =
   | "round_robin"
   | "weighted_round_robin"
@@ -29,5 +31,10 @@ export type ProviderInstance = {
   circuitBreaker: ProviderCircuitBreakerConfig;
   createdAt: Date;
   updatedAt: Date;
+
+  /** Array of media kinds this provider supports (e.g., embedding, tts, image) */
+  serviceKinds?: MediaKind[];
+  /** Per-kind media configuration for this provider instance */
+  mediaConfig?: Partial<Record<MediaKind, MediaServiceConfig>>;
 };
 

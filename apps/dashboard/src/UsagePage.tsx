@@ -5,13 +5,14 @@
 import { useMemo, useState } from "react";
 import {
   ReactFlow,
-  Background,
   Controls,
-  MiniMap,
+  Handle,
   type Node,
   type Edge,
   Position,
   MarkerType,
+  useNodesState,
+  useEdgesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -104,11 +105,25 @@ function timeAgo(dateStr: string): string {
 // ─── Provider logos/colors ─────────────────────────────────
 
 const PROVIDER_META: Record<string, { color: string; label: string }> = {
-  windsurf: { color: "#06b6d4", label: "Windsurf" },
-  kiro: { color: "#8b5cf6", label: "Kiro AI" },
+  windsurf: { color: "#00D4AA", label: "Windsurf" },
+  kiro: { color: "#FF6B35", label: "Kiro AI" },
   openai: { color: "#10a37f", label: "OpenAI" },
-  anthropic: { color: "#d97706", label: "Anthropic" },
+  anthropic: { color: "#D97757", label: "Anthropic" },
   google: { color: "#4285f4", label: "Google" },
+  gemini: { color: "#4285F4", label: "Gemini" },
+  opencode_free: { color: "#E87040", label: "OpenCode Free" },
+  codex: { color: "#3B82F6", label: "OpenAI Codex" },
+  cursor: { color: "#00D4AA", label: "Cursor" },
+  "github-copilot": { color: "#333333", label: "GitHub Copilot" },
+  deepseek: { color: "#4D6BFE", label: "DeepSeek" },
+  groq: { color: "#F55036", label: "Groq" },
+  openrouter: { color: "#F97316", label: "OpenRouter" },
+  nvidia: { color: "#76B900", label: "NVIDIA NIM" },
+  mistral: { color: "#FF7000", label: "Mistral" },
+  together: { color: "#0F6FFF", label: "Together AI" },
+  fireworks: { color: "#7B2EF2", label: "Fireworks AI" },
+  xai: { color: "#1DA1F2", label: "xAI (Grok)" },
+  cerebras: { color: "#FF4F00", label: "Cerebras" },
 };
 
 function getProviderMeta(type: string) {
@@ -117,11 +132,27 @@ function getProviderMeta(type: string) {
 
 // ─── Main component ────────────────────────────────────────
 
+type AccountInfo = {
+  id: string;
+  providerInstanceId: string;
+  providerType: string;
+  status: string;
+};
+
 export function UsagePage(props: {
   usage: UsageRecord[];
   providerInstances: ProviderInstanceInfo[];
+  accounts?: AccountInfo[];
 }) {
-  const { usage, providerInstances } = props;
+  const { usage, accounts = [] } = props;
+
+  // Only show providers that have at least one account (not media-only providers)
+  const providerInstancesWithAccounts = useMemo(() => {
+    const instanceIdsWithAccounts = new Set(accounts.map((a) => a.providerInstanceId));
+    return props.providerInstances.filter((p) => instanceIdsWithAccounts.has(p.id));
+  }, [props.providerInstances, accounts]);
+
+  const providerInstances = providerInstancesWithAccounts;
   const [range, setRange] = useState<TimeRange>("7d");
   const [view, setView] = useState<"overview" | "details">("overview");
   const [metricMode, setMetricMode] = useState<MetricMode>("tokens");
@@ -269,129 +300,232 @@ export function UsagePage(props: {
 
 // ─── Topology Graph ────────────────────────────────────────
 
+/** Gateway node with handles on all 4 sides */
+function GatewayNode({ data }: { data: { label: string } }) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(135deg, #eff6ff, #ffffff)",
+        border: "2.5px solid #0ea5e9",
+        borderRadius: "14px",
+        padding: "14px 26px",
+        fontSize: "15px",
+        fontWeight: 700,
+        color: "#0ea5e9",
+        boxShadow: "0 6px 20px rgba(14, 165, 233, 0.22)",
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        cursor: "grab",
+        letterSpacing: "-0.01em",
+      }}
+    >
+      <Handle type="source" position={Position.Top} id="top" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <Handle type="source" position={Position.Left} id="left" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <Handle type="source" position={Position.Right} id="right" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      {data.label}
+    </div>
+  );
+}
+
+/** Provider node with handles on all 4 sides */
+function ProviderNodeComponent({ data }: { data: { label: string; color: string; active: boolean; providerId: string; textIcon: string } }) {
+  const { label, color, active, providerId, textIcon } = data;
+  return (
+    <div
+      style={{
+        background: "var(--color-surface, #ffffff)",
+        border: `2px solid ${active ? color : "var(--color-border, #e5e7eb)"}`,
+        borderRadius: "10px",
+        padding: "10px 16px",
+        fontSize: "13px",
+        fontWeight: 600,
+        color: active ? color : "var(--color-text-main, #1e293b)",
+        boxShadow: active ? `0 0 16px ${color}30` : "0 1px 4px rgba(0,0,0,0.04)",
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        minWidth: "150px",
+        cursor: "grab",
+      }}
+    >
+      <Handle type="target" position={Position.Top} id="top" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <Handle type="target" position={Position.Bottom} id="bottom" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <Handle type="target" position={Position.Left} id="left" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <Handle type="target" position={Position.Right} id="right" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
+      <div
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 7,
+          background: `${color}15`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <img
+          src={`/provider-logos/${providerId}.png`}
+          alt={label}
+          style={{ width: 22, height: 22, borderRadius: 4, objectFit: "contain" }}
+          onError={(e) => {
+            const img = e.currentTarget;
+            img.style.display = "none";
+            const parent = img.parentElement;
+            if (parent && !parent.querySelector("span")) {
+              const span = document.createElement("span");
+              span.textContent = textIcon;
+              span.style.cssText = `font-size:11px;font-weight:800;color:${color}`;
+              parent.appendChild(span);
+            }
+          }}
+        />
+      </div>
+      {label}
+    </div>
+  );
+}
+
+const topologyNodeTypes = {
+  gateway: GatewayNode,
+  provider: ProviderNodeComponent,
+};
+
 function TopologyGraph(props: {
   providerInstances: ProviderInstanceInfo[];
   activeProviders: Set<string>;
 }) {
   const { providerInstances, activeProviders } = props;
 
-  const { nodes, edges } = useMemo(() => {
-    const enabledProviders = providerInstances.filter((p) => p.enabled);
-    const providerCount = enabledProviders.length;
-    const centerY = 140;
-    const rightStartY = Math.max(60, centerY - (providerCount - 1) * 45);
+  const { initialNodes, initialEdges } = useMemo(() => {
+    const connectedProviders = providerInstances.filter((p) => p.enabled);
+    if (connectedProviders.length === 0) {
+      return { initialNodes: [], initialEdges: [] };
+    }
+
+    const providerCount = connectedProviders.length;
+    const nodeW = 180;
+    const nodeH = 44;
+    const routerW = 140;
+    const routerH = 48;
+
+    // Ellipse radii — scale with provider count
+    const minRx = ((nodeW + 30) * providerCount) / (2 * Math.PI);
+    const rx = Math.max(300, minRx);
+    const ry = Math.max(180, rx * 0.55);
 
     const nodeList: Node[] = [
       {
-        id: "clients",
-        position: { x: 30, y: centerY - 20 },
-        data: { label: "IDE Clients" },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        style: {
-          background: "#f8fafc",
-          border: "1px solid #e2e8f0",
-          borderRadius: "10px",
-          padding: "10px 18px",
-          fontSize: "12px",
-          fontWeight: 500,
-        },
-      },
-      {
         id: "gateway",
-        position: { x: 260, y: centerY - 25 },
+        type: "gateway",
+        position: { x: -routerW / 2, y: -routerH / 2 },
         data: { label: "⚡ AI Gateway" },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        style: {
-          background: "linear-gradient(135deg, #f0f9ff, #fff)",
-          border: "2px solid #0ea5e9",
-          borderRadius: "14px",
-          padding: "12px 22px",
-          fontSize: "13px",
-          fontWeight: 700,
-          boxShadow: "0 4px 12px rgba(229, 106, 74, 0.15)",
-        },
+        draggable: true,
       },
     ];
 
-    enabledProviders.forEach((p, i) => {
+    connectedProviders.forEach((p, i) => {
       const meta = getProviderMeta(p.type);
       const isActive = activeProviders.has(p.id);
+
+      // Distribute evenly starting from top (-π/2), clockwise
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / providerCount;
+      const cx = rx * Math.cos(angle);
+      const cy = ry * Math.sin(angle);
+
       nodeList.push({
         id: p.id,
-        position: { x: 500, y: rightStartY + i * 90 },
-        data: { label: `${meta.label}` },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        style: {
-          background: isActive
-            ? `linear-gradient(135deg, ${meta.color}15, #fff)`
-            : "#f8fafc",
-          border: `1.5px solid ${isActive ? meta.color : "#e2e8f0"}`,
-          borderRadius: "10px",
-          padding: "10px 18px",
-          fontSize: "12px",
-          fontWeight: 600,
-          color: isActive ? meta.color : "#64748b",
-          boxShadow: isActive ? `0 2px 8px ${meta.color}20` : "none",
-          transition: "all 0.3s ease",
-        },
+        type: "provider",
+        position: { x: cx - nodeW / 2, y: cy - nodeH / 2 },
+        data: { label: meta.label, color: meta.color, active: isActive, providerId: p.type, textIcon: p.type.slice(0, 2).toUpperCase() },
+        draggable: true,
       });
     });
 
-    const edgeList: Edge[] = [
-      {
-        id: "clients-gateway",
-        source: "clients",
-        target: "gateway",
-        animated: activeProviders.size > 0,
-        style: { stroke: "#0ea5e9", strokeWidth: 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#0ea5e9" },
-      },
-    ];
+    const edgeList: Edge[] = [];
 
-    enabledProviders.forEach((p) => {
-      const meta = getProviderMeta(p.type);
+    connectedProviders.forEach((p, i) => {
       const isActive = activeProviders.has(p.id);
+
+      // Pick the gateway handle closest to this provider's angle
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / providerCount;
+      let sourceHandle: string;
+      let targetHandle: string;
+
+      if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
+        // Provider is more to the left or right
+        sourceHandle = Math.cos(angle) > 0 ? "right" : "left";
+        targetHandle = Math.cos(angle) > 0 ? "left" : "right";
+      } else {
+        // Provider is more above or below
+        sourceHandle = Math.sin(angle) > 0 ? "bottom" : "top";
+        targetHandle = Math.sin(angle) > 0 ? "top" : "bottom";
+      }
+
       edgeList.push({
         id: `gateway-${p.id}`,
         source: "gateway",
+        sourceHandle,
         target: p.id,
+        targetHandle,
+        type: "default",
         animated: isActive,
         style: {
-          stroke: isActive ? meta.color : "#cbd5e1",
-          strokeWidth: isActive ? 2 : 1,
-          strokeDasharray: isActive ? undefined : "5 5",
+          stroke: isActive ? "#22c55e" : "#94a3b8",
+          strokeWidth: isActive ? 2.5 : 1.8,
+          strokeDasharray: isActive ? undefined : "6 4",
         },
         markerEnd: isActive
-          ? { type: MarkerType.ArrowClosed, color: meta.color }
+          ? { type: MarkerType.ArrowClosed, color: "#22c55e", width: 18, height: 18 }
           : undefined,
       });
     });
 
-    return { nodes: nodeList, edges: edgeList };
+    return { initialNodes: nodeList, initialEdges: edgeList };
   }, [providerInstances, activeProviders]);
 
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // Sync when provider data changes
+  useMemo(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  if (initialNodes.length === 0) {
+    return (
+      <div className="usageEmptyMsg" style={{ height: 440, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        No connected providers
+      </div>
+    );
+  }
+
   return (
-    <div style={{ width: "100%", height: 280 }}>
+    <div style={{ width: "100%", height: 440 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={topologyNodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: 0.2, duration: 200 }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={true}
         nodesConnectable={false}
-        elementsSelectable={true}
-        panOnDrag={true}
+        elementsSelectable={false}
+        selectionOnDrag={false}
+        panOnDrag={[1, 2]}
         zoomOnScroll={true}
         zoomOnPinch={true}
         zoomOnDoubleClick={true}
-        minZoom={0.3}
+        minZoom={0.1}
         maxZoom={2}
+        preventScrolling={false}
       >
-        <Background color="#f1f5f9" gap={24} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>
