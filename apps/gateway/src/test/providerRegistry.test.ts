@@ -50,13 +50,29 @@ describe("ProviderAdapterRegistry", () => {
 });
 
 describe("default provider registry", () => {
-  it("includes the mock provider adapter", () => {
+  it("includes legacy adapters (mock, kiro, windsurf)", () => {
     const registry = createDefaultProviderRegistry();
 
     expect(registry.getAdapter("mock")).toBeInstanceOf(MockProviderAdapter);
     expect(registry.getAdapter("kiro").type).toBe("kiro");
     expect(registry.getAdapter("windsurf").type).toBe("windsurf");
-    expect(registry.listProviderTypes()).toHaveLength(3);
+  });
+
+  it("auto-registers all catalog providers on startup", () => {
+    const registry = createDefaultProviderRegistry();
+    const types = registry.listProviderTypes();
+
+    // Legacy (3) + catalog entries (28) = 31 total
+    expect(types.length).toBeGreaterThanOrEqual(31);
+
+    // Verify some catalog providers are registered
+    expect(registry.getAdapter("openai").type).toBe("generic_openai");
+    expect(registry.getAdapter("deepseek").type).toBe("generic_openai");
+    expect(registry.getAdapter("anthropic").type).toBe("anthropic");
+    expect(registry.getAdapter("azure_openai").type).toBe("azure_openai");
+    expect(registry.getAdapter("vertex_ai").type).toBe("vertex_ai");
+    expect(registry.getAdapter("opencode_free").type).toBe("no_auth");
+    expect(registry.getAdapter("claude_code").type).toBe("oauth_pkce");
   });
 
   it("is attached to the Fastify app for later phases", async () => {

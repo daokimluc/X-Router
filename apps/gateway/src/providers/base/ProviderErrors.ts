@@ -51,3 +51,53 @@ export class UnsupportedCapabilityError extends ProviderError {
   }
 }
 
+export class ProviderAuthError extends ProviderError {
+  constructor(providerType: string, message: string) {
+    super({
+      code: "provider_auth_error",
+      message: `[${providerType}] Authentication failed: ${message}`,
+      retryable: false,
+      statusCode: 401
+    });
+    this.name = "ProviderAuthError";
+  }
+}
+
+export class ProviderRateLimitError extends ProviderError {
+  readonly retryAfterSeconds?: number;
+
+  constructor(providerType: string, retryAfterSeconds?: number) {
+    super({
+      code: "provider_rate_limited",
+      message: `[${providerType}] Rate limited${retryAfterSeconds ? `, retry after ${retryAfterSeconds}s` : ""}`,
+      retryable: true,
+      statusCode: 429
+    });
+    this.name = "ProviderRateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export class ProviderTimeoutError extends ProviderError {
+  constructor(providerType: string, baseUrl: string, timeoutMs: number) {
+    super({
+      code: "provider_timeout",
+      message: `[${providerType}] Request timeout after ${timeoutMs}ms to ${baseUrl}`,
+      retryable: true,
+      statusCode: 504
+    });
+    this.name = "ProviderTimeoutError";
+  }
+}
+
+export class ProviderUnavailableError extends ProviderError {
+  constructor(providerType: string, statusCode: number) {
+    super({
+      code: "provider_unavailable",
+      message: `[${providerType}] Provider unavailable (HTTP ${statusCode})`,
+      retryable: true,
+      statusCode
+    });
+    this.name = "ProviderUnavailableError";
+  }
+}

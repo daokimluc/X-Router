@@ -12,6 +12,7 @@ import type {
 } from "../providers/base/types.js";
 import { isProviderStream } from "../utils/sse.js";
 import { anthropicMessagesRequestSchema } from "../validation/openaiSchemas.js";
+import type { ProviderProtocol } from "../providers/base/ProviderCapabilities.js";
 
 export async function registerAnthropicRoutes(
   app: FastifyInstance,
@@ -31,6 +32,15 @@ export async function registerAnthropicRoutes(
 
       try {
         const body = anthropicMessagesRequestSchema.parse(request.body);
+
+        // Direct account routing: when x-provider-account-id header is present,
+        // route directly to the specified account's adapter
+        const directAccountId = request.headers["x-provider-account-id"];
+        if (typeof directAccountId === "string" && directAccountId.length > 0) {
+          const directResult = await handleDirectAnthropicRouting(app, request, reply, body, directAccountId);
+          return directResult;
+        }
+
         const route = app.modelResolver.resolve(body.model, ["chat"]);
         let lastError: unknown;
 
@@ -199,6 +209,124 @@ export async function registerAnthropicRoutes(
       }
     }
   );
+}
+
+/**
+ * Handle direct account routing for /v1/messages when x-provider-account-id header is present.
+ * Validates that the provider supports anthropic_messages protocol.
+ * Credentials are injected into the adapter context without being exposed in logs or errors.
+ */
+async function handleDirectAnthropicRouting(
+  app: FastifyInstance,
+  request: any,
+  reply: any,
+  body: any,
+  accountId: string
+) {
+  const requiredProtocol: ProviderProtocol = "anthropic_messages";
+
+  // Lookup ProviderAccount by account ID
+  const account = app.providerRuntimeRegistry.getAccount(accountId);
+  if (!account) {
+    await reply.code(404).send({
+      error: {
+        type: "invalid_request_error",
+        message: `Provider account "${accountId}" not found`,
+        code: "account_not_found"
+      }
+    });
+    return reply;
+  }
+
+  // Determine adapter type from ProviderTypeDefinition
+  const definition = app.providerRegistry.getDefinition(account.providerType);
+
+  // Validate protocol compatibility: /v1/messages requires anthropic_messages
+  if (definition && !definition.supportedProtocols.includes(requiredProtocol)) {
+    await reply.code(400).send({
+      error: {
+        type: "invalid_request_error",
+        message: `Provider "${definition.displayName}" (type: ${account.providerType}) does not support protocol "${requiredProtocol}". Supported protocols: ${definition.supportedProtocols.join(", ")}`,
+        code: "protocol_not_supported"
+      }
+    });
+    return reply;
+  }
+
+  // Route to correct adapter instance via ProviderAdapterRegistry
+  const adapter = app.providerRegistry.getAdapter(account.providerType);
+
+  // Get provider instance for the account
+  const providerInstance = app.providerRuntimeRegistry.getProviderInstance(
+    account.providerInstanceId
+  );
+  if (!providerInstance) {
+    await reply.code(404).send({
+      error: {
+        type: "invalid_request_error",
+        message: `Provider instance for account "${accountId}" not found`,
+        code: "provider_instance_not_found"
+      }
+    });
+    return reply;
+  }
+
+  // Inject credentials into adapter context without exposing in logs/errors
+  const secret = app.secretService.getSecretForAccount(account.id);
+  const credentialPayload = secret
+    ? app.secretService.decryptSecretPayload(secret)
+    : {};
+
+  // If adapter supports native anthropic_messages protocol, use messages() directly
+  if (adapter.messages) {
+    const response = await adapter.messages(body, {
+      providerInstance,
+      account,
+      requestId: request.id,
+      credentialPayload
+    });
+
+    if (isProviderStream(response)) {
+      await writeAnthropicStream({
+        reply,
+        stream: response,
+        model: body.model,
+        requestId: request.id
+      });
+      return reply;
+    }
+
+    return response;
+  }
+
+  // Fallback: convert to OpenAI format and use chatCompletions
+  const openAIRequest = toOpenAIChatRequest({
+    model: body.model,
+    maxTokens: body.max_tokens,
+    stream: body.stream,
+    temperature: body.temperature,
+    system: body.system,
+    messages: body.messages
+  });
+
+  const response = await adapter.chatCompletions(openAIRequest, {
+    providerInstance,
+    account,
+    requestId: request.id,
+    credentialPayload
+  });
+
+  if (isProviderStream(response)) {
+    await writeAnthropicStream({
+      reply,
+      stream: response,
+      model: body.model,
+      requestId: request.id
+    });
+    return reply;
+  }
+
+  return toAnthropicResponse(response, body.model);
 }
 
 function toOpenAIChatRequest(options: {

@@ -170,19 +170,28 @@ describe("POST /v1/messages", () => {
         output_tokens: 5
       }
     });
+    // KiroClient transforms OpenAI format into Kiro's internal payload format
     expect(upstreamBody).toMatchObject({
-      model: "sonnet",
-      max_tokens: 128,
-      messages: [
-        {
-          role: "system",
-          content: "You are concise."
+      conversationState: {
+        chatTriggerType: "MANUAL",
+        currentMessage: {
+          userInputMessage: {
+            content: expect.stringContaining("hello"),
+            modelId: "claude-sonnet-4.5"
+          }
         },
-        {
-          role: "user",
-          content: "hello"
-        }
-      ]
+        history: expect.arrayContaining([
+          {
+            userInputMessage: {
+              content: "System: You are concise.",
+              modelId: "claude-sonnet-4.5"
+            }
+          }
+        ])
+      },
+      inferenceConfig: {
+        maxTokens: 128
+      }
     });
 
     await app.close();

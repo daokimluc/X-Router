@@ -102,11 +102,16 @@ describe("Admin API", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().data.map((item: { type: string }) => item.type)).toEqual([
-      "mock",
-      "kiro",
-      "windsurf"
-    ]);
+    const types = response.json().data.map((item: { type: string }) => item.type);
+    // Legacy adapters must be present
+    expect(types).toContain("mock");
+    expect(types).toContain("kiro");
+    expect(types).toContain("windsurf");
+    // Catalog providers are also registered
+    expect(types).toContain("openai");
+    expect(types).toContain("anthropic");
+    expect(types).toContain("deepseek");
+    expect(types.length).toBeGreaterThanOrEqual(31);
 
     await app.close();
   });

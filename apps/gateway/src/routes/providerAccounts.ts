@@ -466,13 +466,18 @@ function buildAuthorizationUrl(
 
 /**
  * Get OAuth authorization endpoint for a provider type.
- * This is a placeholder - in production, this should come from provider config.
+ * Checks the definition's oauthConfig first, then falls back to known endpoints.
  */
 function getOAuthAuthorizationEndpoint(
   definition: ProviderTypeDefinition,
   providerType: string
 ): string {
-  // Known OAuth endpoints for common providers
+  // Check if provider definition has oauthConfig (new multi-provider OAuth PKCE flow)
+  if (definition.oauthConfig?.authorizationEndpoint) {
+    return definition.oauthConfig.authorizationEndpoint;
+  }
+
+  // Known OAuth endpoints for common providers (legacy)
   const knownEndpoints: Record<string, string> = {
     kiro: "https://app.kiro.dev/signin",
     google: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -485,10 +490,10 @@ function getOAuthAuthorizationEndpoint(
     return endpoint;
   }
 
-  // Fallback: check if provider has OAuth config in definition
-  const oauthConfig = definition.configSchema as { authorizationEndpoint?: string } | undefined;
-  if (oauthConfig?.authorizationEndpoint) {
-    return oauthConfig.authorizationEndpoint;
+  // Fallback: check if provider has OAuth config in configSchema
+  const configSchema = definition.configSchema as { authorizationEndpoint?: string } | undefined;
+  if (configSchema?.authorizationEndpoint) {
+    return configSchema.authorizationEndpoint;
   }
 
   // Default fallback
@@ -658,16 +663,18 @@ export async function registerProviderAccountRoutes(
           const oauthSessionId = randomUUID();
           const expiresAt = Date.now() + 600_000; // 10 minutes
 
-          // Build authorization URL
-          // TODO: Get OAuth config from provider definition or adapter
-          // For now, use a placeholder - this should be configured per provider
-          const redirectUri = "http://127.0.0.1:8080/oauth/callback";
+          // Build authorization URL using oauthConfig from definition if available
+          const redirectUri = definition.oauthConfig?.redirectUri ?? "http://127.0.0.1:8080/oauth/callback";
           const authorizationEndpoint = getOAuthAuthorizationEndpoint(definition, providerType);
+          const clientId = definition.oauthConfig?.clientId;
+          const scope = definition.oauthConfig?.scope;
           const authorizationUrl = buildAuthorizationUrl(
             authorizationEndpoint,
             state,
             codeChallenge,
-            redirectUri
+            redirectUri,
+            clientId,
+            scope
           );
 
           // Create OAuth session

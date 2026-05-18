@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertCircle,
   BadgeCheck,
   Bot,
   BookOpen,
@@ -107,6 +108,9 @@ type ProviderType = {
     maxInputTokens?: number;
     maxOutputTokens?: number;
   };
+  category?: "free" | "oauth_subscription" | "api_key_cheap" | "api_key_premium" | "cloud_platform" | "custom";
+  logoUrl?: string;
+  defaultBaseUrl?: string;
 };
 
 type ProviderInstance = {
@@ -138,6 +142,10 @@ type Account = {
     failedRequests: number;
     consecutiveFailures: number;
     lastError?: string;
+  };
+  metadata?: {
+    healthCheckStatus?: "healthy" | "unhealthy" | "timeout";
+    healthCheckMessage?: string;
   };
 };
 
@@ -243,6 +251,12 @@ type AddAccountFormState = {
     apiKey?: string;
     mockToken?: string;
   };
+};
+
+type HealthCheckResult = {
+  status: "healthy" | "unhealthy" | "timeout";
+  message?: string;
+  latencyMs?: number;
 };
 
 type OAuthSessionPoll = {
@@ -1014,6 +1028,7 @@ function ProvidersPageWithDetail(props: {
     <ProvidersPage
       accounts={props.accounts}
       providerInstances={props.instances}
+      providerTypes={props.providerTypes}
       onSelectProvider={(type) => setSelectedType(type)}
     />
   );
@@ -1149,18 +1164,28 @@ function getSupportedCredentialModes(providerType?: ProviderType): CredentialMod
 
 function AddAccountModal(props: {
   providerType: string;
+  providerTypeInfo?: ProviderType;
   supportedModes: CredentialMode[];
   api: ReturnType<typeof createApiClient>;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  type TabId = "oauth" | "token" | "local";
-  const hasOAuth = props.supportedModes.includes("oauth_pkce");
+  type TabId = "oauth" | "token" | "local" | "azure" | "vertex" | "noauth" | "custom";
+
+  // Determine form type based on provider type and auth methods
+  const authMethods = props.providerTypeInfo?.authMethods ?? [];
+  const isAzure = props.providerType === "azure_openai";
+  const isVertex = props.providerType === "vertex_ai";
+  const isNoAuth = authMethods.includes("none") || props.providerType === "opencode_free";
+  const isCustom = props.providerType === "custom_openai" || props.providerType === "custom";
+  const isNewOAuth = authMethods.includes("oauth") && !["kiro", "windsurf"].includes(props.providerType);
+
+  const hasOAuth = props.supportedModes.includes("oauth_pkce") || isNewOAuth;
   const hasRefreshToken = props.supportedModes.includes("refresh_token");
   const hasApiKey = props.supportedModes.includes("api_key");
   const hasLocal = props.providerType === "kiro" || props.providerType === "windsurf";
 
-  const defaultTab: TabId = hasOAuth ? "oauth" : hasRefreshToken || hasApiKey ? "token" : "local";
+  const defaultTab: TabId = isAzure ? "azure" : isVertex ? "vertex" : isNoAuth ? "noauth" : isCustom ? "custom" : hasOAuth ? "oauth" : hasRefreshToken || hasApiKey ? "token" : "local";
   const [activeTab, setActiveTab] = useState<TabId>(defaultTab);
 
   const [label, setLabel] = useState("");
@@ -1177,6 +1202,30 @@ function AddAccountModal(props: {
 
   // Local import state
   const [importing, setImporting] = useState(false);
+
+  // Health check result state (Task 13.3)
+  const [healthResult, setHealthResult] = useState<HealthCheckResult | null>(null);
+  const [healthPending, setHealthPending] = useState(false);
+
+  // Azure form state
+  const [azureResourceName, setAzureResourceName] = useState("");
+  const [azureDeploymentName, setAzureDeploymentName] = useState("");
+  const [azureApiKey, setAzureApiKey] = useState("");
+  const [azureApiVersion, setAzureApiVersion] = useState("2024-02-01");
+
+  // Vertex AI form state
+  const [vertexProjectId, setVertexProjectId] = useState("");
+  const [vertexRegion, setVertexRegion] = useState("us-central1");
+  const [vertexServiceAccountJson, setVertexServiceAccountJson] = useState("");
+
+  // No-Auth form state
+  const [noAuthBaseUrl, setNoAuthBaseUrl] = useState("");
+
+  // Custom Provider form state
+  const [customDisplayName, setCustomDisplayName] = useState("");
+  const [customBaseUrl, setCustomBaseUrl] = useState("");
+  const [customApiKey, setCustomApiKey] = useState("");
+  const [customProtocol, setCustomProtocol] = useState<"openai_chat_completions" | "anthropic_messages">("openai_chat_completions");
 
   // OAuth polling — check callback status via state
   useEffect(() => {
@@ -1213,40 +1262,63 @@ function AddAccountModal(props: {
     setSubmitting(true);
     setErrors({});
     try {
-      // Use the legacy OAuth PKCE start endpoint which builds the correct
-      // authorization URL with client_id, prompt, response_type=token for Windsurf
-      const response = await props.api.post<{
-        data: { state: string; authorizationUrl: string; accountId: string; redirectUri: string };
-      }>("/admin/v1/oauth/pkce/start", {
-        providerType: props.providerType,
-        providerInstanceId: `provider_${props.providerType}_main`,
-        accountId,
-        displayName: trimmedLabel,
-        owner: "team",
-        maxConcurrency: 3,
-        weight: 1,
-        allowedModels: [],
-        tags: ["oauth"],
-        authorizationEndpoint: defaultOAuthEndpoint(props.providerType),
-        redirectUri: defaultOAuthRedirectUri(props.providerType),
-        clientId: defaultOAuthClientId(props.providerType) || undefined,
-        extraParams: oauthExtraParams(props.providerType, {
-          prompt: "login",
-          redirectParametersType: "query",
-          workflow: "onboarding"
-        })
-      });
+      // For new OAuth providers (not kiro/windsurf), use the generic OAuth start endpoint
+      if (isNewOAuth) {
+        const response = await props.api.post<{
+          data: { authorizationUrl: string; state: string; providerType: string; expiresIn: number };
+        }>("/admin/oauth/start", {
+          providerType: props.providerType,
+          displayName: trimmedLabel,
+          owner: "team",
+          maxConcurrency: 3,
+          weight: 1,
+          allowedModels: [],
+          tags: ["oauth"],
+        });
 
-      const oauthData = response.data;
-      setOauthUrl(oauthData.authorizationUrl);
-      // Use state as session ID for polling via callbacks endpoint
-      setOauthSession({
-        id: oauthData.state,
-        status: "pending",
-        providerType: props.providerType,
-        label: trimmedLabel,
-        expiresAt: new Date(Date.now() + 600_000).toISOString(),
-      });
+        const oauthData = response.data;
+        setOauthUrl(oauthData.authorizationUrl);
+        setOauthSession({
+          id: oauthData.state,
+          status: "pending",
+          providerType: props.providerType,
+          label: trimmedLabel,
+          expiresAt: new Date(Date.now() + (oauthData.expiresIn * 1000)).toISOString(),
+        });
+      } else {
+        // Use the legacy OAuth PKCE start endpoint for Kiro/Windsurf
+        const response = await props.api.post<{
+          data: { state: string; authorizationUrl: string; accountId: string; redirectUri: string };
+        }>("/admin/v1/oauth/pkce/start", {
+          providerType: props.providerType,
+          providerInstanceId: `provider_${props.providerType}_main`,
+          accountId,
+          displayName: trimmedLabel,
+          owner: "team",
+          maxConcurrency: 3,
+          weight: 1,
+          allowedModels: [],
+          tags: ["oauth"],
+          authorizationEndpoint: defaultOAuthEndpoint(props.providerType),
+          redirectUri: defaultOAuthRedirectUri(props.providerType),
+          clientId: defaultOAuthClientId(props.providerType) || undefined,
+          extraParams: oauthExtraParams(props.providerType, {
+            prompt: "login",
+            redirectParametersType: "query",
+            workflow: "onboarding"
+          })
+        });
+
+        const oauthData = response.data;
+        setOauthUrl(oauthData.authorizationUrl);
+        setOauthSession({
+          id: oauthData.state,
+          status: "pending",
+          providerType: props.providerType,
+          label: trimmedLabel,
+          expiresAt: new Date(Date.now() + 600_000).toISOString(),
+        });
+      }
     } catch (caught) {
       const error = caught as { error?: { code?: string; message?: string } };
       setErrors({ submit: error.error?.message ?? "Không thể tạo phiên OAuth" });
@@ -1310,16 +1382,173 @@ function AddAccountModal(props: {
     }
   }
 
+  // Submit provider account via POST /admin/provider-accounts (new multi-provider API)
+  async function submitProviderAccount(
+    displayName: string,
+    credentials: Record<string, unknown>,
+    config: Record<string, unknown> = {}
+  ) {
+    setSubmitting(true);
+    setErrors({});
+    setHealthResult(null);
+    setHealthPending(true);
+    try {
+      const response = await props.api.post<{
+        data: {
+          id: string;
+          providerType: string;
+          displayName: string;
+          status: string;
+          healthCheck?: HealthCheckResult;
+        };
+      }>("/admin/provider-accounts", {
+        providerType: props.providerType,
+        displayName,
+        credentials,
+        config,
+        weight: 1,
+        maxConcurrency: 3,
+        tags: [],
+      });
+
+      const result: HealthCheckResult = response.data.healthCheck ?? {
+        status: response.data.status === "active" ? "healthy" : "unhealthy",
+        message: response.data.status === "active" ? "Connection successful" : "Connection failed",
+      };
+      setHealthResult(result);
+      setHealthPending(false);
+
+      if (result.status === "healthy") {
+        props.onSuccess();
+      }
+      // For timeout/unhealthy, user decides via buttons shown in UI
+    } catch (caught) {
+      setHealthPending(false);
+      const msg = caught instanceof Error ? caught.message : "Failed to add account";
+      setErrors({ submit: msg });
+      setHealthResult({ status: "unhealthy", message: msg });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitAzure(event: React.FormEvent) {
+    event.preventDefault();
+    if (!azureResourceName.trim()) { setErrors({ azureResourceName: "Resource name is required" }); return; }
+    if (!azureDeploymentName.trim()) { setErrors({ azureDeploymentName: "Deployment name is required" }); return; }
+    if (!azureApiKey.trim()) { setErrors({ azureApiKey: "API key is required" }); return; }
+
+    const displayName = label.trim() || `Azure ${azureResourceName}/${azureDeploymentName}`;
+    await submitProviderAccount(
+      displayName,
+      { apiKey: azureApiKey.trim() },
+      { resourceName: azureResourceName.trim(), deploymentName: azureDeploymentName.trim(), apiVersion: azureApiVersion.trim() }
+    );
+  }
+
+  async function submitVertex(event: React.FormEvent) {
+    event.preventDefault();
+    if (!vertexProjectId.trim()) { setErrors({ vertexProjectId: "Project ID is required" }); return; }
+    if (!vertexServiceAccountJson.trim()) { setErrors({ vertexServiceAccountJson: "Service account JSON is required" }); return; }
+
+    // Validate JSON
+    try {
+      JSON.parse(vertexServiceAccountJson.trim());
+    } catch {
+      setErrors({ vertexServiceAccountJson: "Invalid JSON format" });
+      return;
+    }
+
+    const displayName = label.trim() || `Vertex AI (${vertexProjectId})`;
+    await submitProviderAccount(
+      displayName,
+      { serviceAccountJson: vertexServiceAccountJson.trim() },
+      { projectId: vertexProjectId.trim(), region: vertexRegion.trim() }
+    );
+  }
+
+  async function submitNoAuth(event: React.FormEvent) {
+    event.preventDefault();
+    if (!noAuthBaseUrl.trim()) { setErrors({ noAuthBaseUrl: "Base URL is required" }); return; }
+
+    const displayName = label.trim() || `${props.providerType} (${noAuthBaseUrl.trim()})`;
+    await submitProviderAccount(
+      displayName,
+      {},
+      { baseUrl: noAuthBaseUrl.trim() }
+    );
+  }
+
+  async function submitCustom(event: React.FormEvent) {
+    event.preventDefault();
+    if (!customDisplayName.trim()) { setErrors({ customDisplayName: "Display name is required" }); return; }
+    if (!customBaseUrl.trim()) { setErrors({ customBaseUrl: "Base URL is required" }); return; }
+
+    await submitProviderAccount(
+      customDisplayName.trim(),
+      customApiKey.trim() ? { apiKey: customApiKey.trim() } : {},
+      { baseUrl: customBaseUrl.trim(), protocol: customProtocol }
+    );
+  }
+
+  async function submitApiKeyForm(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) { setErrors({ label: "Label is required" }); return; }
+    if (!tokenValue.trim()) { setErrors({ token: "API Key is required" }); return; }
+
+    await submitProviderAccount(
+      trimmedLabel,
+      { apiKey: tokenValue.trim() },
+      {}
+    );
+  }
+
+  // Determine provider display name
+  const providerDisplayName = props.providerTypeInfo?.displayName ?? props.providerType;
+
   return (
     <div className="modalOverlay" role="presentation" onMouseDown={props.onClose}>
       <div className="addAccountModal addAccountModalV2" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modalHeader">
           <div className="windowDots"><span /><span /><span /></div>
-          <h3>Thêm tài khoản {props.providerType === "kiro" ? "Kiro" : props.providerType === "windsurf" ? "Windsurf" : props.providerType}</h3>
+          <h3>Add Account — {providerDisplayName}</h3>
           <button className="iconButton" type="button" onClick={props.onClose}><X size={18} /></button>
         </div>
 
-        {/* Tabs */}
+        {/* Health Check Result Banner (Task 13.3) */}
+        {healthResult && (
+          <div className={`healthCheckBanner healthCheckBanner--${healthResult.status}`}>
+            <div className="healthCheckBannerContent">
+              {healthResult.status === "healthy" && <CheckCircle2 size={18} />}
+              {healthResult.status === "unhealthy" && <XCircle size={18} />}
+              {healthResult.status === "timeout" && <Activity size={18} />}
+              <div>
+                <strong>
+                  {healthResult.status === "healthy" && "Connection Healthy"}
+                  {healthResult.status === "unhealthy" && "Connection Unhealthy"}
+                  {healthResult.status === "timeout" && "Connection Timeout"}
+                </strong>
+                {healthResult.message && <p>{healthResult.message}</p>}
+              </div>
+            </div>
+            {healthResult.status === "timeout" && (
+              <div className="healthCheckBannerActions">
+                <button className="primaryButton" type="button" onClick={props.onSuccess}>Save Anyway</button>
+                <button className="ghostButton" type="button" onClick={props.onClose}>Cancel</button>
+              </div>
+            )}
+            {healthResult.status === "unhealthy" && (
+              <div className="healthCheckBannerActions">
+                <button className="ghostButton" type="button" onClick={() => setHealthResult(null)}>Try Again</button>
+                <button className="ghostButton" type="button" onClick={props.onClose}>Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tabs — only show for providers with multiple auth options or legacy providers */}
+        {!isAzure && !isVertex && !isNoAuth && !isCustom && (<>
         <div className="addAccTabs">
           {hasOAuth && (
             <button
@@ -1327,7 +1556,7 @@ function AddAccountModal(props: {
               className={`addAccTab ${activeTab === "oauth" ? "active" : ""}`}
               onClick={() => setActiveTab("oauth")}
             >
-              <Globe size={14} /> Ủy quyền OAuth
+              <Globe size={14} /> {isNewOAuth ? "Connect via Browser" : "Ủy quyền OAuth"}
             </button>
           )}
           {(hasRefreshToken || hasApiKey) && (
@@ -1358,10 +1587,12 @@ function AddAccountModal(props: {
             {!oauthSession ? (
               <>
                 <p className="addAccDesc">
-                  Nhấn nút bên dưới và hoàn tất ủy quyền {props.providerType === "kiro" ? "Kiro" : "Windsurf"} trong trình duyệt.
+                  {isNewOAuth
+                    ? `Click the button below to connect your ${providerDisplayName} account via browser.`
+                    : `Nhấn nút bên dưới và hoàn tất ủy quyền ${props.providerType === "kiro" ? "Kiro" : "Windsurf"} trong trình duyệt.`}
                 </p>
                 <label className="addAccField">
-                  <span>Label (tùy chọn)</span>
+                  <span>Label (optional)</span>
                   <input
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
@@ -1375,13 +1606,13 @@ function AddAccountModal(props: {
                   onClick={() => void startOAuth()}
                 >
                   <Globe size={16} />
-                  {submitting ? "Đang tạo link..." : "Mở trong trình duyệt"}
+                  {submitting ? "Creating link..." : isNewOAuth ? "Connect via Browser" : "Mở trong trình duyệt"}
                 </button>
               </>
             ) : (
               <>
                 <label className="addAccField">
-                  <span>Liên kết xác thực</span>
+                  <span>{isNewOAuth ? "Authorization Link" : "Liên kết xác thực"}</span>
                   <div className="addAccOAuthUrlRow">
                     <input readOnly value={oauthUrl ?? ""} className="addAccOAuthUrl" />
                     <button
@@ -1413,7 +1644,14 @@ function AddAccountModal(props: {
 
         {/* Tab: Token / Key */}
         {activeTab === "token" && (
-          <form className="addAccTabContent" onSubmit={(e) => void submitToken(e)}>
+          <form className="addAccTabContent" onSubmit={(e) => {
+            // For new multi-provider types, use the new provider-accounts API with health check
+            if (!["kiro", "windsurf"].includes(props.providerType)) {
+              void submitApiKeyForm(e);
+            } else {
+              void submitToken(e);
+            }
+          }}>
             {props.providerType === "windsurf" && (
               <div className="addAccGetTokenHint">
                 <span>Lấy token tại:</span>
@@ -1432,7 +1670,7 @@ function AddAccountModal(props: {
                 autoFocus
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
-                placeholder="Tên hiển thị cho account"
+                placeholder="Display name for account"
               />
               {errors.label && <small className="fieldError">{errors.label}</small>}
             </label>
@@ -1445,7 +1683,7 @@ function AddAccountModal(props: {
             <label className="addAccField">
               <span>{tokenMode === "refresh_token" ? "Refresh Token" : "API Key"}</span>
               <textarea
-                placeholder={tokenMode === "refresh_token" ? "Nhập refresh token" : "Nhập API key / session token"}
+                placeholder={tokenMode === "refresh_token" ? "Enter refresh token" : "Enter API key"}
                 value={tokenValue}
                 onChange={(e) => setTokenValue(e.target.value)}
                 disabled={submitting}
@@ -1486,6 +1724,146 @@ function AddAccountModal(props: {
               Tìm tại: {props.providerType === "kiro" ? "~/.aws/sso/cache/" : "~/.codeium/windsurf/db/"}
             </p>
           </div>
+        )}
+        </>)}
+
+        {/* Azure OpenAI Form */}
+        {isAzure && (
+          <form className="addAccTabContent" onSubmit={(e) => void submitAzure(e)}>
+            <label className="addAccField">
+              <span>Display Name (optional)</span>
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="My Azure Deployment" />
+            </label>
+            <label className="addAccField">
+              <span>Resource Name *</span>
+              <input autoFocus value={azureResourceName} onChange={(e) => setAzureResourceName(e.target.value)} placeholder="my-resource" />
+              {errors.azureResourceName && <small className="fieldError">{errors.azureResourceName}</small>}
+              <small className="fieldHint">The Azure resource name (e.g. my-resource.openai.azure.com)</small>
+            </label>
+            <label className="addAccField">
+              <span>Deployment Name *</span>
+              <input value={azureDeploymentName} onChange={(e) => setAzureDeploymentName(e.target.value)} placeholder="gpt-4o" />
+              {errors.azureDeploymentName && <small className="fieldError">{errors.azureDeploymentName}</small>}
+            </label>
+            <label className="addAccField">
+              <span>API Key *</span>
+              <input type="password" value={azureApiKey} onChange={(e) => setAzureApiKey(e.target.value)} placeholder="Enter Azure API key" />
+              {errors.azureApiKey && <small className="fieldError">{errors.azureApiKey}</small>}
+            </label>
+            <label className="addAccField">
+              <span>API Version</span>
+              <input value={azureApiVersion} onChange={(e) => setAzureApiVersion(e.target.value)} placeholder="2024-02-01" />
+              <small className="fieldHint">Default: 2024-02-01</small>
+            </label>
+            {errors.submit && <div className="formNotice error">{errors.submit}</div>}
+            <button type="submit" className="primaryButton" disabled={submitting || !azureResourceName.trim() || !azureDeploymentName.trim() || !azureApiKey.trim()}>
+              {submitting ? "Connecting..." : "Add Azure Account"}
+            </button>
+          </form>
+        )}
+
+        {/* Vertex AI Form */}
+        {isVertex && (
+          <form className="addAccTabContent" onSubmit={(e) => void submitVertex(e)}>
+            <label className="addAccField">
+              <span>Display Name (optional)</span>
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="My Vertex AI Project" />
+            </label>
+            <label className="addAccField">
+              <span>Project ID *</span>
+              <input autoFocus value={vertexProjectId} onChange={(e) => setVertexProjectId(e.target.value)} placeholder="my-gcp-project" />
+              {errors.vertexProjectId && <small className="fieldError">{errors.vertexProjectId}</small>}
+            </label>
+            <label className="addAccField">
+              <span>Region</span>
+              <input value={vertexRegion} onChange={(e) => setVertexRegion(e.target.value)} placeholder="us-central1" />
+              <small className="fieldHint">Default: us-central1</small>
+            </label>
+            <label className="addAccField">
+              <span>Service Account JSON *</span>
+              <textarea
+                value={vertexServiceAccountJson}
+                onChange={(e) => setVertexServiceAccountJson(e.target.value)}
+                placeholder='Paste service account JSON key file content here...'
+                rows={6}
+              />
+              {errors.vertexServiceAccountJson && <small className="fieldError">{errors.vertexServiceAccountJson}</small>}
+              <small className="fieldHint">Paste the contents of your service account key JSON file, or upload below</small>
+            </label>
+            <label className="addAccField">
+              <span>Or upload JSON file</span>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                      const content = ev.target?.result;
+                      if (typeof content === "string") setVertexServiceAccountJson(content);
+                    };
+                    reader.readAsText(file);
+                  }
+                }}
+              />
+            </label>
+            {errors.submit && <div className="formNotice error">{errors.submit}</div>}
+            <button type="submit" className="primaryButton" disabled={submitting || !vertexProjectId.trim() || !vertexServiceAccountJson.trim()}>
+              {submitting ? "Connecting..." : "Add Vertex AI Account"}
+            </button>
+          </form>
+        )}
+
+        {/* No-Auth Form */}
+        {isNoAuth && (
+          <form className="addAccTabContent" onSubmit={(e) => void submitNoAuth(e)}>
+            <label className="addAccField">
+              <span>Display Name (optional)</span>
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`${providerDisplayName} account`} />
+            </label>
+            <label className="addAccField">
+              <span>Base URL *</span>
+              <input autoFocus value={noAuthBaseUrl} onChange={(e) => setNoAuthBaseUrl(e.target.value)} placeholder="https://api.example.com" />
+              {errors.noAuthBaseUrl && <small className="fieldError">{errors.noAuthBaseUrl}</small>}
+              <small className="fieldHint">The API base URL (no authentication required)</small>
+            </label>
+            {errors.submit && <div className="formNotice error">{errors.submit}</div>}
+            <button type="submit" className="primaryButton" disabled={submitting || !noAuthBaseUrl.trim()}>
+              {submitting ? "Connecting..." : "Add Account"}
+            </button>
+          </form>
+        )}
+
+        {/* Custom Provider Form */}
+        {isCustom && (
+          <form className="addAccTabContent" onSubmit={(e) => void submitCustom(e)}>
+            <label className="addAccField">
+              <span>Display Name *</span>
+              <input autoFocus value={customDisplayName} onChange={(e) => setCustomDisplayName(e.target.value)} placeholder="My Custom Provider" />
+              {errors.customDisplayName && <small className="fieldError">{errors.customDisplayName}</small>}
+            </label>
+            <label className="addAccField">
+              <span>Base URL *</span>
+              <input value={customBaseUrl} onChange={(e) => setCustomBaseUrl(e.target.value)} placeholder="https://api.example.com" />
+              {errors.customBaseUrl && <small className="fieldError">{errors.customBaseUrl}</small>}
+            </label>
+            <label className="addAccField">
+              <span>API Key (optional)</span>
+              <input type="password" value={customApiKey} onChange={(e) => setCustomApiKey(e.target.value)} placeholder="Enter API key if required" />
+            </label>
+            <label className="addAccField">
+              <span>Protocol</span>
+              <select value={customProtocol} onChange={(e) => setCustomProtocol(e.target.value as "openai_chat_completions" | "anthropic_messages")}>
+                <option value="openai_chat_completions">OpenAI Chat Completions</option>
+                <option value="anthropic_messages">Anthropic Messages</option>
+              </select>
+            </label>
+            {errors.submit && <div className="formNotice error">{errors.submit}</div>}
+            <button type="submit" className="primaryButton" disabled={submitting || !customDisplayName.trim() || !customBaseUrl.trim()}>
+              {submitting ? "Connecting..." : "Add Custom Provider"}
+            </button>
+          </form>
         )}
       </div>
     </div>
@@ -1893,13 +2271,27 @@ function ProviderDetail(props: {
 
         {props.accounts.length ? (
           <div className="connectionList">
-            {props.accounts.map((account, index) => (
+            {props.accounts.map((account, index) => {
+              const isUnhealthy = account.metadata?.healthCheckStatus === "unhealthy" || (account.status === "cooldown" && account.runtime.consecutiveFailures > 0);
+              const isExpired = account.runtime.lastError?.toLowerCase().includes("expired") || account.runtime.lastError?.toLowerCase().includes("token");
+              const healthTooltip = account.metadata?.healthCheckMessage ?? account.runtime.lastError ?? "";
+              return (
               <div className="connectionRow" key={account.id}>
                 <div className="connectionRowIndex">#{index + 1}</div>
                 <div>
                   <strong>{account.displayName}</strong>
                   <span>
                     <StatusBadge status={account.status} label={account.status} />
+                    {isUnhealthy && (
+                      <span className="healthBadge healthBadge--unhealthy" title={healthTooltip}>
+                        <AlertCircle size={12} /> unhealthy
+                      </span>
+                    )}
+                    {isExpired && !isUnhealthy && (
+                      <span className="healthBadge healthBadge--expired" title={healthTooltip}>
+                        <AlertCircle size={12} /> expired
+                      </span>
+                    )}
                     {account.runtime.totalRequests > 0 && <span className="connectionReqCount">{account.runtime.totalRequests.toLocaleString()} reqs</span>}
                   </span>
                 </div>
@@ -1912,7 +2304,8 @@ function ProviderDetail(props: {
                   <button className="iconButton danger" type="button" onClick={() => setDeleteCandidate(account)}><Trash2 size={16} /></button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="emptyConnections">
@@ -2053,6 +2446,7 @@ function ProviderDetail(props: {
       {addAccountModalOpen ? (
         <AddAccountModal
           providerType={props.provider.type}
+          providerTypeInfo={props.providerType}
           supportedModes={getSupportedCredentialModes(props.providerType)}
           api={props.api}
           onClose={() => setAddAccountModalOpen(false)}

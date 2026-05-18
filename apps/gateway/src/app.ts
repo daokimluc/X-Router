@@ -13,6 +13,7 @@ import { registerOAuthRoutes } from "./routes/oauth.js";
 import { registerOpenAIRoutes } from "./routes/openai.js";
 import { registerReadyzRoute } from "./routes/readyz.js";
 import { registerProviderAccountRoutes } from "./routes/providerAccounts.js";
+import { registerProviderAccountManagementRoutes } from "./routes/admin/providerAccounts.js";
 import { registerDashboardPlugin } from "./plugins/dashboard.js";
 import { redactObject } from "./utils/redaction.js";
 import { createDefaultProviderRegistry } from "./providers/registry/defaultRegistry.js";
@@ -298,6 +299,8 @@ export async function buildApp(
     persistenceService,
     configRevisionService,
   });
+
+  await registerProviderAccountManagementRoutes(app, config);
 
   // Register dashboard static serving AFTER all API routes to ensure API priority
   await registerDashboardPlugin(app);

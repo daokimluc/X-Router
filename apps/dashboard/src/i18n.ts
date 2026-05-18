@@ -303,6 +303,9 @@ const translations: Record<Lang, Record<string, string>> = {
     "prov.connections": "connections",
     "prov.models": "models",
     "prov.phaseLater": "Phase later",
+    "prov.category": "Category",
+    "prov.protocols": "Protocols",
+    "prov.noProviders": "No provider types registered. Start the gateway to load the provider catalog.",
 
     // Unified Providers / Provider Detail
     "prov.manageByProvider": "Manage account connections and available model IDs by provider.",
@@ -664,6 +667,9 @@ const translations: Record<Lang, Record<string, string>> = {
     "prov.connections": "kết nối",
     "prov.models": "model",
     "prov.phaseLater": "Giai đoạn sau",
+    "prov.category": "Danh mục",
+    "prov.protocols": "Giao thức",
+    "prov.noProviders": "Chưa có provider nào được đăng ký. Khởi động gateway để tải danh mục provider.",
 
     // Unified Providers / Provider Detail
     "prov.manageByProvider": "Quản lý kết nối account và model ID khả dụng theo provider.",

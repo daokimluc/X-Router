@@ -17,6 +17,8 @@ const AUTH_METHOD_TO_CREDENTIAL_MODE: Record<ProviderAuthMethod, CredentialMode 
   bearer_token: "api_key", // bearer_token uses same flow as api_key
   session_cookie: null, // not supported in add-account flow
   custom_json: null, // not supported in add-account flow
+  service_account: "api_key", // service account JSON provided like api_key
+  none: null, // no credentials required
 };
 
 /**

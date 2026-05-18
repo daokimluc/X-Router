@@ -15,6 +15,9 @@ import {
   exchangeOAuthCallbackAccount,
   getOAuthCallback
 } from "./oauth.js";
+import {
+  startOAuthPKCEFlow
+} from "../providers/adapters/oauth-pkce/OAuthPKCECallbackHandler.js";
 import type { ProviderAccount } from "../providers/base/ProviderAccount.js";
 import type { ProviderCapabilityFlag } from "../providers/base/ProviderCapabilities.js";
 import type { ProviderInstance } from "../providers/base/ProviderInstance.js";
@@ -177,6 +180,15 @@ const oauthPkceStartSchema = z.object({
   clientId: z.string().optional(),
   extraParams: z.record(z.string()).optional()
 });
+const oauthGenericStartSchema = z.object({
+  providerType: z.string().min(1),
+  displayName: z.string().min(1).optional(),
+  owner: z.string().min(1).optional(),
+  maxConcurrency: z.number().int().positive().default(5),
+  weight: z.number().int().positive().default(1),
+  allowedModels: z.array(z.string().min(1)).optional(),
+  tags: z.array(z.string().min(1)).optional()
+});
 const oauthManualCallbackSchema = z.object({
   state: z.string().min(1).optional(),
   callbackUrl: z.string().min(1)
@@ -269,6 +281,62 @@ export async function registerAdminRoutes(
           redirectUri: pending.redirectUri
         }
       };
+    }
+  );
+
+  // ============================================================================
+  // POST /admin/oauth/start — Generic OAuth PKCE flow start
+  // Accepts providerType, calls OAuthPKCEAdapter.startOAuthFlow(),
+  // stores pending session (state → codeVerifier mapping), returns authorizationUrl.
+  // Sessions expire after 10 minutes.
+  // ============================================================================
+  app.post(
+    "/admin/oauth/start",
+    {
+      preHandler: adminAuth
+    },
+    async (request, reply) => {
+      const body = oauthGenericStartSchema.parse(request.body);
+
+      try {
+        const result = startOAuthPKCEFlow(
+          body.providerType,
+          undefined, // oauthConfig looked up by providerType internally
+          {
+            displayName: body.displayName ?? `${body.providerType} account`,
+            owner: body.owner,
+            maxConcurrency: body.maxConcurrency,
+            weight: body.weight,
+            allowedModels: body.allowedModels,
+            tags: body.tags,
+          }
+        );
+
+        app.adminAuditService.record({
+          action: "oauth.generic_pkce_start",
+          actorKeyHash: request.adminAuth?.apiKeyHash,
+          targetType: "oauth_flow",
+          targetId: result.state
+        });
+
+        return {
+          data: {
+            authorizationUrl: result.authorizationUrl,
+            state: result.state,
+            providerType: body.providerType,
+            expiresIn: 600 // 10 minutes in seconds
+          }
+        };
+      } catch (error) {
+        reply.code(400);
+        return {
+          error: {
+            type: "invalid_request",
+            message: error instanceof Error ? error.message : "Failed to start OAuth flow",
+            code: "oauth_start_failed"
+          }
+        };
+      }
     }
   );
 

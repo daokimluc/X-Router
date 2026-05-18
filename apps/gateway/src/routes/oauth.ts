@@ -5,6 +5,10 @@ import type { ProviderAccount } from "../providers/base/ProviderAccount.js";
 import { applyKiroToken, KiroAuthClient } from "../providers/adapters/kiro/KiroAuthClient.js";
 import type { KiroCredentialPayload } from "../providers/adapters/kiro/kiroTypes.js";
 import type { OAuthSessionStore } from "../services/OAuthSessionStore.js";
+import {
+  isGenericOAuthPKCEState,
+  handleOAuthPKCECallback,
+} from "../providers/adapters/oauth-pkce/OAuthPKCECallbackHandler.js";
 
 export type OAuthCallbackRecord = {
   state: string;
@@ -80,6 +84,20 @@ export async function registerOAuthRoutes(
       if (session && session.status === "pending") {
         await completeOAuthSessionCallback(app, oauthSessionStore, session.id, parsed.code, token, query);
         record.accountCreated = true;
+      }
+    }
+
+    // Then check generic OAuth PKCE providers (Claude Code, GitHub Copilot, Cursor, Codex, Antigravity)
+    if (parsed.code && !parsed.error && !record.accountCreated) {
+      if (isGenericOAuthPKCEState(parsed.state)) {
+        const callbackResult = await handleOAuthPKCECallback(app, parsed.state, parsed.code);
+        if (callbackResult.success) {
+          record.accountId = callbackResult.accountId;
+          record.accountCreated = true;
+          record.tokenExchanged = true;
+        } else {
+          record.error = callbackResult.error;
+        }
       }
     }
 

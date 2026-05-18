@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { AppConfig } from "../config.js";
 import { NoAvailableAccountError } from "../account-pool/AccountPool.js";
 import { CircuitBreakerOpenError } from "../services/CircuitBreaker.js";
@@ -6,6 +6,7 @@ import { createAuthMiddleware } from "../middleware/auth.js";
 import { ProviderError } from "../providers/base/ProviderErrors.js";
 import { isProviderStream, writeOpenAIStream } from "../utils/sse.js";
 import { openAIChatCompletionRequestSchema } from "../validation/openaiSchemas.js";
+import type { ProviderProtocol } from "../providers/base/ProviderCapabilities.js";
 
 export async function registerOpenAIRoutes(
   app: FastifyInstance,
@@ -36,6 +37,14 @@ export async function registerOpenAIRoutes(
 
       try {
       const body = openAIChatCompletionRequestSchema.parse(request.body);
+
+      // Direct account routing: when x-provider-account-id header is present,
+      // route directly to the specified account's adapter
+      const directAccountId = request.headers["x-provider-account-id"];
+      if (typeof directAccountId === "string" && directAccountId.length > 0) {
+        const directResult = await handleDirectAccountRouting(app, request, reply, body, directAccountId, "openai_chat_completions");
+        return directResult;
+      }
 
       // Team enforcement: check allowedModels if key belongs to a team
       if (request.auth?.apiKeyHash) {
@@ -292,6 +301,91 @@ export async function registerOpenAIRoutes(
       }
     }
   );
+}
+
+/**
+ * Handle direct account routing when x-provider-account-id header is present.
+ * Looks up the account, validates protocol compatibility, and routes to the correct adapter.
+ * Credentials are injected into the adapter context without being exposed in logs or errors.
+ */
+async function handleDirectAccountRouting(
+  app: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  body: Record<string, unknown>,
+  accountId: string,
+  requiredProtocol: ProviderProtocol
+) {
+  // Lookup ProviderAccount by account ID
+  const account = app.providerRuntimeRegistry.getAccount(accountId);
+  if (!account) {
+    await reply.code(404).send({
+      error: {
+        type: "invalid_request_error",
+        message: `Provider account "${accountId}" not found`,
+        code: "account_not_found"
+      }
+    });
+    return reply;
+  }
+
+  // Determine adapter type from ProviderTypeDefinition
+  const definition = app.providerRegistry.getDefinition(account.providerType);
+
+  // Validate protocol compatibility
+  if (definition && !definition.supportedProtocols.includes(requiredProtocol)) {
+    await reply.code(400).send({
+      error: {
+        type: "invalid_request_error",
+        message: `Provider "${definition.displayName}" (type: ${account.providerType}) does not support protocol "${requiredProtocol}". Supported protocols: ${definition.supportedProtocols.join(", ")}`,
+        code: "protocol_not_supported"
+      }
+    });
+    return reply;
+  }
+
+  // Route to correct adapter instance via ProviderAdapterRegistry
+  const adapter = app.providerRegistry.getAdapter(account.providerType);
+
+  // Get provider instance for the account
+  const providerInstance = app.providerRuntimeRegistry.getProviderInstance(
+    account.providerInstanceId
+  );
+  if (!providerInstance) {
+    await reply.code(404).send({
+      error: {
+        type: "invalid_request_error",
+        message: `Provider instance for account "${accountId}" not found`,
+        code: "provider_instance_not_found"
+      }
+    });
+    return reply;
+  }
+
+  // Inject credentials into adapter context without exposing in logs/errors
+  const secret = app.secretService.getSecretForAccount(account.id);
+  const credentialPayload = secret
+    ? app.secretService.decryptSecretPayload(secret)
+    : {};
+
+  const response = await adapter.chatCompletions(body as any, {
+    providerInstance,
+    account,
+    requestId: request.id,
+    credentialPayload
+  });
+
+  if (isProviderStream(response)) {
+    await writeOpenAIStream({
+      reply,
+      stream: response,
+      model: (body as any).model ?? "unknown",
+      requestId: request.id
+    });
+    return reply;
+  }
+
+  return response;
 }
 
 function isRetryableProviderError(error: unknown): boolean {
