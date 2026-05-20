@@ -10,7 +10,7 @@ Connect **Claude Code, Cursor, Cline, Kiro, Windsurf, Codex, OpenClaw, Antigravi
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🏗️ Architecture](#️-architecture)
+[🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🎨 Media Providers](#-media-providers) • [🏗️ Architecture](#️-architecture)
 
 [🇻🇳 Tiếng Việt](docs/README.vi.md)
 
@@ -33,6 +33,8 @@ Stop wasting money, tokens and hitting limits:
 - ✅ **Multi-account pooling** — Round-robin between accounts per provider
 - ✅ **Auto fallback** — Route chains with priority order, zero downtime
 - ✅ **Full dashboard** — Real-time monitoring, account health, usage analytics
+- ✅ **Media Providers** — Image generation, TTS, STT, Embedding, Web Search via unified API
+- ✅ **Proxy Pools** — Route through SOCKS5/HTTP proxies or Vercel relay
 - ✅ **Universal** — Works with any OpenAI/Anthropic-compatible CLI tool
 - ✅ **Single process** — One command, one port, one container
 
@@ -50,21 +52,25 @@ Stop wasting money, tokens and hitting limits:
 │              AI Gateway (localhost:3100)          │
 │                                                  │
 │  • Dashboard UI at /                             │
-│  • API at /v1/chat/completions                   │
+│  • LLM:    /v1/chat/completions                  │
+│  • Image:  /v1/images/generations                │
+│  • TTS:    /v1/audio/speech                      │
+│  • STT:    /v1/audio/transcriptions              │
+│  • Embed:  /v1/embeddings                        │
+│  • Search: /v1/search                            │
+│  • Fetch:  /v1/web/fetch                         │
 │  • Token Saver (RTK: -60-90% input tokens)       │
-│  • Caveman Mode (-65% output tokens)             │
-│  • Format translation (OpenAI ↔ Anthropic)       │
 │  • Multi-account round-robin & load balancing    │
 │  • Circuit breaker & auto-cooldown               │
-│  • Request queue & backpressure                  │
+│  • Proxy pool routing (SOCKS5/HTTP/Vercel)       │
 └────────┬─────────────────────────────────────────┘
          │
          ├─→ Kiro AI (FREE Claude Sonnet 4.5)
          ├─→ Windsurf (FREE via Cascade)
+         ├─→ Codex / Antigravity (OAuth)
          ├─→ OpenAI / Anthropic / Gemini (API Key)
+         ├─→ Google TTS / Edge TTS (FREE, no key)
          └─→ Any OpenAI-compatible endpoint
-
-Result: Never stop coding. Minimal cost + massive token savings.
 ```
 
 ---
@@ -93,22 +99,20 @@ npm run build
 ### 3. Start Gateway
 
 ```bash
-# Set required environment variables
+# Linux/macOS
 export INTERNAL_API_KEYS="your-internal-key"
 export ADMIN_API_KEYS="your-admin-password"
-
-# Start (single process, single port)
 node bin/ai-gateway.js
 ```
 
-PowerShell (Windows):
 ```powershell
+# Windows PowerShell
 $env:INTERNAL_API_KEYS="your-internal-key"
 $env:ADMIN_API_KEYS="your-admin-password"
 node bin/ai-gateway.js
 ```
 
-- 🌐 Dashboard + API: `http://localhost:3100`
+- 🌐 Dashboard: `http://localhost:3100`
 - 🔌 API Endpoint: `http://localhost:3100/v1`
 - 🔑 Admin password: value of `ADMIN_API_KEYS`
 
@@ -126,8 +130,6 @@ Claude Code / Cursor / Cline Settings:
   Model:        strong (or: kiro-sonnet, coding, fast, balanced)
 ```
 
-That's it! Start coding with FREE AI models.
-
 ---
 
 ## 🐳 Docker
@@ -141,26 +143,82 @@ docker run -p 3100:3100 \
   ai-gateway
 ```
 
-Single container, single port. No docker-compose needed.
+---
+
+## 🎨 Media Providers
+
+AI Gateway routes media requests through the same multi-account pooling infrastructure as LLM chat.
+
+### Endpoints
+
+| Kind | Endpoint | Example Model |
+|------|----------|---------------|
+| Image Generation | `POST /v1/images/generations` | `cx/gpt-5.5-image` |
+| Text to Speech | `POST /v1/audio/speech` | `google-tts/en` |
+| Speech to Text | `POST /v1/audio/transcriptions` | `oa/whisper-1` |
+| Embedding | `POST /v1/embeddings` | `oa/text-embedding-3-small` |
+| Web Search | `POST /v1/search` | *(auto-select)* |
+| Web Fetch | `POST /v1/web/fetch` | *(auto-select)* |
+
+### Free Media Providers (no API key needed)
+
+| Provider | Kind | Notes |
+|----------|------|-------|
+| **Google TTS** | TTS | 58 languages, scrapes Google Translate |
+| **Edge TTS** | TTS | 400+ neural voices, scrapes Bing Translator |
+| **SearXNG** | Web Search | Self-hosted, no auth |
+
+### Quick Examples
+
+```bash
+# Image generation (Codex — requires ChatGPT Plus)
+curl -X POST http://localhost:3100/v1/images/generations \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"cx/gpt-5.5-image","prompt":"A cat wearing a hat","size":"1024x1024"}' \
+  --output image.png
+
+# TTS — Google (free, no API key needed)
+curl -X POST http://localhost:3100/v1/audio/speech \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"google-tts/vi","input":"Xin chào thế giới"}' \
+  --output speech.mp3
+
+# Embedding
+curl -X POST http://localhost:3100/v1/embeddings \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"oa/text-embedding-3-small","input":"Hello world"}'
+```
+
+📖 Full provider list: [docs/MEDIA_PROVIDERS.md](docs/MEDIA_PROVIDERS.md)
+
+---
+
+## 🔀 Proxy Pools
+
+Route requests through SOCKS5/HTTP proxies or Vercel relay to bypass IP-based rate limits.
+
+Dashboard → Proxy Pools → Add Pool → assign to provider accounts.
+
+📖 Details: [docs/PROXY_POOLS.md](docs/PROXY_POOLS.md)
 
 ---
 
 ## 🛠️ Supported CLI Tools
 
-AI Gateway works seamlessly with all major AI coding tools:
-
-| Tool | Status | Notes |
-|------|--------|-------|
-| Claude Code | ✅ | Full support |
-| Cursor IDE | ✅ | Full support |
-| Cline | ✅ | Full support |
-| Kiro IDE | ✅ | Full support |
-| Windsurf | ✅ | Full support |
-| OpenAI Codex | ✅ | Full support |
-| Antigravity | ✅ | Full support |
-| OpenClaw | ✅ | Full support |
-| Continue | ✅ | Full support |
-| Any OpenAI-compatible | ✅ | Just point endpoint |
+| Tool | Status |
+|------|--------|
+| Claude Code | ✅ |
+| Cursor IDE | ✅ |
+| Cline | ✅ |
+| Kiro IDE | ✅ |
+| Windsurf | ✅ |
+| OpenAI Codex | ✅ |
+| Antigravity | ✅ |
+| Continue | ✅ |
+| Any OpenAI-compatible | ✅ |
 
 ---
 
@@ -168,41 +226,40 @@ AI Gateway works seamlessly with all major AI coding tools:
 
 ### 🆓 Free Providers (Built-in Adapters)
 
-| Provider | Models | Auth Method |
-|----------|--------|-------------|
+| Provider | Models | Auth |
+|----------|--------|------|
 | **Kiro AI** | Claude Sonnet 4.5, GLM-5, MiniMax | OAuth / Local Import |
 | **Windsurf** | Claude Sonnet 4.6 Thinking | OAuth / Local Import |
+| **Codex** | GPT-5.x (ChatGPT Plus) | OAuth PKCE |
+| **Antigravity** | Gemini 3 Pro, Claude Sonnet 4.6 | OAuth PKCE |
+| **Google TTS** | 58 languages | None |
+| **Edge TTS** | 400+ neural voices | None |
 
-### 🔑 API Key Providers (Planned)
+### 🔑 API Key Providers
 
-| Provider | Status |
-|----------|--------|
-| OpenAI | Roadmap |
-| Anthropic | Roadmap |
-| Google Gemini | Roadmap |
-| DeepSeek | Roadmap |
-| OpenRouter | Roadmap |
-| Groq | Roadmap |
+OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek, Together, Fireworks, Nebius, ElevenLabs, Deepgram, AssemblyAI, Tavily, Brave, Serper, Exa, Firecrawl, Jina, Voyage AI, and 30+ more.
 
 ---
 
 ## 💡 Key Features
 
-| Feature | Description | Savings |
-|---------|-------------|---------|
-| 🚀 **Token Saver (RTK)** | Compress tool outputs (git diff, grep, ls, tree...) before sending to LLM | 60-90% fewer input tokens |
-| 🪨 **Caveman Mode** | Inject terse-mode system prompt → LLM replies concise | Up to 65% fewer output tokens |
-| 🔄 **Multi-Account Pool** | Round-robin, weighted, least-busy account selection per provider | Load balancing + redundancy |
-| 🎯 **Route Chains** | Priority-ordered model fallback | Zero downtime |
-| ⚡ **Circuit Breaker** | Per-provider failure detection, auto-cooldown, half-open recovery | Auto-healing |
-| 📊 **Real-Time Dashboard** | Provider health, request logs, usage analytics, audit trail | Full visibility |
-| 🔐 **API Key Management** | Per-key rate limits, team quotas, enable/disable | Access control |
-| 👥 **Teams & Quotas** | Group API keys, shared RPM/daily limits | Multi-tenant |
-| 🔄 **Auto Token Refresh** | Provider sessions refresh automatically | No manual re-login |
-| 📝 **Config Versioning** | Draft → Validate → Publish → Rollback | Safe changes |
-| 🌐 **Dual Protocol** | OpenAI `/v1/chat/completions` + Anthropic `/v1/messages` | Universal compatibility |
-| 🎨 **i18n Dashboard** | English + Vietnamese, switchable in real-time | Localized UX |
-| 📦 **Single Package** | One process, one port, one container | Simple deployment |
+| Feature | Description |
+|---------|-------------|
+| 🚀 **Token Saver (RTK)** | Compress tool outputs (git diff, grep, ls, tree...) — 60-90% fewer input tokens |
+| 🪨 **Caveman Mode** | Inject terse-mode system prompt — up to 65% fewer output tokens |
+| 🔄 **Multi-Account Pool** | Round-robin, weighted, least-busy account selection |
+| 🎯 **Route Chains** | Priority-ordered model fallback, zero downtime |
+| ⚡ **Circuit Breaker** | Per-provider failure detection, auto-cooldown |
+| 🎨 **Media Providers** | Image, TTS, STT, Embedding, Web Search via unified API |
+| 🔀 **Proxy Pools** | SOCKS5/HTTP/Vercel relay with health testing |
+| 📊 **Real-Time Dashboard** | Provider health, request logs, usage analytics |
+| 🔐 **API Key Management** | Per-key rate limits, team quotas |
+| 👥 **Teams & Quotas** | Group API keys, shared RPM/daily limits |
+| 🔄 **Auto Token Refresh** | Provider sessions refresh automatically |
+| 📝 **Config Versioning** | Draft → Validate → Publish → Rollback |
+| 🌐 **Dual Protocol** | OpenAI `/v1/chat/completions` + Anthropic `/v1/messages` |
+| 🎨 **i18n Dashboard** | English + Vietnamese |
+| 📦 **Single Package** | One process, one port, one container |
 
 ---
 
@@ -214,23 +271,18 @@ AI Gateway works seamlessly with all major AI coding tools:
 
 Dashboard → Providers → Select Provider → Add Account → "Nhập từ máy" tab → Click import
 
-Works for Kiro (reads `~/.aws/sso/cache/`) and Windsurf (reads local SQLite DB).
-
 **Method 2: Paste Token**
 
 Dashboard → Providers → Select Provider → Add Account → "Token / Key" tab
 
-For Windsurf: get token from [windsurf.com/show-auth-token](https://windsurf.com/show-auth-token)
+**Method 3: OAuth (Windsurf, Codex, Antigravity)**
 
-**Method 3: OAuth (Windsurf)**
-
-Dashboard → Providers → Windsurf → Add Account → "Ủy quyền OAuth" tab → Open browser → Login → Auto-created
+Dashboard → Providers → Select Provider → Add Account → "Ủy quyền OAuth" tab
 
 ### Creating Routes (Fallback Chains)
 
 Dashboard → Routes → Create Route → Add models in priority order
 
-Example:
 ```
 Route: "coding"
   1. kiro-sonnet        (free, primary)
@@ -239,59 +291,39 @@ Route: "coding"
 
 ### Available Model IDs
 
-Use these as `model` in your IDE configuration:
-
 | Model ID | Description |
 |----------|-------------|
-| `strong` | Best quality (routes to kiro-sonnet) |
-| `coding` | Optimized for code (kiro-sonnet → windsurf-sonnet fallback) |
-| `fast` | Fastest response (windsurf-sonnet → kiro-sonnet fallback) |
+| `strong` | Best quality |
+| `coding` | Optimized for code |
+| `fast` | Fastest response |
 | `balanced` | Balance of speed and quality |
-| `kiro-sonnet` | Direct to Kiro provider |
-| `windsurf-sonnet` | Direct to Windsurf provider |
-
-### Token Saver Configuration
-
-Dashboard → Endpoint → Token Saver section:
-- **Compress tool output (RTK)**: ON — saves 60-90% on git/grep/ls/tree outputs
-- **Compress LLM output (Caveman)**: Lite / Full / Ultra modes
-
-### API Keys & Teams
-
-Dashboard → Endpoint → API Keys → Create Key
-- Assign to teams for shared quotas
-- Set per-key RPM and daily limits
+| `kiro-sonnet` | Direct to Kiro |
+| `windsurf-sonnet` | Direct to Windsurf |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-ai-gateway/                    # Single package
-├── bin/
-│   └── ai-gateway.js         # CLI entry point (npx ai-gateway)
-├── dist/                      # Compiled gateway (TypeScript → JS)
-├── dashboard-dist/            # Pre-built React dashboard (static files)
+ai-gateway/
+├── bin/ai-gateway.js          # CLI entry point
 ├── apps/
-│   ├── gateway/               # Fastify API server source
-│   │   ├── src/
-│   │   │   ├── routes/        # Admin API + OAuth + Provider accounts
-│   │   │   ├── providers/     # Provider adapter system
-│   │   │   │   ├── adapters/
-│   │   │   │   │   ├── kiro/      # Kiro (OAuth + refresh token)
-│   │   │   │   │   └── windsurf/  # Windsurf (local LS + Cascade)
-│   │   │   │   └── registry/      # ProviderAdapterRegistry
-│   │   │   ├── plugins/      # Static file serving (dashboard)
-│   │   │   └── services/     # Secret, Audit, Persistence, RateLimit
-│   │   └── test/
-│   └── dashboard/             # React SPA source
-│       └── src/
-│           ├── App.tsx        # Main dashboard
-│           └── i18n.ts        # EN/VI translations
-├── scripts/
-│   └── build.mjs             # Build script (dashboard + gateway)
-├── Dockerfile                 # Multi-stage (3 stages, non-root user)
-└── package.json               # Single package config
+│   ├── gateway/src/
+│   │   ├── routes/            # LLM + Admin + OAuth routes
+│   │   ├── media/             # Media routing (image/tts/stt/embed/search)
+│   │   │   ├── MediaRouter.ts
+│   │   │   ├── handlers/      # Per-kind handlers (30+ provider formats)
+│   │   │   └── autoSyncMediaConfig.ts
+│   │   ├── proxy/             # Proxy pool service + ProxyAwareFetch
+│   │   ├── providers/         # Provider adapter system
+│   │   │   └── adapters/      # kiro, windsurf, codex, antigravity, github
+│   │   └── services/          # Secret, Audit, Persistence, RateLimit
+│   └── dashboard/src/
+│       ├── components/        # Provider catalog UI components
+│       ├── media/             # Per-kind provider pages
+│       └── providerCatalog.ts # 50+ provider definitions
+├── docs/                      # Documentation
+└── Dockerfile                 # Multi-stage, non-root user
 ```
 
 ### Tech Stack
@@ -299,44 +331,54 @@ ai-gateway/                    # Single package
 | Layer | Technology |
 |-------|-----------|
 | Runtime | Node.js 22+ / TypeScript 5.6 |
-| Gateway | Fastify 5 + @fastify/static |
+| Gateway | Fastify 5 |
 | Dashboard | React 19 + Vite 7 |
-| Static Serving | Dashboard built into gateway process |
 | Storage | JSON file persistence |
-| Auth | Bearer token + AES-256-GCM credential encryption |
+| Auth | Bearer token + AES-256-GCM encryption |
 | Streaming | Server-Sent Events (SSE) |
-| Container | node:22-alpine, non-root user, healthcheck |
+| Container | node:22-alpine, non-root user |
 
 ---
 
 ## 📝 API Reference
 
-### Chat Completions (OpenAI-compatible)
+### Chat Completions
 
 ```http
-POST http://localhost:3100/v1/chat/completions
-Authorization: Bearer <your-api-key>
-Content-Type: application/json
+POST /v1/chat/completions
+Authorization: Bearer <key>
 
-{
-  "model": "strong",
-  "messages": [
-    {"role": "user", "content": "Write a function to sort an array"}
-  ],
-  "stream": true
-}
+{"model": "strong", "messages": [{"role": "user", "content": "Hello"}], "stream": true}
 ```
 
-### List Models
+### Image Generation
 
 ```http
-GET http://localhost:3100/v1/models
-Authorization: Bearer <your-api-key>
+POST /v1/images/generations
+Authorization: Bearer <key>
+
+{"model": "cx/gpt-5.5-image", "prompt": "A cat", "size": "1024x1024"}
 ```
 
-### Admin API
+### Text to Speech
 
-Full admin API at `/admin/v1/*` — accessible from the Dashboard docs page.
+```http
+POST /v1/audio/speech
+Authorization: Bearer <key>
+
+{"model": "google-tts/en", "input": "Hello world"}
+```
+
+### Embedding
+
+```http
+POST /v1/embeddings
+Authorization: Bearer <key>
+
+{"model": "oa/text-embedding-3-small", "input": "Hello world"}
+```
+
+Full API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 
 ---
 
@@ -348,74 +390,62 @@ Usage: ai-gateway [options]
 Options:
   --port <number>  Port to listen on (default: 3100)
   --host <string>  Host to bind to (default: 0.0.0.0)
-  --help           Show help message
+  --help           Show help
 
-Environment Variables (required):
-  INTERNAL_API_KEYS   Comma-separated API keys for /v1 routes
-  ADMIN_API_KEYS      Comma-separated API keys for /admin routes
-
-Optional:
-  DATA_FILE           Path to state file (default: data/gateway-state.json)
-  NODE_ENV            development | production (default: development)
+Environment Variables:
+  INTERNAL_API_KEYS   API keys for /v1 routes (required)
+  ADMIN_API_KEYS      API keys for /admin routes (required)
+  DATA_FILE           State file path (default: data/gateway-state.json)
+  DASHBOARD_DIST      Override dashboard static files path
   LOG_LEVEL           info | debug | warn | error (default: info)
 ```
 
 ---
 
-## 🐛 Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| "invalid api key" on test | Token expired → Re-import from IDE or get new token |
-| "daily usage quota exhausted" | Account quota used up → Wait for reset or add another account |
-| "Kiro local token not found" | Login to Kiro IDE first, then retry import |
-| "Port 3100 is already in use" | Kill existing process or use `--port 3101` |
-| Rate limited | Add more accounts to the pool for round-robin |
-| Model ID not found | Use lowercase: `strong`, `coding`, `fast` (not `Strong`) |
-
----
-
 ## 🗺️ Roadmap
 
-- [x] Kiro provider adapter (OAuth + refresh token)
-- [x] Windsurf provider adapter (local LS + Cascade gRPC)
+- [x] Kiro / Windsurf / Codex / Antigravity provider adapters
 - [x] Multi-account pool with round-robin
 - [x] Route chains with fallback
-- [x] Token Saver (RTK compression)
-- [x] Caveman Mode (output compression)
+- [x] Token Saver (RTK) + Caveman Mode
 - [x] Dashboard with full admin control
-- [x] i18n (English + Vietnamese)
 - [x] API key management with team quotas
 - [x] Circuit breaker per provider
-- [x] Single package deployment (one port, one process)
-- [x] Multi-stage Dockerfile
-- [x] CLI entry point with flag parsing
-- [ ] OpenAI provider adapter
-- [ ] Anthropic provider adapter
-- [ ] OpenRouter provider adapter
-- [ ] Gemini provider adapter
-- [ ] Cloudflare Tunnel integration
+- [x] **Media Providers** — Image, TTS, STT, Embedding, Web Search, Web Fetch
+- [x] **Proxy Pools** — SOCKS5/HTTP/Vercel relay with health testing
+- [x] **50+ provider catalog** with auto-sync on startup
+- [x] Google TTS + Edge TTS (free, no API key)
+- [ ] Text to Video (Gemini Veo, Runway ML)
 - [ ] Docker Hub image
 - [ ] npm publish (npx ai-gateway)
 
 ---
 
+## 📚 Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [API Reference](docs/API_REFERENCE.md) | Full REST API docs |
+| [Media Providers](docs/MEDIA_PROVIDERS.md) | Image, TTS, STT, Embedding, Search |
+| [Proxy Pools](docs/PROXY_POOLS.md) | SOCKS5/HTTP/Vercel relay setup |
+| [Architecture](docs/ARCHITECTURE.md) | System design |
+| [Dashboard](docs/DASHBOARD.md) | Dashboard guide |
+| [Operations](docs/OPERATIONS.md) | Deployment & ops |
+
+---
+
 ## 🙏 Acknowledgments
 
-Built on the shoulders of giants:
-
-- [RTK](https://github.com/rtk-ai/rtk) — Rust token-saver. Gateway ports its compression pipeline to TypeScript → 60-90% fewer input tokens.
-- [Caveman](https://github.com/JuliusBrussee/caveman) by [@JuliusBrussee](https://github.com/JuliusBrussee) — "why use many token when few token do trick". Gateway adapts its prompt → up to 65% fewer output tokens.
-- [WindsurfAPI](https://github.com/dwgx/WindsurfAPI) — Reference implementation for Windsurf Cascade protocol. Windsurf adapter derived from this work (MIT).
+- [RTK](https://github.com/rtk-ai/rtk) — Token compression pipeline (60-90% fewer input tokens)
+- [Caveman](https://github.com/JuliusBrussee/caveman) — Terse output prompt (up to 65% fewer output tokens)
+- [WindsurfAPI](https://github.com/dwgx/WindsurfAPI) — Windsurf Cascade protocol reference
 
 ---
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE)
 
 ---
 
-<p align="center">
-  Built with ❤️ for developers who code 24/7
-</p>
+<p align="center">Built with ❤️ for developers who code 24/7</p>
