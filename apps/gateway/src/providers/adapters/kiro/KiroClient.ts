@@ -32,11 +32,10 @@ export class KiroClient {
       });
     }
 
-    const baseUrl =
-      options.config.baseUrl ??
-      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region, false);
+    const endpoints = options.config.baseUrl
+      ? [options.config.baseUrl]
+      : resolveKiroApiUrls(options.credential.apiRegion ?? options.credential.region);
     const path = options.config.chatCompletionsPath ?? "";
-    const url = new URL(path, baseUrl);
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), options.timeoutMs);
 
@@ -49,6 +48,7 @@ export class KiroClient {
       const requestBody = JSON.stringify(buildKiroPayload(options.request, options.credential));
 
       if (options.proxyOptions?.enabled) {
+        const url = new URL(path, endpoints[0]);
         const proxyResult = await proxyAwareFetch({
           url: url.toString(),
           method: "POST",
@@ -68,22 +68,39 @@ export class KiroClient {
         return parseKiroResponseFromBuffer(proxyResult.body, options.request.model);
       }
 
-      const response = await this.fetchImpl(url, {
-        method: "POST",
-        headers,
-        body: requestBody,
-        signal: abortController.signal
+      let lastError: ProviderError | undefined;
+      for (const endpoint of endpoints) {
+        const url = new URL(path, endpoint);
+        const response = await this.fetchImpl(url, {
+          method: "POST",
+          headers,
+          body: requestBody,
+          signal: abortController.signal
+        });
+
+        if (!response.ok) {
+          const error = await classifyKiroHttpError(response, options.instance);
+          // Retry on 400 (profileArn issues) or 403 (endpoint mismatch) with next endpoint
+          if ((response.status === 400 || response.status === 403) && endpoint !== endpoints[endpoints.length - 1]) {
+            lastError = error;
+            continue;
+          }
+          throw error;
+        }
+
+        if (shouldParseJsonResponse(response, options.config)) {
+          return (await response.json()) as KiroChatResponse;
+        }
+
+        return await parseKiroResponse(response, options.request.model);
+      }
+
+      throw lastError ?? new ProviderError({
+        code: "provider_unavailable",
+        message: "All Kiro endpoints failed",
+        retryable: true,
+        statusCode: 502
       });
-
-      if (!response.ok) {
-        throw await classifyKiroHttpError(response, options.instance);
-      }
-
-      if (shouldParseJsonResponse(response, options.config)) {
-        return (await response.json()) as KiroChatResponse;
-      }
-
-      return await parseKiroResponse(response, options.request.model);
     } catch (error) {
       if (error instanceof ProviderError) {
         throw error;
@@ -129,11 +146,10 @@ export class KiroClient {
       });
     }
 
-    const baseUrl =
-      options.config.baseUrl ??
-      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region, false);
+    const endpoints = options.config.baseUrl
+      ? [options.config.baseUrl]
+      : resolveKiroApiUrls(options.credential.apiRegion ?? options.credential.region);
     const path = options.config.chatCompletionsPath ?? "";
-    const url = new URL(path, baseUrl);
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), options.timeoutMs);
 
@@ -142,31 +158,49 @@ export class KiroClient {
       const headers = options.instance
         ? applyChannelOverrides({}, baseHeaders, options.instance).headers
         : baseHeaders;
-      const response = await this.fetchImpl(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(buildKiroPayload(options.request, options.credential)),
-        signal: abortController.signal
-      });
+      const requestBody = JSON.stringify(buildKiroPayload(options.request, options.credential));
 
-      if (!response.ok) {
-        throw await classifyKiroHttpError(response, options.instance);
-      }
-
-      if (!response.body) {
-        throw new ProviderError({
-          code: "provider_bad_response",
-          message: "Kiro returned an empty stream",
-          retryable: true,
-          statusCode: 502
+      let lastError: ProviderError | undefined;
+      for (const endpoint of endpoints) {
+        const url = new URL(path, endpoint);
+        const response = await this.fetchImpl(url, {
+          method: "POST",
+          headers,
+          body: requestBody,
+          signal: abortController.signal
         });
+
+        if (!response.ok) {
+          const error = await classifyKiroHttpError(response, options.instance);
+          if ((response.status === 400 || response.status === 403) && endpoint !== endpoints[endpoints.length - 1]) {
+            lastError = error;
+            continue;
+          }
+          throw error;
+        }
+
+        if (!response.body) {
+          throw new ProviderError({
+            code: "provider_bad_response",
+            message: "Kiro returned an empty stream",
+            retryable: true,
+            statusCode: 502
+          });
+        }
+
+        if (shouldUsePlainTextStream(response, options.config)) {
+          return plainTextStream(response.body, () => clearTimeout(timeout));
+        }
+
+        return kiroEventStream(response.body, () => clearTimeout(timeout));
       }
 
-      if (shouldUsePlainTextStream(response, options.config)) {
-        return plainTextStream(response.body, () => clearTimeout(timeout));
-      }
-
-      return kiroEventStream(response.body, () => clearTimeout(timeout));
+      throw lastError ?? new ProviderError({
+        code: "provider_unavailable",
+        message: "All Kiro endpoints failed",
+        retryable: true,
+        statusCode: 502
+      });
     } catch (error) {
       clearTimeout(timeout);
 
@@ -562,12 +596,16 @@ async function safeResponseText(response: Response): Promise<string> {
   }
 }
 
-function resolveKiroApiUrl(region?: string, hasProfileArn?: boolean): string {
+function resolveKiroApiUrls(region?: string): string[] {
   const r = region ?? "us-east-1";
-  if (hasProfileArn) {
-    return `https://q.${r}.amazonaws.com/generateAssistantResponse`;
-  }
-  return `https://codewhisperer.${r}.amazonaws.com/generateAssistantResponse`;
+  return [
+    `https://q.${r}.amazonaws.com/generateAssistantResponse`,
+    `https://codewhisperer.${r}.amazonaws.com/generateAssistantResponse`
+  ];
+}
+
+function resolveKiroApiUrl(region?: string, _hasProfileArn?: boolean): string {
+  return resolveKiroApiUrls(region)[0];
 }
 
 const KIRO_BUILDER_ID_PROFILE_ARN = "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX";

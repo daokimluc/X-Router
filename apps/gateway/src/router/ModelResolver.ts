@@ -45,7 +45,11 @@ export class ModelResolver {
     /** Optional priority lookup. Returns undefined for unknown instances; treated as 0. */
     private readonly getInstancePriority?: (providerInstanceId: string) => number | undefined,
     /** Optional group lookup (Phase 20c). Returns undefined → instance has no group. */
-    private readonly getInstanceGroup?: (providerInstanceId: string) => string | undefined
+    private readonly getInstanceGroup?: (providerInstanceId: string) => string | undefined,
+    /** Phase 30 — Optional per-channel modelMapping lookup. Returns alias→upstream map or undefined. */
+    private readonly getInstanceModelMapping?: (
+      providerInstanceId: string
+    ) => Record<string, string> | undefined
   ) {}
 
   resolve(
@@ -146,11 +150,14 @@ export class ModelResolver {
   }
 
   private toCandidate(mapping: ModelMapping): ResolvedModelCandidate {
+    // Phase 30 — per-channel modelMapping override
+    const channelMapping = this.getInstanceModelMapping?.(mapping.providerInstanceId);
+    const upstreamModel = channelMapping?.[mapping.publicModel] ?? mapping.upstreamModel;
     return {
       publicModel: mapping.publicModel,
       providerInstanceId: mapping.providerInstanceId,
       providerType: mapping.providerType,
-      upstreamModel: mapping.upstreamModel,
+      upstreamModel,
       capabilities: [...mapping.capabilities]
     };
   }

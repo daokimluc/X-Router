@@ -128,7 +128,7 @@ const cohere: ProviderTypeDefinition = {
   configSchema: {
     type: "object",
     properties: {
-      baseUrl: { type: "string", default: "https://api.cohere.com" },
+      baseUrl: { type: "string", default: "https://api.cohere.ai" },
       chatCompletionsPath: { type: "string", default: "/v1/chat/completions" },
       modelsPath: { type: "string", default: "/v1/models" },
     },
@@ -237,8 +237,8 @@ const deepseek: ProviderTypeDefinition = {
     type: "object",
     properties: {
       baseUrl: { type: "string", default: "https://api.deepseek.com" },
-      chatCompletionsPath: { type: "string", default: "/v1/chat/completions" },
-      modelsPath: { type: "string", default: "/v1/models" },
+      chatCompletionsPath: { type: "string", default: "/chat/completions" },
+      modelsPath: { type: "string", default: "/models" },
     },
   },
   credentialSchema: {
@@ -263,8 +263,8 @@ const groq: ProviderTypeDefinition = {
     type: "object",
     properties: {
       baseUrl: { type: "string", default: "https://api.groq.com" },
-      chatCompletionsPath: { type: "string", default: "/v1/chat/completions" },
-      modelsPath: { type: "string", default: "/v1/models" },
+      chatCompletionsPath: { type: "string", default: "/openai/v1/chat/completions" },
+      modelsPath: { type: "string", default: "/openai/v1/models" },
     },
   },
   credentialSchema: {
@@ -341,8 +341,8 @@ const fireworks: ProviderTypeDefinition = {
     type: "object",
     properties: {
       baseUrl: { type: "string", default: "https://api.fireworks.ai" },
-      chatCompletionsPath: { type: "string", default: "/v1/chat/completions" },
-      modelsPath: { type: "string", default: "/v1/models" },
+      chatCompletionsPath: { type: "string", default: "/inference/v1/chat/completions" },
+      modelsPath: { type: "string", default: "/inference/v1/models" },
     },
   },
   credentialSchema: {
@@ -794,10 +794,10 @@ const alibaba: ProviderTypeDefinition = {
   authMethods: ["api_key"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
-  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://dashscope.aliyuncs.com" }, chatCompletionsPath: { type: "string", default: "/compatible-mode/v1/chat/completions" }, modelsPath: { type: "string", default: "/compatible-mode/v1/models" } } },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://coding.dashscope.aliyuncs.com" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
   credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
   category: "api_key_cheap",
-  defaultBaseUrl: "https://dashscope.aliyuncs.com",
+  defaultBaseUrl: "https://coding.dashscope.aliyuncs.com",
 };
 
 const alibabaIntl: ProviderTypeDefinition = {
@@ -807,10 +807,10 @@ const alibabaIntl: ProviderTypeDefinition = {
   authMethods: ["api_key"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
-  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://dashscope-intl.aliyuncs.com" }, chatCompletionsPath: { type: "string", default: "/compatible-mode/v1/chat/completions" }, modelsPath: { type: "string", default: "/compatible-mode/v1/models" } } },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://coding-intl.dashscope.aliyuncs.com" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
   credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
   category: "api_key_cheap",
-  defaultBaseUrl: "https://dashscope-intl.aliyuncs.com",
+  defaultBaseUrl: "https://coding-intl.dashscope.aliyuncs.com",
 };
 
 const volcengineArk: ProviderTypeDefinition = {
@@ -820,7 +820,7 @@ const volcengineArk: ProviderTypeDefinition = {
   authMethods: ["api_key"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
-  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ark.cn-beijing.volces.com" }, chatCompletionsPath: { type: "string", default: "/api/v3/chat/completions" }, modelsPath: { type: "string", default: "/api/v3/models" } } },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ark.cn-beijing.volces.com" }, chatCompletionsPath: { type: "string", default: "/api/coding/v3/chat/completions" }, modelsPath: { type: "string", default: "/api/v3/models" } } },
   credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
   category: "api_key_cheap",
   defaultBaseUrl: "https://ark.cn-beijing.volces.com",
@@ -833,7 +833,7 @@ const byteplus: ProviderTypeDefinition = {
   authMethods: ["api_key"],
   supportedProtocols: ["openai_chat_completions"],
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
-  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ark.ap-southeast.bytepluses.com" }, chatCompletionsPath: { type: "string", default: "/api/v3/chat/completions" }, modelsPath: { type: "string", default: "/api/v3/models" } } },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://ark.ap-southeast.bytepluses.com" }, chatCompletionsPath: { type: "string", default: "/api/coding/v3/chat/completions" }, modelsPath: { type: "string", default: "/api/v3/models" } } },
   credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
   category: "api_key_cheap",
   defaultBaseUrl: "https://ark.ap-southeast.bytepluses.com",
@@ -960,6 +960,127 @@ const opencodeGo: ProviderTypeDefinition = {
 };
 
 // ============================================================================
+// Phase 4: Additional providers from 9router
+// ============================================================================
+
+const glmCoding: ProviderTypeDefinition = {
+  type: "glm_coding",
+  displayName: "GLM Coding (z.ai)",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://open.bigmodel.cn" }, chatCompletionsPath: { type: "string", default: "/api/coding/paas/v4/chat/completions" }, modelsPath: { type: "string", default: "/api/paas/v4/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://open.bigmodel.cn",
+};
+
+const minimaxAnthropic: ProviderTypeDefinition = {
+  type: "minimax_anthropic",
+  displayName: "MiniMax (Anthropic)",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.minimax.io" }, chatCompletionsPath: { type: "string", default: "/anthropic/v1/messages" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.minimax.io",
+};
+
+const gitlab: ProviderTypeDefinition = {
+  type: "gitlab",
+  displayName: "GitLab Duo",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://gitlab.com" }, chatCompletionsPath: { type: "string", default: "/api/v4/chat/completions" }, modelsPath: { type: "string", default: "/api/v4/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_premium",
+  defaultBaseUrl: "https://gitlab.com",
+};
+
+const codebuddy: ProviderTypeDefinition = {
+  type: "codebuddy",
+  displayName: "CodeBuddy (Tencent)",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://copilot.tencent.com" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://copilot.tencent.com",
+};
+
+const xiaomiMimo: ProviderTypeDefinition = {
+  type: "xiaomi_mimo",
+  displayName: "Xiaomi MiMo",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.xiaomimimo.com" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.xiaomimimo.com",
+};
+
+const nanobanana: ProviderTypeDefinition = {
+  type: "nanobanana",
+  displayName: "NanoBanana",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.nanobananaapi.ai" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.nanobananaapi.ai",
+};
+
+const qwen: ProviderTypeDefinition = {
+  type: "qwen",
+  displayName: "Qwen (Tongyi)",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key", "oauth"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming", "tool_calling"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://portal.qwen.ai" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://portal.qwen.ai",
+};
+
+const iflow: ProviderTypeDefinition = {
+  type: "iflow",
+  displayName: "iFlow",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key", "oauth"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://apis.iflow.cn" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://apis.iflow.cn",
+};
+
+const qoder: ProviderTypeDefinition = {
+  type: "qoder",
+  displayName: "Qoder",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["api_key", "oauth"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://api.qoder.com" }, chatCompletionsPath: { type: "string", default: "/v1/chat/completions" }, modelsPath: { type: "string", default: "/v1/models" } } },
+  credentialSchema: { type: "object", properties: { apiKey: { type: "string" } }, required: ["apiKey"] },
+  category: "api_key_cheap",
+  defaultBaseUrl: "https://api.qoder.com",
+};
+
+// ============================================================================
 // Custom Provider
 // ============================================================================
 
@@ -1048,6 +1169,17 @@ export const providerCatalog: ProviderTypeDefinition[] = [
   ollamaLocal,
   commandcode,
   opencodeGo,
+
+  // Phase 4: Additional from 9router
+  glmCoding,
+  minimaxAnthropic,
+  gitlab,
+  codebuddy,
+  xiaomiMimo,
+  nanobanana,
+  qwen,
+  iflow,
+  qoder,
 
   // Custom
   customProvider,

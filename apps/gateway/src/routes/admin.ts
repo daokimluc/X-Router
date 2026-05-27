@@ -47,6 +47,8 @@ const providerInstancePatchSchema = z.object({
   maxInputTokens: z.union([z.number().int().positive(), z.null()]).optional(),
   systemPromptOverride: z.union([z.string().max(8000), z.null()]).optional(),
   remark: z.union([z.string().max(500), z.null()]).optional(),
+  modelMapping: z.union([z.record(z.string()), z.null()]).optional(),
+  testModel: z.union([z.string().min(1).max(120), z.null()]).optional(),
   circuitBreaker: z
     .object({
       enabled: z.boolean(),
@@ -1174,6 +1176,8 @@ export async function registerAdminRoutes(
           maxInputTokens: patch.maxInputTokens === null ? undefined : patch.maxInputTokens,
           systemPromptOverride: patch.systemPromptOverride === null ? undefined : patch.systemPromptOverride,
           remark: patch.remark === null ? undefined : patch.remark,
+          modelMapping: patch.modelMapping === null ? undefined : patch.modelMapping,
+          testModel: patch.testModel === null ? undefined : patch.testModel,
           // circuitBreaker requires halfOpenMaxRequests; default to existing value or 1
           circuitBreaker: patch.circuitBreaker
             ? {
@@ -1535,6 +1539,195 @@ export async function registerAdminRoutes(
         totalRemovedModels: totalRemoved,
         totalErrors,
         results
+      };
+    }
+  );
+
+  // Phase 30 — Quick-create channel: atomic create instance + accounts + model mappings.
+  app.post(
+    "/admin/v1/channels/quick-create",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const schema = z.object({
+        // Basic
+        id: z.string().min(1).max(120),
+        type: z.string().min(1),
+        name: z.string().min(1).max(120),
+        baseUrl: z.string().url().optional(),
+        groupName: z.string().min(1).max(64).optional(),
+        tag: z.string().min(1).max(64).optional(),
+        priority: z.number().int().min(-1000).max(1000).optional(),
+        remark: z.string().max(500).optional(),
+        // Credentials — accept either single key or list
+        credentialType: z.enum([
+          "api_key",
+          "bearer_token",
+          "oauth",
+          "refresh_token",
+          "session_cookie",
+          "custom_json"
+        ]).default("api_key"),
+        keys: z.array(z.string().min(1)).min(1).max(50),
+        // Models
+        models: z.array(z.string().min(1)).min(1).max(200),
+        modelMapping: z.record(z.string()).optional(),
+        testModel: z.string().min(1).optional(),
+        // Advanced (optional)
+        maxInputTokens: z.number().int().positive().optional(),
+        systemPromptOverride: z.string().max(8000).optional(),
+        paramOverride: z.record(z.unknown()).optional(),
+        headerOverride: z.record(z.string()).optional(),
+        statusCodeMapping: z.record(z.enum(["retry", "disable", "passthrough"])).optional(),
+        autoBan: z.boolean().optional()
+      });
+      const body = schema.parse(request.body ?? {});
+
+      // Reject if id already taken
+      if (app.providerRuntimeRegistry.getProviderInstance(body.id)) {
+        return reply.code(409).send({
+          error: { type: "conflict", message: `Channel id "${body.id}" already exists`, code: "id_conflict" }
+        });
+      }
+
+      // Validate header override
+      if (body.headerOverride) {
+        const conflicts = validateHeaderOverride(body.headerOverride);
+        if (!conflicts.valid) {
+          return reply.code(400).send({
+            error: {
+              type: "validation_error",
+              message: `Reserved headers cannot be overridden: ${conflicts.reservedConflicts.join(", ")}`,
+              code: "reserved_header_override"
+            }
+          });
+        }
+      }
+      if (body.statusCodeMapping) {
+        for (const k of Object.keys(body.statusCodeMapping)) {
+          if (!isValidStatusCodeMappingKey(k)) {
+            return reply.code(400).send({
+              error: { type: "validation_error", message: `Invalid status code key: "${k}"`, code: "invalid_status_code_key" }
+            });
+          }
+        }
+      }
+
+      const now = new Date();
+      const instance: ProviderInstance = {
+        id: body.id,
+        type: body.type,
+        name: body.name,
+        enabled: true,
+        baseUrl: body.baseUrl,
+        priority: body.priority,
+        config: body.baseUrl ? { baseUrl: body.baseUrl } : {},
+        defaultTimeoutMs: 30000,
+        maxRetries: 1,
+        cooldownMs: 60000,
+        accountSelectionStrategy: "round_robin",
+        maxConcurrentRequests: 20,
+        maxConcurrentRequestsPerAccount: 3,
+        circuitBreaker: {
+          enabled: body.autoBan ?? true,
+          failureThreshold: 5,
+          cooldownMs: 60000,
+          halfOpenMaxRequests: 1
+        },
+        groupName: body.groupName,
+        tag: body.tag,
+        remark: body.remark,
+        modelMapping: body.modelMapping,
+        testModel: body.testModel,
+        maxInputTokens: body.maxInputTokens,
+        systemPromptOverride: body.systemPromptOverride,
+        paramOverride: body.paramOverride,
+        headerOverride: body.headerOverride,
+        statusCodeMapping: body.statusCodeMapping,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      app.providerRuntimeRegistry.registerProviderInstance(instance);
+      const accountPool = new AccountPool(
+        [],
+        createAccountSelectionStrategy(instance.accountSelectionStrategy)
+      );
+      app.providerRuntimeRegistry.registerAccountPool(instance.id, accountPool);
+
+      // Create N accounts (1 per key)
+      const createdAccountIds: string[] = [];
+      body.keys.forEach((key, index) => {
+        const accountId = `${instance.id}_acc_${index + 1}`;
+        const credentialRef = `${instance.id}_cred_${index + 1}`;
+        const account: ProviderAccount = {
+          id: accountId,
+          providerInstanceId: instance.id,
+          providerType: instance.type,
+          displayName: `${instance.name} key ${index + 1}`,
+          status: "active",
+          weight: 1,
+          maxConcurrency: 3,
+          credentialRef,
+          runtime: {
+            activeRequests: 0,
+            totalRequests: 0,
+            failedRequests: 0,
+            consecutiveFailures: 0
+          },
+          createdAt: now,
+          updatedAt: now
+        };
+        const credentialPayload: Record<string, unknown> =
+          body.credentialType === "api_key"
+            ? { apiKey: key }
+            : body.credentialType === "bearer_token"
+            ? { accessToken: key }
+            : body.credentialType === "refresh_token"
+            ? { refreshToken: key }
+            : { apiKey: key };
+        app.secretService.addCredentialPayload({
+          id: credentialRef,
+          accountId,
+          credentialType: body.credentialType,
+          credentialPayload
+        });
+        accountPool.addAccount(account);
+        createdAccountIds.push(accountId);
+      });
+
+      // Create N model mappings (1 per model in body.models)
+      const createdMappingIds: string[] = [];
+      for (const model of body.models) {
+        const mappingId = `${instance.id}_${model}`.replace(/[^a-z0-9_]+/gi, "_");
+        try {
+          app.modelRegistry.register({
+            id: mappingId,
+            publicModel: model,
+            providerInstanceId: instance.id,
+            providerType: instance.type,
+            upstreamModel: body.modelMapping?.[model] ?? model,
+            capabilities: ["chat"],
+            enabled: true
+          });
+          createdMappingIds.push(mappingId);
+        } catch {
+          // skip duplicates silently
+        }
+      }
+
+      app.adminAuditService.record({
+        action: "channel.quick_create",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: instance.id
+      });
+      await saveAdminRuntimeState(app);
+
+      return {
+        instance,
+        accounts: createdAccountIds,
+        models: createdMappingIds,
+        summary: `Created channel "${instance.id}" with ${createdAccountIds.length} key(s) and ${createdMappingIds.length} model(s).`
       };
     }
   );

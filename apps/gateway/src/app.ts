@@ -181,7 +181,8 @@ export async function buildApp(
     routingProfileRegistry,
     undefined,
     (id) => providerRuntimeRegistry.getProviderInstance(id)?.priority,
-    (id) => providerRuntimeRegistry.getProviderInstance(id)?.groupName
+    (id) => providerRuntimeRegistry.getProviderInstance(id)?.groupName,
+    (id) => providerRuntimeRegistry.getProviderInstance(id)?.modelMapping
   );
   const secretService =
     dependencies.secretService ??

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useLang } from "./i18n";
 import { TestAllResultsModal, type TestAllPayload } from "./components/TestAllResultsModal";
+import { ChannelWizardModal } from "./components/ChannelWizardModal";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -246,6 +247,8 @@ export function ProvidersPage(props: {
   // Phase 29 — admin tools
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
+  // Phase 30 — quick-create wizard
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Merge API provider types with static catalog
   const registeredTypes = new Set((props.providerTypes ?? []).map((p) => p.type));
@@ -468,6 +471,14 @@ export function ProvidersPage(props: {
           <p className="providersPageSubtitle">{t("prov.subtitle")}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            type="button"
+            className="primaryButton"
+            onClick={() => setWizardOpen(true)}
+            title="Quick add channel — single-form wizard with type, keys, models, overrides"
+          >
+            <Plus size={14} /> Quick add channel
+          </button>
           <button
             type="button"
             className={batchMode ? "primaryButton" : "ghostButton"}
@@ -768,6 +779,23 @@ export function ProvidersPage(props: {
       )}
       {testResult && (
         <TestAllResultsModal payload={testResult} onClose={() => setTestResult(null)} />
+      )}
+      {wizardOpen && props.api && (
+        <ChannelWizardModal
+          api={props.api}
+          providerTypes={(props.providerTypes ?? []).map((p) => ({
+            type: p.type,
+            displayName: p.displayName,
+            defaultBaseUrl: p.defaultBaseUrl
+          }))}
+          onClose={() => setWizardOpen(false)}
+          onSuccess={async (instanceId) => {
+            setWizardOpen(false);
+            setBulkResult(`✓ Created channel "${instanceId}"`);
+            window.setTimeout(() => setBulkResult(null), 4000);
+            await props.refresh?.();
+          }}
+        />
       )}
     </div>
   );

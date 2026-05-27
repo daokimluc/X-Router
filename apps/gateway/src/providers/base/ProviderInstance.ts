@@ -61,6 +61,10 @@ export type ProviderInstance = {
   upstreamBalance?: number;
   /** Phase 29 — when upstreamBalance was last refreshed. */
   upstreamBalanceUpdatedAt?: Date;
+  /** Phase 30 — per-channel alias→upstream mapping. Takes precedence over global ModelMapping.upstreamModel. */
+  modelMapping?: Record<string, string>;
+  /** Phase 30 — model used for health check / test endpoints; default lets adapter pick. */
+  testModel?: string;
 
   /** Array of media kinds this provider supports (e.g., embedding, tts, image) */
   serviceKinds?: MediaKind[];
