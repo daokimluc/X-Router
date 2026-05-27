@@ -74,6 +74,9 @@ import { ApiKeyEditModal, type ApiKeyForEdit } from "./components/ApiKeyEditModa
 import { ApiKeyExportModal } from "./components/ApiKeyExportModal";
 import { ChannelOverridesEditor } from "./components/ChannelOverridesEditor";
 import { CopyChannelModal } from "./components/CopyChannelModal";
+import { ApiInfoPanel } from "./components/ApiInfoPanel";
+import { UptimePanel } from "./components/UptimePanel";
+import { FaqPanel } from "./components/FaqPanel";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -980,7 +983,7 @@ function PageContent(props: {
     case "usage":
       return <UsagePage usage={props.data.usage} providerInstances={props.data.providerInstances} accounts={props.data.accounts} />;
     case "requests":
-      return <RequestLogs logs={props.data.requestLogs} api={props.api} refresh={props.refresh} />;
+      return <RequestLogs logs={props.data.requestLogs} apiKeys={props.data.apiKeys} api={props.api} refresh={props.refresh} />;
     case "audit":
       return <AuditLogs logs={props.data.auditLogs} />;
     case "settings":
@@ -1208,6 +1211,15 @@ function Overview({ data }: { data: DashboardData }) {
               </div>
             </div>
           </article>
+
+          {/* Phase 27 — API Info panel: clickable endpoints + speed test */}
+          <ApiInfoPanel />
+
+          {/* Phase 27 — Uptime panel: 24h hourly sparkline */}
+          <UptimePanel sparkData={sparkData} errorRate={errorRate} totalRequests={totalRequests} />
+
+          {/* Phase 27 — FAQ panel */}
+          <FaqPanel />
         </div>
       </div>
     </div>
@@ -5595,6 +5607,41 @@ function ApiKeysSection(props: {
                         </span>
                       )}
                     </small>
+                    {/* Phase 26 — Quota progress bars */}
+                    {(() => {
+                      const bars: React.ReactNode[] = [];
+                      const dr = key.limits?.dailyRequestQuota;
+                      const dt = key.limits?.dailyTokenQuota;
+                      if (dr && dr > 0) {
+                        const used = key.limits?.dailyRequests ?? 0;
+                        const pct = Math.min(100, Math.round((used / dr) * 100));
+                        const tone = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
+                        bars.push(
+                          <div key="dr" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: 11 }}>
+                            <span style={{ minWidth: 70, color: "var(--color-text-muted)" }}>Requests</span>
+                            <div style={{ flex: 1, height: 6, background: "var(--color-surface-2, #1f2937)", borderRadius: 3, overflow: "hidden", maxWidth: 200 }}>
+                              <div style={{ width: `${pct}%`, height: "100%", background: tone, transition: "width 0.3s" }} />
+                            </div>
+                            <span style={{ fontVariantNumeric: "tabular-nums", color: tone }}>{used}/{dr}</span>
+                          </div>
+                        );
+                      }
+                      if (dt && dt > 0) {
+                        const used = key.limits?.dailyTokens ?? 0;
+                        const pct = Math.min(100, Math.round((used / dt) * 100));
+                        const tone = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
+                        bars.push(
+                          <div key="dt" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: 11 }}>
+                            <span style={{ minWidth: 70, color: "var(--color-text-muted)" }}>Tokens</span>
+                            <div style={{ flex: 1, height: 6, background: "var(--color-surface-2, #1f2937)", borderRadius: 3, overflow: "hidden", maxWidth: 200 }}>
+                              <div style={{ width: `${pct}%`, height: "100%", background: tone, transition: "width 0.3s" }} />
+                            </div>
+                            <span style={{ fontVariantNumeric: "tabular-nums", color: tone }}>{(used / 1000).toFixed(1)}k/{(dt / 1000).toFixed(0)}k</span>
+                          </div>
+                        );
+                      }
+                      return bars.length > 0 ? bars : null;
+                    })()}
                   </div>
                   <div className="endpointKeyActions">
                     <button
@@ -6112,10 +6159,11 @@ function Playground(props: { models: ModelMapping[]; profiles: RoutingProfile[] 
   );
 }
 
-function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnType<typeof createApiClient>; refresh: () => Promise<void> }) {
+function RequestLogs({ logs, apiKeys, api, refresh }: { logs: RequestLog[]; apiKeys: ApiKey[]; api: ReturnType<typeof createApiClient>; refresh: () => Promise<void> }) {
   const { t } = useLang();
   const [filter, setFilter] = useState<"all" | "success" | "error">("all");
   const [methodFilter, setMethodFilter] = useState<string>("all");
+  const [tokenFilter, setTokenFilter] = useState<string>("all"); // Phase 26 — filter by API key
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -6146,6 +6194,7 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
     if (filter === "success") result = result.filter((l) => l.statusCode < 400);
     if (filter === "error") result = result.filter((l) => l.statusCode >= 400);
     if (methodFilter !== "all") result = result.filter((l) => l.method === methodFilter);
+    if (tokenFilter !== "all") result = result.filter((l) => l.apiKeyHash === tokenFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((l) =>
@@ -6156,7 +6205,7 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
       );
     }
     return result;
-  }, [logs, filter, methodFilter, search]);
+  }, [logs, filter, methodFilter, tokenFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
   const paginated = useMemo(() => {
@@ -6165,7 +6214,7 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
   }, [filtered, page]);
 
   // Reset page when filter changes
-  useEffect(() => { setPage(1); }, [filter, methodFilter, search]);
+  useEffect(() => { setPage(1); }, [filter, methodFilter, tokenFilter, search]);
 
   const stats = useMemo(() => {
     const total = logs.length;
@@ -6256,6 +6305,19 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
         <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)} style={{ padding: "4px 8px", fontSize: 12 }}>
           <option value="all">All methods</option>
           {allMethods.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select
+          value={tokenFilter}
+          onChange={(e) => setTokenFilter(e.target.value)}
+          style={{ padding: "4px 8px", fontSize: 12, maxWidth: 180 }}
+          title="Filter by API key"
+        >
+          <option value="all">All keys</option>
+          {apiKeys.map((k) => (
+            <option key={k.id} value={k.keyHash}>
+              {k.owner ?? k.id} ({k.keyHash.slice(0, 8)})
+            </option>
+          ))}
         </select>
         <input
           className="rlSearchInput"
@@ -6512,7 +6574,7 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
   const [revisions, setRevisions] = useState<ConfigRevision[]>([]);
   const [draft, setDraft] = useState("{\n  \"routingMode\": \"default\"\n}");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<"general" | "config" | "revisions">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "rateLimit" | "webhooks" | "config" | "revisions">("general");
   const [runtimeSettings, setRuntimeSettings] = useState<{ requestQueue: boolean; autoPersist: boolean; circuitBreaker: boolean }>({
     requestQueue: false,
     autoPersist: true,
@@ -6637,6 +6699,8 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
       {/* Tabs */}
       <div className="segmentedControl" style={{ alignSelf: "flex-start" }}>
         <button className={`segmentedItem ${activeTab === "general" ? "active" : ""}`} onClick={() => setActiveTab("general")}>{t("settings.general")}</button>
+        <button className={`segmentedItem ${activeTab === "rateLimit" ? "active" : ""}`} onClick={() => setActiveTab("rateLimit")}>Rate limits</button>
+        <button className={`segmentedItem ${activeTab === "webhooks" ? "active" : ""}`} onClick={() => setActiveTab("webhooks")}>Webhooks</button>
         <button className={`segmentedItem ${activeTab === "config" ? "active" : ""}`} onClick={() => setActiveTab("config")}>{t("settings.configuration")}</button>
         <button className={`segmentedItem ${activeTab === "revisions" ? "active" : ""}`} onClick={() => setActiveTab("revisions")}>{t("settings.revisions")} ({revisions.length})</button>
       </div>
@@ -6788,8 +6852,71 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
               </button>
             </div>
           </article>
+        </div>
+      )}
 
-          {/* Webhook Notifications */}
+      {/* Phase 28 — Rate limits tab */}
+      {activeTab === "rateLimit" && (
+        <div className="settingsGrid">
+          <article className="endpointCard">
+            <header className="endpointCardHeader">
+              <Gauge size={18} />
+              <h2>Default per-key rate limits</h2>
+            </header>
+            <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)", margin: 0 }}>
+                These are the gateway defaults. Per-key limits set on individual API keys override these.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <div style={{ padding: "10px 12px", border: "1px solid var(--color-border)", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--color-text-muted)", letterSpacing: 0.5 }}>Requests / minute</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
+                    {String((current.internalRateLimitPerMinute as number | undefined) ?? "—")}
+                  </div>
+                </div>
+                <div style={{ padding: "10px 12px", border: "1px solid var(--color-border)", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--color-text-muted)", letterSpacing: 0.5 }}>Daily request quota</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
+                    {String((current.internalDailyRequestQuota as number | undefined) ?? "—")}
+                  </div>
+                </div>
+                <div style={{ padding: "10px 12px", border: "1px solid var(--color-border)", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--color-text-muted)", letterSpacing: 0.5 }}>Daily token quota</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
+                    {String((current.internalDailyTokenQuota as number | undefined) ?? "—")}
+                  </div>
+                </div>
+              </div>
+              <small style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+                Defaults are loaded from environment variables: <code>RATE_LIMIT_PER_MIN</code>, <code>DAILY_REQUEST_QUOTA</code>, <code>DAILY_TOKEN_QUOTA</code>. Restart the gateway to apply changes.
+              </small>
+            </div>
+          </article>
+
+          <article className="endpointCard">
+            <header className="endpointCardHeader">
+              <Shield size={18} />
+              <h2>Rate limit responses</h2>
+            </header>
+            <div style={{ padding: "12px 16px", fontSize: 13, lineHeight: 1.6 }}>
+              <p>
+                When a key exceeds its limits, the gateway responds with:
+              </p>
+              <ul style={{ marginLeft: 20, marginTop: 8 }}>
+                <li><code>HTTP 429</code> with <code>code: rate_limit_exceeded</code></li>
+                <li><code>code: token_quota_exhausted</code> for daily token limit</li>
+                <li><code>code: daily_quota_exceeded</code> for daily request count</li>
+                <li><code>HTTP 402 balance_exhausted</code> when balance reaches 0</li>
+                <li><code>HTTP 401 token_expired</code> when expiresAt has passed</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      )}
+
+      {/* Phase 28 — Webhooks tab */}
+      {activeTab === "webhooks" && (
+        <div className="settingsGrid">
           <WebhookConfigCard api={api} />
         </div>
       )}

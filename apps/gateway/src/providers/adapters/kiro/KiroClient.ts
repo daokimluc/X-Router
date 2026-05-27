@@ -49,7 +49,9 @@ export class KiroClient {
         "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
         "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
         "amz-sdk-request": "attempt=1; max=3",
-        "x-request-id": options.requestId
+        "x-request-id": options.requestId,
+        ...((options.credential.authMethod as string) === "api_key" || (options.credential as Record<string, unknown>).kiroApiKey
+          ? { tokentype: "API_KEY" } : {})
       };
       // Phase 24 — header-only overrides for Kiro (AWS event-stream body has fixed shape)
       const headers = options.instance
@@ -155,7 +157,9 @@ export class KiroClient {
         "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
         "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
         "amz-sdk-request": "attempt=1; max=3",
-        "x-request-id": options.requestId
+        "x-request-id": options.requestId,
+        ...((options.credential.authMethod as string) === "api_key" || (options.credential as Record<string, unknown>).kiroApiKey
+          ? { tokentype: "API_KEY" } : {})
       };
       const headers = options.instance
         ? applyChannelOverrides({}, baseHeaders, options.instance).headers

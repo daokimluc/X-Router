@@ -1359,12 +1359,13 @@ export async function registerAdminRoutes(
         updatedAt: now
       };
 
-      // Auto-refresh Kiro token when adding with refreshToken
+      // Auto-refresh Kiro token when adding with refreshToken (skip for api_key auth)
       let finalCredentialPayload = body.credentialPayload;
       const effectiveType = body.providerType ?? providerInstance.type;
-      if (effectiveType === "kiro" && body.credentialPayload.refreshToken && typeof body.credentialPayload.refreshToken === "string") {
+      const kiroCredential = body.credentialPayload as Record<string, unknown>;
+      const isApiKeyAuth = kiroCredential.authMethod === "api_key" || kiroCredential.kiroApiKey;
+      if (effectiveType === "kiro" && !isApiKeyAuth && body.credentialPayload.refreshToken && typeof body.credentialPayload.refreshToken === "string") {
         try {
-          const kiroCredential = body.credentialPayload as Record<string, unknown>;
           const token = await new KiroAuthClient().refreshToken({
             refreshToken: kiroCredential.refreshToken as string,
             clientId: kiroCredential.clientId as string | undefined,
@@ -1383,6 +1384,13 @@ export async function registerAdminRoutes(
         } catch {
           // If refresh fails, store as-is — user can refresh later
         }
+      }
+      // For API key auth, set accessToken = kiroApiKey for direct use
+      if (effectiveType === "kiro" && isApiKeyAuth && kiroCredential.kiroApiKey) {
+        finalCredentialPayload = {
+          ...kiroCredential,
+          accessToken: kiroCredential.kiroApiKey as string
+        };
       }
 
       app.secretService.addCredentialPayload({
