@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { useLang } from "./i18n";
+import { TestAllResultsModal, type TestAllPayload } from "./components/TestAllResultsModal";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -214,7 +215,9 @@ export function ProvidersPage(props: {
   const { t } = useLang();
   const [search, setSearch] = useState("");
   const [showAllApikey, setShowAllApikey] = useState(false);
-  const [testingMode, setTestingMode] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestAllPayload | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
   const [customProviderModal, setCustomProviderModal] = useState<"openai" | "anthropic" | null>(null);
 
   // Merge API provider types with static catalog
@@ -299,10 +302,19 @@ export function ProvidersPage(props: {
   const isSearching = !!search.trim();
   const hasAnyResult = AUTH_GROUP_ORDER.some((g) => (grouped.get(g) ?? []).length > 0);
 
-  const handleBatchTest = async (mode: AuthGroup) => {
-    if (testingMode) return;
-    setTestingMode(mode);
-    setTimeout(() => setTestingMode(null), 2000);
+  const handleTestAll = async () => {
+    if (testing || !props.api) return;
+    setTesting(true);
+    setTestError(null);
+    try {
+      const payload = await props.api.post("/admin/v1/test-all", {}) as TestAllPayload;
+      setTestResult(payload);
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : "Test failed");
+      window.setTimeout(() => setTestError(null), 5000);
+    } finally {
+      setTesting(false);
+    }
   };
 
   if (allProviders.length === 0 && (props.providerTypes ?? []).length === 0) {
@@ -327,19 +339,31 @@ export function ProvidersPage(props: {
           <h2 className="providersPageTitle">{t("prov.title")}</h2>
           <p className="providersPageSubtitle">{t("prov.subtitle")}</p>
         </div>
-        <div className="providersSearchWrap">
-          <Search size={16} />
-          <input
-            className="providersSearchInput"
-            placeholder={t("prov.searchPlaceholder") ?? "Search providers..."}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <button className="providersSearchClear" onClick={() => setSearch("")} aria-label="Clear search">
-              <X size={14} />
-            </button>
-          )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            type="button"
+            className="primaryButton"
+            onClick={() => void handleTestAll()}
+            disabled={testing}
+            title={t("prov.testAllConnections")}
+          >
+            <Play size={14} />
+            {testing ? t("prov.testing") : t("prov.testAllConnections")}
+          </button>
+          <div className="providersSearchWrap">
+            <Search size={16} />
+            <input
+              className="providersSearchInput"
+              placeholder={t("prov.searchPlaceholder") ?? "Search providers..."}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button className="providersSearchClear" onClick={() => setSearch("")} aria-label="Clear search">
+                <X size={14} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -383,17 +407,6 @@ export function ProvidersPage(props: {
                       <Plus size={14} /> Add OpenAI Compatible
                     </button>
                   </div>
-                )}
-                {groupKey !== "custom" && (
-                  <button
-                    className={`providerTestAllBtn ${testingMode === groupKey ? "providerTestAllBtn--active" : ""}`}
-                    onClick={() => void handleBatchTest(groupKey)}
-                    disabled={!!testingMode}
-                    title={`Test all ${AUTH_GROUP_LABELS[groupKey]} connections`}
-                  >
-                    <Play size={12} />
-                    {testingMode === groupKey ? "Testing..." : "Test All"}
-                  </button>
                 )}
               </div>
             </div>
@@ -439,6 +452,27 @@ export function ProvidersPage(props: {
             void props.refresh?.();
           }}
         />
+      )}
+      {testError && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "10px 16px",
+            background: "#ef4444",
+            color: "white",
+            borderRadius: 8,
+            fontSize: 13,
+            zIndex: 1000,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          }}
+        >
+          {testError}
+        </div>
+      )}
+      {testResult && (
+        <TestAllResultsModal payload={testResult} onClose={() => setTestResult(null)} />
       )}
     </div>
   );

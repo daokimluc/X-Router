@@ -3,7 +3,7 @@ import { buildApp } from "../app.js";
 import { testConfig } from "./helpers.js";
 
 describe("GET /", () => {
-  it("attempts to serve dashboard index.html (404 when dashboard-dist is missing)", async () => {
+  it("serves the dashboard index.html", async () => {
     const app = await buildApp(testConfig());
 
     const response = await app.inject({
@@ -11,10 +11,10 @@ describe("GET /", () => {
       url: "/"
     });
 
-    // In test environment without dashboard-dist/, the static plugin
-    // cannot find index.html so the not-found handler serves 404.
-    // In production with dashboard-dist/ present, this would return 200 with index.html.
-    expect(response.statusCode).toBe(404);
+    // dashboard-dist/index.html is committed, so the static plugin
+    // serves it on root requests.
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/text\/html/);
 
     await app.close();
   });

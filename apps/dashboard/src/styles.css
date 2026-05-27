@@ -5101,6 +5101,12 @@ img.providerCard2Logo {
   margin-left: 6px;
 }
 
+.endpointKeyQuotaExhausted {
+  display: inline-block;
+  font-weight: 600;
+  color: var(--color-danger, #dc2626);
+}
+
 /* ─── Key buttons + edit form ───────────────────────────── */
 
 .endpointKeyBtn {
@@ -7259,4 +7265,26 @@ code.ovInfoValue {
 .langToggle:hover {
   border-color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+}
+
+.balanceBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  background: var(--color-surface-2, #1f2937);
+  color: var(--color-text, #e5e7eb);
+  border: 1px solid var(--color-border, #374151);
+  margin-left: 6px;
+  font-weight: 500;
+}
+.balanceBadge[data-tone="low"] {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.balanceBadge[data-tone="unlimited"] {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.4);
 }

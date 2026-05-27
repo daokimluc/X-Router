@@ -29,6 +29,8 @@ export type UsageRecord = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cachedTokens?: number;
+  estimatedCost?: number;
   createdAt: string;
 };
 
@@ -59,10 +61,13 @@ const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   "deepseek-v4": { input: 0.27, output: 1.1 },
 };
 
-function estimateCost(model: string, promptTokens: number, completionTokens: number) {
-  const costs = MODEL_COSTS[model] ?? { input: 3.0, output: 15.0 };
-  const inputCost = (promptTokens / 1_000_000) * costs.input;
-  const outputCost = (completionTokens / 1_000_000) * costs.output;
+function estimateCost(record: Pick<UsageRecord, "model" | "promptTokens" | "completionTokens" | "estimatedCost">) {
+  if (typeof record.estimatedCost === "number") {
+    return { inputCost: 0, outputCost: 0, totalCost: record.estimatedCost };
+  }
+  const costs = MODEL_COSTS[record.model] ?? { input: 3.0, output: 15.0 };
+  const inputCost = (record.promptTokens / 1_000_000) * costs.input;
+  const outputCost = (record.completionTokens / 1_000_000) * costs.output;
   return { inputCost, outputCost, totalCost: inputCost + outputCost };
 }
 
@@ -169,7 +174,7 @@ export function UsagePage(props: {
       requests++;
       inputTokens += r.promptTokens;
       outputTokens += r.completionTokens;
-      totalCost += estimateCost(r.model, r.promptTokens, r.completionTokens).totalCost;
+      totalCost += estimateCost(r).totalCost;
     }
     return { requests, inputTokens, outputTokens, totalCost };
   }, [filtered]);
@@ -183,7 +188,7 @@ export function UsagePage(props: {
     }>();
     for (const r of filtered) {
       const existing = map.get(r.model);
-      const cost = estimateCost(r.model, r.promptTokens, r.completionTokens);
+      const cost = estimateCost(r);
       if (existing) {
         existing.requests++;
         existing.inputTokens += r.promptTokens;
@@ -580,7 +585,7 @@ function UsageChart(props: { records: UsageRecord[]; mode: MetricMode; range: Ti
       const day = new Date(r.createdAt).toISOString().slice(0, 10);
       const val = mode === "tokens"
         ? r.promptTokens + r.completionTokens
-        : estimateCost(r.model, r.promptTokens, r.completionTokens).totalCost;
+        : estimateCost(r).totalCost;
       dayMap.set(day, (dayMap.get(day) ?? 0) + val);
     }
     const days = Math.max(Math.ceil(getTimeRangeMs(range) / 86_400_000), 1);

@@ -65,6 +65,10 @@ import { useLang } from "./i18n";
 import { getKnownModels } from "./providerModels";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { QuickSetupWizard } from "./components/QuickSetupWizard";
+import { TopupModal } from "./components/TopupModal";
+import { ModelPricingSection } from "./components/ModelPricingSection";
+import { TestAllResultsModal, type TestAllPayload } from "./components/TestAllResultsModal";
+import { SyncModelsModal } from "./components/SyncModelsModal";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -245,6 +249,7 @@ type ApiKey = {
   keyHash: string;
   enabled: boolean;
   owner?: string;
+  balance?: number; // undefined = unlimited (no balance tracking)
   createdAt?: string;
   limits?: {
     minuteRequests: number;
@@ -2287,6 +2292,8 @@ function ProviderDetail(props: {
   const [deleteCandidate, setDeleteCandidate] = useState<Account | null>(null);
   const [deleteModelCandidate, setDeleteModelCandidate] = useState<ModelMapping | null>(null);
   const [editAccountCandidate, setEditAccountCandidate] = useState<Account | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
   const [oauthLaunch, setOAuthLaunch] = useState<{
     state: string;
     authorizationUrl: string;
@@ -2836,6 +2843,18 @@ function ProviderDetail(props: {
         <div className="providerSectionHeader">
           <h3>{t("prov.availableModels")}</h3>
           <div className="connectionControls">
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={() => setSyncOpen(true)}
+              disabled={
+                props.instances.length === 0 ||
+                props.accounts.filter((a) => a.status === "active").length === 0
+              }
+              title={t("prov.syncModels")}
+            >
+              <RefreshCw size={16} /> {t("prov.syncModels")}
+            </button>
             <button className="secondaryButton" type="button" onClick={() => setModelModalOpen(true)}><Plus size={16} /> {t("prov.addModel")}</button>
             <button className="secondaryButton" type="button" onClick={() => void disableAllModels()}><XCircle size={16} /> {t("prov.disableAll")}</button>
           </div>
@@ -3019,6 +3038,39 @@ function ProviderDetail(props: {
           }}
         />
       ) : null}
+
+      {syncOpen && props.instances[0] && (
+        <SyncModelsModal
+          api={props.api}
+          providerInstanceId={props.instances[0].id}
+          providerInstanceName={props.instances[0].name ?? props.instances[0].id}
+          onClose={() => setSyncOpen(false)}
+          onApplied={async (n) => {
+            setSyncOpen(false);
+            setSyncToast(t("prov.syncDone").replace("{n}", String(n)));
+            window.setTimeout(() => setSyncToast(null), 4000);
+            await props.refresh();
+          }}
+        />
+      )}
+      {syncToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "10px 16px",
+            background: "#10b981",
+            color: "white",
+            borderRadius: 8,
+            fontSize: 13,
+            zIndex: 1000,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          }}
+        >
+          {syncToast}
+        </div>
+      )}
     </div>
   );
 }
@@ -3927,6 +3979,9 @@ function ModelRegistry(props: {
 
       {/* Model Aliases */}
       <ModelAliasesSection api={props.api} />
+
+      {/* Model Pricing */}
+      <ModelPricingSection api={props.api} />
     </div>
   );
 }
@@ -4781,6 +4836,13 @@ function TokenSaverSection(props: {
   );
 }
 
+function formatBalance(balance: number | undefined): { text: string; tone: "ok" | "low" | "unlimited" } {
+  if (balance === undefined) return { text: "∞", tone: "unlimited" };
+  if (balance === 0) return { text: "$0.00", tone: "low" };
+  if (balance < 1) return { text: `$${balance.toFixed(4)}`, tone: balance < 0.1 ? "low" : "ok" };
+  return { text: `$${balance.toFixed(2)}`, tone: "ok" };
+}
+
 function ApiKeysSection(props: {
   keys: ApiKey[];
   api: ReturnType<typeof createApiClient>;
@@ -4807,6 +4869,8 @@ function ApiKeysSection(props: {
   const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null);
   const [revealedKeyValue, setRevealedKeyValue] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ApiKey | null>(null);
+  const [topupTarget, setTopupTarget] = useState<ApiKey | null>(null);
+  const [topupToast, setTopupToast] = useState<string | null>(null);
 
   // Load teams for dropdown
   useEffect(() => {
@@ -5121,6 +5185,18 @@ function ApiKeysSection(props: {
                           {teams.find((t) => t.id === (key as unknown as { teamId?: string }).teamId)?.name ?? "team"}
                         </span>
                       )}
+                      {(() => {
+                        const b = formatBalance(key.balance);
+                        return (
+                          <span
+                            className="balanceBadge"
+                            data-tone={b.tone}
+                            title={b.tone === "unlimited" ? t("apikey.unlimited") : t("apikey.balance")}
+                          >
+                            {b.text}
+                          </span>
+                        );
+                      })()}
                     </strong>
                     {revealedKeyId === key.id && revealedKeyValue ? (
                       <code className="endpointKeyRevealed">{revealedKeyValue}</code>
@@ -5163,6 +5239,14 @@ function ApiKeysSection(props: {
                     >
                       {t("common.edit")}
                     </button>
+                    <button
+                      type="button"
+                      className="iconButton compact"
+                      title={t("apikey.topup")}
+                      onClick={() => setTopupTarget(key)}
+                    >
+                      <Plus size={14} />
+                    </button>
                     <Toggle
                       checked={key.enabled}
                       onChange={(checked) => void setKeyEnabled(key, checked)}
@@ -5191,6 +5275,43 @@ function ApiKeysSection(props: {
           onConfirm={() => void confirmDeleteKey()}
           onCancel={() => setPendingDelete(null)}
         />
+      )}
+      {topupTarget && (
+        <TopupModal
+          apiKeyId={topupTarget.id}
+          ownerLabel={topupTarget.owner ?? topupTarget.id}
+          currentBalance={topupTarget.balance}
+          api={props.api}
+          onClose={() => setTopupTarget(null)}
+          onSuccess={async (newBalance, added) => {
+            setTopupTarget(null);
+            setTopupToast(
+              t("apikey.topupSuccess")
+                .replace("${amount}", added.toFixed(2))
+                .replace("${balance}", newBalance.toFixed(2))
+            );
+            window.setTimeout(() => setTopupToast(null), 4000);
+            await props.refresh();
+          }}
+        />
+      )}
+      {topupToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "10px 16px",
+            background: "#10b981",
+            color: "white",
+            borderRadius: 8,
+            fontSize: 13,
+            zIndex: 1000,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          }}
+        >
+          {topupToast}
+        </div>
       )}
     </section>
   );
