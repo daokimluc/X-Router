@@ -49,6 +49,7 @@ import { ConfigRevisionService } from "./services/ConfigRevisionService.js";
 import { ApiKeyService } from "./services/ApiKeyService.js";
 import { RequestLogService } from "./services/RequestLogService.js";
 import { UsageService } from "./services/UsageService.js";
+import { ModelPricingService } from "./services/ModelPricingService.js";
 import { TokenSaverService } from "./services/TokenSaverService.js";
 import { RequestQueueService } from "./services/RequestQueueService.js";
 import { TeamService } from "./services/TeamService.js";
@@ -107,6 +108,7 @@ declare module "fastify" {
     teamService: TeamService;
     webhookService: WebhookService;
     proxyPoolService: ProxyPoolService;
+    modelPricingService: ModelPricingService;
     mediaRouter: MediaRouter;
   }
 }
@@ -196,8 +198,13 @@ export async function buildApp(
     dependencies.rateLimitService ??
     new RateLimitService({
       requestsPerMinute: config.internalRateLimitPerMinute,
-      dailyRequestQuota: config.internalDailyRequestQuota
+      dailyRequestQuota: config.internalDailyRequestQuota,
+      dailyTokenQuota: config.internalDailyTokenQuota
     });
+
+  if (persistedState?.rateLimitCounters && !dependencies.rateLimitService) {
+    rateLimitService.loadState(persistedState.rateLimitCounters);
+  }
 
   // Add-account specific services
   const addAccountLockService = new AddAccountLockService();
@@ -205,7 +212,8 @@ export async function buildApp(
   const oauthSessionStore = new OAuthSessionStore();
   const addAccountRateLimiter = new RateLimitService({
     requestsPerMinute: config.addAccountRateLimitPerMinute,
-    dailyRequestQuota: 0 // unlimited daily
+    dailyRequestQuota: 0, // unlimited daily
+    dailyTokenQuota: 0
   });
   const encryptionService = new LocalEncryptionService("development-local-secret-key");
 
@@ -238,6 +246,12 @@ export async function buildApp(
 
   // Webhook notifications
   const webhookService = new WebhookService();
+
+  // Model Pricing
+  const modelPricingService = new ModelPricingService();
+  if (persistedState?.modelPricing) {
+    modelPricingService.load(persistedState.modelPricing);
+  }
 
   // Proxy Pool Service
   const proxyPoolService = new ProxyPoolService();
@@ -288,6 +302,7 @@ export async function buildApp(
   app.decorate("teamService", teamService);
   app.decorate("webhookService", webhookService);
   app.decorate("proxyPoolService", proxyPoolService);
+  app.decorate("modelPricingService", modelPricingService);
   app.decorate("mediaRouter", mediaRouter);
 
   app.addHook("onSend", async (request, reply, payload) => {
@@ -400,6 +415,8 @@ function createPersistedState(app: FastifyInstance): PersistedGatewayState {
     teams: app.teamService.list(),
     usage: app.usageService.listAll(),
     requestLogs: app.requestLogService.listAll(),
-    proxyPools: app.proxyPoolService.listAll()
+    proxyPools: app.proxyPoolService.listAll(),
+    rateLimitCounters: app.rateLimitService.exportState(),
+    modelPricing: app.modelPricingService.export()
   };
 }

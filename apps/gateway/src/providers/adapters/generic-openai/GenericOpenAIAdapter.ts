@@ -174,13 +174,18 @@ export class GenericOpenAIAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
+      // Inject reasoning_effort if provided via model suffix
+      const requestBody = context.reasoningEffort
+        ? { ...request, reasoning_effort: context.reasoningEffort }
+        : request;
+
       const response = await this.fetchImpl(url, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${credential.apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(requestBody),
         signal: abortController.signal
       });
 

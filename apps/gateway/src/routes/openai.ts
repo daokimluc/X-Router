@@ -18,7 +18,8 @@ export async function registerOpenAIRoutes(
       preHandler: createAuthMiddleware(
         config,
         app.apiKeyService,
-        app.rateLimitService
+        app.rateLimitService,
+        app.teamService
       )
     },
     async (request, reply) => {
@@ -64,6 +65,18 @@ export async function registerOpenAIRoutes(
             }
           }
         }
+      }
+
+      // Balance check: reject if key has exhausted its token balance
+      if (request.auth?.apiKeyHash && !app.apiKeyService.hasBalance(request.auth.apiKeyHash)) {
+        await reply.code(402).send({
+          error: {
+            type: "insufficient_balance",
+            message: "API key token balance exhausted. Contact admin for top-up.",
+            code: "balance_exhausted"
+          }
+        });
+        return reply;
       }
 
       // Apply Token Saver compression to messages
@@ -142,7 +155,8 @@ export async function registerOpenAIRoutes(
                 providerInstance,
                 account: lease.account,
                 requestId: request.id,
-                credentialPayload
+                credentialPayload,
+                reasoningEffort: route.reasoningEffort
               }
             );
 
@@ -163,6 +177,7 @@ export async function registerOpenAIRoutes(
                 }, 0);
                 const promptTokens = Math.ceil(inputChars / 4);
                 const completionTokens = Math.ceil(outputChars / 4);
+                const cost = app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens);
                 app.usageService.record({
                   requestId: request.id,
                   protocol: "openai",
@@ -173,8 +188,19 @@ export async function registerOpenAIRoutes(
                   apiKeyHash: request.auth?.apiKeyHash,
                   promptTokens,
                   completionTokens,
-                  totalTokens: promptTokens + completionTokens
+                  totalTokens: promptTokens + completionTokens,
+                  estimatedCost: cost.totalCost || undefined
                 });
+                if (request.auth?.apiKeyHash) {
+                  app.rateLimitService.consumeTokens(
+                    request.auth.apiKeyHash,
+                    promptTokens + completionTokens
+                  );
+                  app.apiKeyService.deductBalance(
+                    request.auth.apiKeyHash,
+                    promptTokens + completionTokens
+                  );
+                }
               } catch (streamError) {
                 lease.releaseFailure(
                   streamError instanceof Error ? streamError.message : "stream failed"
@@ -233,8 +259,19 @@ export async function registerOpenAIRoutes(
               apiKeyHash: request.auth?.apiKeyHash,
               promptTokens,
               completionTokens,
-              totalTokens: promptTokens + completionTokens
+              totalTokens: promptTokens + completionTokens,
+              estimatedCost: app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens).totalCost || undefined
             });
+            if (request.auth?.apiKeyHash) {
+              app.rateLimitService.consumeTokens(
+                request.auth.apiKeyHash,
+                promptTokens + completionTokens
+              );
+              app.apiKeyService.deductBalance(
+                request.auth.apiKeyHash,
+                promptTokens + completionTokens
+              );
+            }
             return {
               ...response,
               model: body.model

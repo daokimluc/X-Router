@@ -8,6 +8,7 @@ import type { ModelMapping } from "../router/ModelRegistry.js";
 import type { RoutingProfile } from "../router/RoutingProfileRegistry.js";
 import type { ConfigRevision } from "./ConfigRevisionService.js";
 import type { InternalApiKeyRecord } from "./ApiKeyService.js";
+import type { ModelPricing } from "./ModelPricingService.js";
 
 const dateish = z.union([z.string(), z.date()]);
 
@@ -28,7 +29,9 @@ const persistedStateSchema = z.object({
   teams: z.array(z.any()).optional(),
   usage: z.array(z.any()).optional(),
   requestLogs: z.array(z.any()).optional(),
-  proxyPools: z.array(z.any()).default([])
+  proxyPools: z.array(z.any()).default([]),
+  rateLimitCounters: z.array(z.any()).optional(),
+  modelPricing: z.array(z.any()).optional()
 });
 
 export type PersistedGatewayState = {
@@ -63,6 +66,15 @@ export type PersistedGatewayState = {
   usage?: Array<Record<string, unknown>>;
   requestLogs?: Array<Record<string, unknown>>;
   proxyPools?: ProxyPool[];
+  rateLimitCounters?: Array<{
+    apiKeyHash: string;
+    minuteWindowStart: number;
+    minuteRequests: number;
+    dailyWindowStart: string;
+    dailyRequests: number;
+    dailyTokens: number;
+  }>;
+  modelPricing?: ModelPricing[];
 };
 
 export class PersistenceService {
@@ -88,7 +100,9 @@ export class PersistenceService {
         teams: parsed.teams?.map(reviveDates),
         usage: parsed.usage,
         requestLogs: parsed.requestLogs,
-        proxyPools: parsed.proxyPools.map(reviveDates)
+        proxyPools: parsed.proxyPools.map(reviveDates),
+        rateLimitCounters: parsed.rateLimitCounters,
+        modelPricing: parsed.modelPricing?.map(reviveDates)
       } as PersistedGatewayState;
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {

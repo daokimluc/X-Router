@@ -152,7 +152,10 @@ const routingProfilePatchSchema = z.object({
 });
 const apiKeyCreateSchema = z.object({
   owner: z.string().min(1).optional(),
-  teamId: z.string().min(1).optional()
+  teamId: z.string().min(1).optional(),
+  rpmLimit: z.number().int().min(0).optional(),
+  dailyLimit: z.number().int().min(0).optional(),
+  dailyTokenLimit: z.number().int().min(0).optional()
 });
 const configDraftSchema = z.object({
   config: z.record(z.unknown())
@@ -1340,6 +1343,242 @@ export async function registerAdminRoutes(
     }
   );
 
+  // ─── Batch Provider Testing ─────────────────────────────────
+
+  app.post(
+    "/admin/v1/test-all",
+    { preHandler: adminAuth },
+    async (request) => {
+      const instances = app.providerRuntimeRegistry.listProviderInstances()
+        .filter((inst) => inst.enabled);
+
+      const results: Array<{
+        providerInstanceId: string;
+        type: string;
+        name: string;
+        status: "ok" | "degraded" | "down" | "error";
+        message?: string;
+        durationMs: number;
+      }> = [];
+
+      for (const inst of instances) {
+        const adapter = app.providerRegistry.getAdapter(inst.type);
+        if (!adapter) {
+          results.push({
+            providerInstanceId: inst.id,
+            type: inst.type,
+            name: inst.name,
+            status: "error",
+            message: "No adapter registered",
+            durationMs: 0,
+          });
+          continue;
+        }
+
+        // Find a credential for health check
+        const pool = app.providerRuntimeRegistry.getAccountPool(inst.id);
+        const accounts = pool ? pool.listAccounts().filter((a) => a.status !== "disabled") : [];
+        const account = accounts[0];
+        const secret = account ? app.secretService.getSecretForAccount(account.id) : undefined;
+        const credentialPayload = secret
+          ? app.secretService.decryptSecretPayload(secret)
+          : {};
+
+        const start = Date.now();
+        try {
+          const health = await adapter.healthCheck({
+            providerInstance: inst,
+            credentialPayload,
+          });
+          results.push({
+            providerInstanceId: inst.id,
+            type: inst.type,
+            name: inst.name,
+            status: health.status,
+            message: health.message,
+            durationMs: Date.now() - start,
+          });
+        } catch (err) {
+          results.push({
+            providerInstanceId: inst.id,
+            type: inst.type,
+            name: inst.name,
+            status: "error",
+            message: err instanceof Error ? err.message : "Unknown error",
+            durationMs: Date.now() - start,
+          });
+        }
+      }
+
+      app.adminAuditService.record({
+        action: "provider.test_all",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: "*",
+      });
+
+      const ok = results.filter((r) => r.status === "ok").length;
+      const degraded = results.filter((r) => r.status === "degraded").length;
+      const down = results.filter((r) => r.status === "down" || r.status === "error").length;
+
+      return {
+        summary: { total: results.length, ok, degraded, down },
+        results,
+      };
+    }
+  );
+
+  app.post(
+    "/admin/v1/provider-instances/:id/test",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = request.params as { id: string };
+      const inst = app.providerRuntimeRegistry.getProviderInstance(params.id);
+
+      if (!inst) {
+        return reply.code(404).send({
+          error: { message: `Provider instance "${params.id}" not found`, code: "not_found" }
+        });
+      }
+
+      const adapter = app.providerRegistry.getAdapter(inst.type);
+      if (!adapter) {
+        return reply.code(400).send({
+          error: { message: `No adapter for type "${inst.type}"`, code: "no_adapter" }
+        });
+      }
+
+      const pool = app.providerRuntimeRegistry.getAccountPool(inst.id);
+      const accounts = pool ? pool.listAccounts().filter((a) => a.status !== "disabled") : [];
+      const account = accounts[0];
+      const secret = account ? app.secretService.getSecretForAccount(account.id) : undefined;
+      const credentialPayload = secret
+        ? app.secretService.decryptSecretPayload(secret)
+        : {};
+
+      const start = Date.now();
+      try {
+        const health = await adapter.healthCheck({
+          providerInstance: inst,
+          credentialPayload,
+        });
+        return {
+          providerInstanceId: inst.id,
+          type: inst.type,
+          name: inst.name,
+          status: health.status,
+          message: health.message,
+          durationMs: Date.now() - start,
+        };
+      } catch (err) {
+        return {
+          providerInstanceId: inst.id,
+          type: inst.type,
+          name: inst.name,
+          status: "error",
+          message: err instanceof Error ? err.message : "Unknown error",
+          durationMs: Date.now() - start,
+        };
+      }
+    }
+  );
+
+  // ─── Model Sync from Upstream ───────────────────────────────
+
+  app.post(
+    "/admin/v1/provider-instances/:id/sync-models",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = request.params as { id: string };
+      const inst = app.providerRuntimeRegistry.getProviderInstance(params.id);
+
+      if (!inst) {
+        return reply.code(404).send({
+          error: { message: `Provider instance "${params.id}" not found`, code: "not_found" }
+        });
+      }
+
+      const adapter = app.providerRegistry.getAdapter(inst.type);
+      if (!adapter) {
+        return reply.code(400).send({
+          error: { message: `No adapter for type "${inst.type}"`, code: "no_adapter" }
+        });
+      }
+
+      // Get credentials for the first active account
+      const pool = app.providerRuntimeRegistry.getAccountPool(inst.id);
+      const accounts = pool ? pool.listAccounts().filter((a) => a.status !== "disabled") : [];
+      const account = accounts[0];
+      const secret = account ? app.secretService.getSecretForAccount(account.id) : undefined;
+      const credentialPayload = secret
+        ? app.secretService.decryptSecretPayload(secret)
+        : {};
+
+      try {
+        const upstreamModels = await adapter.listModels({
+          providerInstance: inst,
+          credentialPayload,
+        });
+
+        // Compare with existing model mappings for this provider
+        const existingMappings = app.modelRegistry.listModelMappings()
+          .filter((m) => m.providerInstanceId === inst.id);
+        const existingUpstream = new Set(existingMappings.map((m) => m.upstreamModel));
+
+        const newModels = upstreamModels.filter((m) => !existingUpstream.has(m.upstreamModel));
+        const removedModels = existingMappings.filter(
+          (m) => !upstreamModels.some((u) => u.upstreamModel === m.upstreamModel)
+        );
+
+        // Auto-create option
+        const body = request.body as { autoCreate?: boolean } | null;
+        const created: string[] = [];
+
+        if (body?.autoCreate) {
+          for (const model of newModels) {
+            const mappingId = `${inst.type}_${model.id}`.replace(/[^a-z0-9_]+/gi, "_");
+            try {
+              app.modelRegistry.register({
+                id: mappingId,
+                publicModel: model.id,
+                providerInstanceId: inst.id,
+                providerType: inst.type,
+                upstreamModel: model.upstreamModel,
+                capabilities: ["chat"],
+                enabled: true,
+              });
+              created.push(model.id);
+            } catch {
+              // Already exists — skip
+            }
+          }
+        }
+
+        app.adminAuditService.record({
+          action: "provider.sync_models",
+          actorKeyHash: request.adminAuth?.apiKeyHash,
+          targetType: "provider_instance",
+          targetId: params.id,
+        });
+
+        return {
+          providerInstanceId: inst.id,
+          discovered: upstreamModels.length,
+          new: newModels.map((m) => ({ id: m.id, upstreamModel: m.upstreamModel })),
+          removed: removedModels.map((m) => ({ id: m.id, publicModel: m.publicModel })),
+          autoCreated: created,
+        };
+      } catch (err) {
+        return reply.code(500).send({
+          error: {
+            message: err instanceof Error ? err.message : "Failed to sync models",
+            code: "sync_failed"
+          }
+        });
+      }
+    }
+  );
+
   app.get(
     "/admin/v1/model-mappings",
     {
@@ -1568,7 +1807,7 @@ export async function registerAdminRoutes(
     },
     async (request) => {
       const body = apiKeyCreateSchema.parse(request.body ?? {});
-      const apiKey = app.apiKeyService.create(body.owner, body.teamId);
+      const apiKey = app.apiKeyService.create(body);
       app.adminAuditService.record({
         action: "api_key.create",
         actorKeyHash: request.adminAuth?.apiKeyHash,
@@ -1589,7 +1828,11 @@ export async function registerAdminRoutes(
       const params = z.object({ id: z.string().min(1) }).parse(request.params);
       const body = z.object({
         owner: z.string().optional(),
-        teamId: z.string().optional()
+        teamId: z.string().optional(),
+        rpmLimit: z.number().int().min(0).optional(),
+        dailyLimit: z.number().int().min(0).optional(),
+        dailyTokenLimit: z.number().int().min(0).optional(),
+        enabled: z.boolean().optional()
       }).parse(request.body ?? {});
       const updated = app.apiKeyService.update(params.id, body);
       if (!updated) {
@@ -1687,6 +1930,52 @@ export async function registerAdminRoutes(
         }
         throw err;
       }
+    }
+  );
+
+  // ─── API Key Balance / Top-up ───────────────────────────────
+
+  app.get(
+    "/admin/v1/api-keys/:id/balance",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const balance = app.apiKeyService.getBalance(params.id);
+      if (balance === undefined) {
+        return { id: params.id, balance: null, unlimited: true };
+      }
+      return { id: params.id, balance, unlimited: false };
+    }
+  );
+
+  app.post(
+    "/admin/v1/api-keys/:id/topup",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const body = request.body as { amount?: number };
+
+      if (typeof body.amount !== "number" || body.amount <= 0) {
+        return reply.code(400).send({
+          error: { message: "amount must be a positive number", code: "validation_error" }
+        });
+      }
+
+      const updated = app.apiKeyService.topup(params.id, body.amount);
+      if (!updated) {
+        return reply.code(404).send({
+          error: { message: `API key "${params.id}" not found`, code: "not_found" }
+        });
+      }
+
+      app.adminAuditService.record({
+        action: "api_key.topup",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "api_key",
+        targetId: params.id,
+      });
+
+      return { id: params.id, balance: updated.balance, added: body.amount };
     }
   );
 
@@ -1999,10 +2288,54 @@ export async function registerAdminRoutes(
     {
       preHandler: adminAuth
     },
-    async () => {
-      return {
-        data: app.usageService.list()
+    async (request, reply) => {
+      const q = z.object({
+        apiKeyHash: z.string().optional(),
+        model: z.string().optional(),
+        providerType: z.string().optional(),
+        protocol: z.enum(["openai", "anthropic"]).optional(),
+        from: z.string().datetime().optional(),
+        to: z.string().datetime().optional(),
+        limit: z.coerce.number().int().min(1).max(1000).optional(),
+        offset: z.coerce.number().int().min(0).optional(),
+        format: z.enum(["json", "csv"]).optional(),
+        aggregate: z.enum(["daily"]).optional()
+      }).parse(request.query ?? {});
+
+      const filter = {
+        apiKeyHash: q.apiKeyHash,
+        model: q.model,
+        providerType: q.providerType,
+        protocol: q.protocol,
+        from: q.from ? new Date(q.from) : undefined,
+        to: q.to ? new Date(q.to) : undefined
       };
+
+      if (q.aggregate === "daily") {
+        return { data: app.usageService.dailyAggregates(filter) };
+      }
+
+      const result = app.usageService.query({
+        ...filter,
+        limit: q.limit,
+        offset: q.offset
+      });
+
+      if (q.format === "csv") {
+        const header = [
+          "id","requestId","protocol","model","providerType","providerInstanceId",
+          "accountId","apiKeyHash","promptTokens","completionTokens","totalTokens","createdAt"
+        ];
+        const rows = result.data.map((r) => header.map((k) => csvEscape(
+          (r as Record<string, unknown>)[k]
+        )).join(","));
+        const body = `${header.join(",")}\n${rows.join("\n")}\n`;
+        reply.header("content-type", "text/csv; charset=utf-8");
+        reply.header("content-disposition", "attachment; filename=usage.csv");
+        return body;
+      }
+
+      return { data: result.data, total: result.total };
     }
   );
 
@@ -2011,10 +2344,44 @@ export async function registerAdminRoutes(
     {
       preHandler: adminAuth
     },
-    async () => {
-      return {
-        data: app.requestLogService.list()
-      };
+    async (request, reply) => {
+      const q = z.object({
+        apiKeyHash: z.string().optional(),
+        route: z.string().optional(),
+        method: z.string().optional(),
+        statusFamily: z.enum(["2xx", "3xx", "4xx", "5xx"]).optional(),
+        from: z.string().datetime().optional(),
+        to: z.string().datetime().optional(),
+        limit: z.coerce.number().int().min(1).max(1000).optional(),
+        offset: z.coerce.number().int().min(0).optional(),
+        format: z.enum(["json", "csv"]).optional()
+      }).parse(request.query ?? {});
+
+      const result = app.requestLogService.query({
+        apiKeyHash: q.apiKeyHash,
+        route: q.route,
+        method: q.method,
+        statusFamily: q.statusFamily,
+        from: q.from ? new Date(q.from) : undefined,
+        to: q.to ? new Date(q.to) : undefined,
+        limit: q.limit,
+        offset: q.offset
+      });
+
+      if (q.format === "csv") {
+        const header = [
+          "id","requestId","method","route","statusCode","durationMs","apiKeyHash","createdAt"
+        ];
+        const rows = result.data.map((r) => header.map((k) => csvEscape(
+          (r as Record<string, unknown>)[k]
+        )).join(","));
+        const body = `${header.join(",")}\n${rows.join("\n")}\n`;
+        reply.header("content-type", "text/csv; charset=utf-8");
+        reply.header("content-disposition", "attachment; filename=request-logs.csv");
+        return body;
+      }
+
+      return { data: result.data, total: result.total };
     }
   );
 
@@ -2123,6 +2490,77 @@ export async function registerAdminRoutes(
       });
 
       return revision;
+    }
+  );
+
+  // ─── Model Pricing ──────────────────────────────────────────
+
+  app.get(
+    "/admin/v1/model-pricing",
+    { preHandler: adminAuth },
+    async () => {
+      return app.modelPricingService.list();
+    }
+  );
+
+  app.put(
+    "/admin/v1/model-pricing/:model",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = request.params as { model: string };
+      const body = request.body as {
+        inputRate?: number;
+        outputRate?: number;
+        cachedInputRate?: number;
+        label?: string;
+      };
+
+      if (typeof body.inputRate !== "number" || typeof body.outputRate !== "number") {
+        return reply.code(400).send({
+          error: { message: "inputRate and outputRate are required numbers", code: "validation_error" }
+        });
+      }
+
+      const entry = app.modelPricingService.set({
+        model: params.model,
+        inputRate: body.inputRate,
+        outputRate: body.outputRate,
+        cachedInputRate: body.cachedInputRate,
+        label: body.label,
+      });
+
+      app.adminAuditService.record({
+        action: "model_pricing.upsert",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "model_pricing",
+        targetId: params.model,
+      });
+
+      return entry;
+    }
+  );
+
+  app.delete(
+    "/admin/v1/model-pricing/:model",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = request.params as { model: string };
+      const deleted = app.modelPricingService.delete(params.model);
+
+      if (!deleted) {
+        return reply.code(404).send({
+          error: { message: `No pricing found for model "${params.model}"`, code: "not_found" }
+        });
+      }
+
+      app.adminAuditService.record({
+        action: "model_pricing.delete",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "model_pricing",
+        targetId: params.model,
+      });
+
+      return { deleted: true };
     }
   );
 }
@@ -2469,4 +2907,13 @@ async function saveAdminRuntimeState(app: FastifyInstance): Promise<void> {
       revisions: app.configRevisionService.listRevisions()
     }
   });
+}
+
+function csvEscape(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const str = value instanceof Date ? value.toISOString() : String(value);
+  if (/[",\n\r]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }

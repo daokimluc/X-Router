@@ -43,7 +43,9 @@ import {
   Terminal,
   Timer,
   Trash2,
+  Download,
   Users,
+  Wand2,
   X,
   XCircle,
   Zap
@@ -61,6 +63,8 @@ import { STTProvidersPage } from "./media/STTProvidersPage";
 import { WebProvidersPage } from "./media/WebProvidersPage";
 import { useLang } from "./i18n";
 import { getKnownModels } from "./providerModels";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { QuickSetupWizard } from "./components/QuickSetupWizard";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -247,6 +251,8 @@ type ApiKey = {
     requestsPerMinuteLimit: number;
     dailyRequests: number;
     dailyRequestQuota: number;
+    dailyTokens?: number;
+    dailyTokenQuota?: number;
     minuteWindowStart: string;
     dailyWindowStart: string;
   };
@@ -604,6 +610,9 @@ export function App() {
   const [cmdQuery, setCmdQuery] = useState("");
   const cmdRef = useRef<HTMLInputElement>(null);
 
+  // Quick Setup Wizard
+  const [showQuickSetup, setShowQuickSetup] = useState(false);
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -742,6 +751,16 @@ export function App() {
           </div>
           <div className="topbarActions">
             <button
+              className="primaryButton"
+              type="button"
+              onClick={() => setShowQuickSetup(true)}
+              title={t("quickSetup.title") ?? "Quick Setup"}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 12px" }}
+            >
+              <Wand2 size={14} />
+              <span>{t("quickSetup.title") ?? "Quick Setup"}</span>
+            </button>
+            <button
               className="topbarSearch"
               onClick={() => { setCmdOpen(true); setCmdQuery(""); }}
               title="Search (Ctrl+K)"
@@ -836,6 +855,29 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+      {/* Quick Setup Wizard */}
+      {showQuickSetup && (
+        <QuickSetupWizard
+          api={api}
+          onClose={() => setShowQuickSetup(false)}
+          onCompleted={() => {
+            void refresh();
+            showToast("success", t("quickSetup.completed") ?? "Quick setup completed");
+          }}
+          onConnectProvider={(providerType) => {
+            // Delegate to the existing per-provider connect flow by
+            // navigating to the providers page; the user can pick the
+            // provider tile and use the existing Add Connection modal.
+            setActivePage("providers");
+            setShowQuickSetup(false);
+            showToast(
+              "info",
+              t("quickSetup.connectHint") ??
+                `Open the ${providerType} card and add a connection. Re-open Quick Setup when done.`
+            );
+          }}
+        />
       )}
     </div>
   );
@@ -4068,9 +4110,16 @@ function RoutingProfiles(props: {
   const { t } = useLang();
   const [showCreate, setShowCreate] = useState(false);
   const [editingProfile, setEditingProfile] = useState<RoutingProfile | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<RoutingProfile | null>(null);
 
   async function deleteProfile(profile: RoutingProfile) {
-    if (!window.confirm(`Delete route "${profile.displayName}"?`)) return;
+    setPendingDelete(profile);
+  }
+
+  async function confirmDeleteProfile() {
+    const profile = pendingDelete;
+    if (!profile) return;
+    setPendingDelete(null);
     try {
       await props.api.delete(`/admin/v1/routing-profiles/${profile.id}`);
       await props.refresh();
@@ -4159,6 +4208,16 @@ function RoutingProfiles(props: {
           api={props.api}
           refresh={props.refresh}
           onClose={() => setShowCreate(false)}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("routes.deleteRoute") ?? "Delete route"}
+          message={`${t("routes.deleteConfirm") ?? "Delete route"} "${pendingDelete.displayName}"?`}
+          confirmLabel={t("common.delete") ?? "Delete"}
+          cancelLabel={t("common.cancel") ?? "Cancel"}
+          onConfirm={() => void confirmDeleteProfile()}
+          onCancel={() => setPendingDelete(null)}
         />
       )}
     </div>
@@ -4735,6 +4794,7 @@ function ApiKeysSection(props: {
   const [teamId, setTeamId] = useState("");
   const [rpmLimit, setRpmLimit] = useState("");
   const [dailyLimit, setDailyLimit] = useState("");
+  const [dailyTokenLimit, setDailyTokenLimit] = useState("");
   const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdKeyOwner, setCreatedKeyOwner] = useState<string | null>(null);
@@ -4746,6 +4806,7 @@ function ApiKeysSection(props: {
   const [editTeamId, setEditTeamId] = useState("");
   const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null);
   const [revealedKeyValue, setRevealedKeyValue] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ApiKey | null>(null);
 
   // Load teams for dropdown
   useEffect(() => {
@@ -4767,7 +4828,8 @@ function ApiKeysSection(props: {
           ...(trimmedOwner ? { owner: trimmedOwner } : {}),
           ...(teamId ? { teamId } : {}),
           ...(rpmLimit ? { rpmLimit: parseInt(rpmLimit, 10) } : {}),
-          ...(dailyLimit ? { dailyLimit: parseInt(dailyLimit, 10) } : {})
+          ...(dailyLimit ? { dailyLimit: parseInt(dailyLimit, 10) } : {}),
+          ...(dailyTokenLimit ? { dailyTokenLimit: parseInt(dailyTokenLimit, 10) } : {})
         }
       );
       setCreatedKey(created.key);
@@ -4776,6 +4838,7 @@ function ApiKeysSection(props: {
       setTeamId("");
       setRpmLimit("");
       setDailyLimit("");
+      setDailyTokenLimit("");
       setShowCreateForm(false);
       await props.refresh();
     } catch (err) {
@@ -4798,14 +4861,13 @@ function ApiKeysSection(props: {
   }
 
   async function deleteKey(key: ApiKey) {
-    const ownerLabel = key.owner ? ` (${key.owner})` : "";
-    if (
-      !window.confirm(
-        `Delete API key ${key.id}${ownerLabel}? This cannot be undone.`
-      )
-    ) {
-      return;
-    }
+    setPendingDelete(key);
+  }
+
+  async function confirmDeleteKey() {
+    const key = pendingDelete;
+    if (!key) return;
+    setPendingDelete(null);
     try {
       await props.api.delete(`/admin/v1/api-keys/${key.id}`);
       await props.refresh();
@@ -4949,6 +5011,17 @@ function ApiKeysSection(props: {
               />
               <small>{t("ep.dailyLimitHint")}</small>
             </label>
+            <label>
+              {t("ep.dailyTokenLimit")}
+              <input
+                type="number"
+                min="0"
+                value={dailyTokenLimit}
+                onChange={(e) => setDailyTokenLimit(e.target.value)}
+                placeholder={t("ep.unlimited")}
+              />
+              <small>{t("ep.dailyTokenLimitHint")}</small>
+            </label>
           </div>
           <div className="endpointCreateFormActions">
             <button
@@ -5060,6 +5133,17 @@ function ApiKeysSection(props: {
                       {formatLimit(key.limits?.minuteRequests, key.limits?.requestsPerMinuteLimit)}/min
                       {" · "}
                       {formatLimit(key.limits?.dailyRequests, key.limits?.dailyRequestQuota)}/day
+                      {key.limits?.dailyTokenQuota && key.limits.dailyTokenQuota > 0 ? (
+                        <>
+                          {" · "}
+                          {formatLimit(key.limits?.dailyTokens, key.limits?.dailyTokenQuota)} tok/day
+                        </>
+                      ) : null}
+                      {isQuotaExhausted(key.limits) ? (
+                        <span className="endpointKeyQuotaExhausted">
+                          {" · "}{t("ep.quotaExhausted")}
+                        </span>
+                      ) : null}
                     </small>
                   </div>
                   <div className="endpointKeyActions">
@@ -5097,6 +5181,16 @@ function ApiKeysSection(props: {
             </li>
           ))}
         </ul>
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("ep.deleteKey") ?? "Delete API key"}
+          message={`${t("common.deleteConfirm") ?? "Delete API key"} ${pendingDelete.id}${pendingDelete.owner ? ` (${pendingDelete.owner})` : ""}? ${t("common.cannotUndo") ?? "This cannot be undone."}`}
+          confirmLabel={t("common.delete") ?? "Delete"}
+          cancelLabel={t("common.cancel") ?? "Cancel"}
+          onConfirm={() => void confirmDeleteKey()}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </section>
   );
@@ -5478,6 +5572,7 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
   const [filter, setFilter] = useState<"all" | "success" | "error">("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [confirmClear, setConfirmClear] = useState(false);
   const perPage = 50;
 
   const filtered = useMemo(() => {
@@ -5513,12 +5608,35 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
   }, [logs]);
 
   async function clearLogs() {
-    if (!window.confirm("Clear all request logs?")) return;
+    setConfirmClear(true);
+  }
+
+  async function doClearLogs() {
+    setConfirmClear(false);
     try {
       await api.delete("/admin/v1/request-logs");
       await refresh();
     } catch {
       // ignore
+    }
+  }
+
+  function exportLogs(format: "csv" | "json") {
+    const params = new URLSearchParams();
+    if (filter === "success") params.set("statusFamily", "2xx");
+    else if (filter === "error") params.set("statusFamily", "5xx");
+    if (search.trim()) params.set("route", search.trim());
+    if (format === "csv") {
+      params.set("format", "csv");
+      window.open(`/admin/v1/request-logs?${params.toString()}`, "_blank");
+    } else {
+      const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `request-logs-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   }
 
@@ -5531,6 +5649,12 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
         </div>
         <button className="ghostButton" onClick={() => void clearLogs()} title={t("rl.clearLogs")}>
           <Trash2 size={14} /> {t("rl.clearLogs")}
+        </button>
+        <button className="ghostButton" onClick={() => exportLogs("csv")} title={t("rl.exportCsv")}>
+          <Download size={14} /> CSV
+        </button>
+        <button className="ghostButton" onClick={() => exportLogs("json")} title={t("rl.exportJson")}>
+          <Download size={14} /> JSON
         </button>
       </div>
 
@@ -5605,6 +5729,16 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
           <span className="rlPageInfo">{t("rl.page")} {page} {t("rl.of")} {totalPages}</span>
           <button className="rlPageBtn" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>{t("rl.next")}</button>
         </div>
+      )}
+      {confirmClear && (
+        <ConfirmDialog
+          title={t("rl.clearLogs") ?? "Clear logs"}
+          message={t("rl.clearConfirm") ?? "Clear all request logs?"}
+          confirmLabel={t("rl.clearLogs") ?? "Clear"}
+          cancelLabel={t("common.cancel") ?? "Cancel"}
+          onConfirm={() => void doClearLogs()}
+          onCancel={() => setConfirmClear(false)}
+        />
       )}
     </div>
   );
@@ -5715,6 +5849,8 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
   });
   const [changePwModal, setChangePwModal] = useState(false);
   const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
+  const [pendingRollback, setPendingRollback] = useState<ConfigRevision | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const load = useCallback(async () => {
     const [currentConfig, revisionList] = await Promise.all([
@@ -5780,7 +5916,13 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
   }
 
   async function rollback(revision: ConfigRevision) {
-    if (!window.confirm(`Rollback to revision ${revision.version}?`)) return;
+    setPendingRollback(revision);
+  }
+
+  async function doRollback() {
+    const revision = pendingRollback;
+    if (!revision) return;
+    setPendingRollback(null);
     try {
       const next = await api.post<ConfigRevision>(`/admin/v1/config/revisions/${revision.id}/rollback`, {});
       setMessage({ type: "success", text: `Rolled back → revision ${next.version}` });
@@ -5970,12 +6112,7 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
                 <strong>{t("settings.resetGateway")}</strong>
                 <span>{t("settings.resetGatewayDesc")}</span>
               </div>
-              <button className="endpointKeyBtn settingsResetBtn" onClick={() => {
-                if (!window.confirm("Reset gateway? This clears usage and request logs.")) return;
-                void api.post("/admin/v1/settings/reset", { confirm: "RESET" }).then(() => {
-                  setMessage({ type: "success", text: "Gateway reset complete" });
-                }).catch(() => setMessage({ type: "error", text: "Reset failed" }));
-              }}>
+              <button className="endpointKeyBtn settingsResetBtn" onClick={() => setConfirmReset(true)}>
                 <Trash2 size={14} /> Reset
               </button>
             </div>
@@ -6059,6 +6196,30 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
           </div>
         </div>
       )}
+      {pendingRollback && (
+        <ConfirmDialog
+          title="Rollback configuration"
+          message={`Rollback to revision ${pendingRollback.version}?`}
+          confirmLabel="Rollback"
+          variant="default"
+          onConfirm={() => void doRollback()}
+          onCancel={() => setPendingRollback(null)}
+        />
+      )}
+      {confirmReset && (
+        <ConfirmDialog
+          title="Reset gateway"
+          message="Reset gateway? This clears usage and request logs."
+          confirmLabel="Reset"
+          onConfirm={() => {
+            setConfirmReset(false);
+            void api.post("/admin/v1/settings/reset", { confirm: "RESET" }).then(() => {
+              setMessage({ type: "success", text: "Gateway reset complete" });
+            }).catch(() => setMessage({ type: "error", text: "Reset failed" }));
+          }}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
     </div>
   );
 }
@@ -6079,6 +6240,8 @@ function DocsPage() {
     { id: "token-saver", label: "Token Saver" },
     { id: "playground", label: "Playground" },
     { id: "webhooks", label: "Webhook thông báo" },
+    { id: "media-providers", label: "🎨 Media Providers" },
+    { id: "proxy-pools", label: "🔀 Proxy Pools" },
     { id: "settings", label: "Cài đặt hệ thống" },
     { id: "shortcuts", label: "Phím tắt" },
     { id: "api", label: "Tham chiếu API" }
@@ -6093,6 +6256,8 @@ function DocsPage() {
     { id: "token-saver", label: "Token Saver" },
     { id: "playground", label: "Playground" },
     { id: "webhooks", label: "Webhook Notifications" },
+    { id: "media-providers", label: "🎨 Media Providers" },
+    { id: "proxy-pools", label: "🔀 Proxy Pools" },
     { id: "settings", label: "System Settings" },
     { id: "shortcuts", label: "Keyboard Shortcuts" },
     { id: "api", label: "API Reference" }
@@ -7368,6 +7533,219 @@ Team "Senior Dev":
               </table>
             </div>
           )}
+
+          {activeSection === "media-providers" && (
+            <div className="docsSection">
+              <h2>🎨 Media Providers</h2>
+              <p>{lang === "vi" ? "AI Gateway hỗ trợ routing media requests qua cùng hạ tầng multi-account pooling và proxy như LLM chat. Tất cả media endpoints sử dụng OpenAI-compatible request/response format." : "AI Gateway supports routing media requests through the same multi-account pooling and proxy infrastructure as LLM chat. All media endpoints use OpenAI-compatible request/response formats."}</p>
+
+              <h3>{lang === "vi" ? "Các loại Media hỗ trợ" : "Supported Media Types"}</h3>
+              <table className="docsTable">
+                <thead><tr><th>{lang === "vi" ? "Loại" : "Kind"}</th><th>Endpoint</th><th>{lang === "vi" ? "Providers hỗ trợ" : "Supported Providers"}</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>Embedding</strong></td><td><code>POST /v1/embeddings</code></td><td>OpenAI, Gemini, Voyage AI, Jina AI, Fireworks, Together, Nebius, NVIDIA</td></tr>
+                  <tr><td><strong>Image Generation</strong></td><td><code>POST /v1/images/generations</code></td><td>Codex (ChatGPT), OpenAI, Gemini, Stability AI, BFL, Fal.ai, Cloudflare, HuggingFace, Runway, NanoBanana</td></tr>
+                  <tr><td><strong>Text to Speech</strong></td><td><code>POST /v1/audio/speech</code></td><td>OpenAI, ElevenLabs, Deepgram, MiniMax, Gemini, NVIDIA, Cartesia, PlayHT, Google TTS*, Edge TTS*</td></tr>
+                  <tr><td><strong>Speech to Text</strong></td><td><code>POST /v1/audio/transcriptions</code></td><td>OpenAI, Groq, Deepgram, Gemini, HuggingFace, NVIDIA</td></tr>
+                  <tr><td><strong>Web Search</strong></td><td><code>POST /v1/search</code></td><td>Tavily, Brave, Serper, Exa, Perplexity, SearXNG*, Google PSE, Linkup, SearchAPI, You.com</td></tr>
+                  <tr><td><strong>Web Fetch</strong></td><td><code>POST /v1/web/fetch</code></td><td>Firecrawl, Jina Reader, Tavily Extract, Exa</td></tr>
+                </tbody>
+              </table>
+              <p><em>* {lang === "vi" ? "Provider miễn phí (không cần API key)" : "Free providers (no API key required)"}</em></p>
+
+              <h3>{lang === "vi" ? "Quy tắc đặt tên Model" : "Model Naming Convention"}</h3>
+              <p>{lang === "vi" ? "Models sử dụng format" : "Models use"} <code>provider-alias/model-id</code>{lang === "vi" ? " để routing:" : " format for routing:"}</p>
+              <pre className="docsCode">{`# Provider Aliases
+cx  = Codex (ChatGPT)     oa  = OpenAI        gm  = Gemini
+an  = Anthropic           cf  = Cloudflare    gh  = GitHub
+el  = ElevenLabs          dg  = Deepgram      st  = Stability AI
+bf  = Black Forest Labs   fa  = Fal.ai        hf  = HuggingFace
+rw  = Runway              tv  = Tavily        bv  = Brave
+sp  = Serper              sx  = SearXNG       fc  = Firecrawl
+ja  = Jina AI             va  = Voyage AI     mm  = MiniMax
+
+# Examples
+cx/gpt-5.5-image            → Codex image generation
+oa/dall-e-3                 → OpenAI DALL-E 3
+gm/gemini-2.5-flash-image   → Gemini image generation
+st/sd3-large                → Stability AI SD3
+oa/tts-1                    → OpenAI TTS
+el/eleven_multilingual_v2   → ElevenLabs
+google-tts/vi               → Google TTS Vietnamese (free)
+edge-tts/vi-VN-HoaiMyNeural → Edge TTS Vietnamese (free)
+oa/text-embedding-3-small   → OpenAI Embedding
+tv/search                   → Tavily Search
+sx/general                  → SearXNG (free)`}</pre>
+
+              <h3>{lang === "vi" ? "Provider miễn phí (không cần API key)" : "Free Providers (No API Key)"}</h3>
+              <table className="docsTable">
+                <thead><tr><th>Provider</th><th>{lang === "vi" ? "Loại" : "Kind"}</th><th>{lang === "vi" ? "Ghi chú" : "Notes"}</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>Google TTS</strong></td><td>Text to Speech</td><td>{lang === "vi" ? "58 ngôn ngữ, sử dụng Google Translate API" : "58 languages, uses Google Translate API"}</td></tr>
+                  <tr><td><strong>Edge TTS</strong></td><td>Text to Speech</td><td>{lang === "vi" ? "400+ giọng neural, sử dụng Microsoft Edge" : "400+ neural voices, uses Microsoft Edge"}</td></tr>
+                  <tr><td><strong>SearXNG</strong></td><td>Web Search</td><td>{lang === "vi" ? "Self-hosted, không cần auth" : "Self-hosted, no auth required"}</td></tr>
+                </tbody>
+              </table>
+
+              <h3>{lang === "vi" ? "Ví dụ Request" : "Request Examples"}</h3>
+
+              <h4>Image Generation (Codex SSE)</h4>
+              <pre className="docsCode">{`curl -X POST http://localhost:3100/v1/images/generations \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -d '{
+    "model": "cx/gpt-5.5-image",
+    "prompt": "A cute cat wearing a hat",
+    "size": "1024x1024",
+    "quality": "hd",
+    "output_format": "png"
+  }'
+
+# Response: {"created": 1234567890, "data": [{"b64_json": "iVBORw0KGgo..."}]}`}</pre>
+
+              <h4>Text to Speech (Google TTS — Free)</h4>
+              <pre className="docsCode">{`curl -X POST http://localhost:3100/v1/audio/speech \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -d '{"model": "google-tts/vi", "input": "Xin chào thế giới"}' \\
+  --output speech.mp3
+
+# Response: Binary MP3 audio`}</pre>
+
+              <h4>Speech to Text (Multipart)</h4>
+              <pre className="docsCode">{`curl -X POST http://localhost:3100/v1/audio/transcriptions \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -F "file=@audio.wav" \\
+  -F "model=oa/whisper-1" \\
+  -F "language=en"
+
+# Response: {"text": "Hello, this is a transcription."}`}</pre>
+
+              <h4>Embeddings</h4>
+              <pre className="docsCode">{`curl -X POST http://localhost:3100/v1/embeddings \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -d '{"model": "oa/text-embedding-3-small", "input": "Hello world", "dimensions": 512}'
+
+# Response: {"data": [{"embedding": [0.1, -0.2, ...], "index": 0}], "model": "...", "usage": {...}}`}</pre>
+
+              <h4>Web Search</h4>
+              <pre className="docsCode">{`curl -X POST http://localhost:3100/v1/search \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -d '{"query": "latest AI news", "max_results": 5, "search_type": "news"}'
+
+# Response: {"results": [{"title": "...", "url": "...", "snippet": "..."}], "provider": "tavily"}`}</pre>
+
+              <h4>Web Fetch</h4>
+              <pre className="docsCode">{`curl -X POST http://localhost:3100/v1/web/fetch \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -d '{"url": "https://example.com", "format": "markdown"}'
+
+# Response: {"provider": "firecrawl", "content": {"format": "markdown", "text": "...", "length": 1234}}`}</pre>
+
+              <h3>{lang === "vi" ? "Xử lý lỗi" : "Error Handling"}</h3>
+              <pre className="docsCode">{`# Common error responses:
+{"error": {"type": "no_provider_available", "code": "no_provider_available"}}
+  → No provider configured for this media kind
+
+{"error": {"type": "model_not_found", "code": "model_not_found", "available_models": [...]}}
+  → Model not found, response includes available alternatives
+
+{"error": {"type": "no_provider_available", "code": "no_available_account"}}
+  → All accounts exhausted or rate limited
+
+{"error": {"type": "upstream_error", "code": "upstream_error"}}
+  → Provider API returned an error`}</pre>
+
+              <h3>{lang === "vi" ? "Tính năng Dashboard" : "Dashboard Features"}</h3>
+              <ul>
+                <li><strong>{lang === "vi" ? "Catalog 50+ providers" : "50+ Provider Catalog"}</strong> — {lang === "vi" ? "Duyệt providers theo loại media" : "Browse providers by media kind"}</li>
+                <li><strong>{lang === "vi" ? "Quản lý Account" : "Account Management"}</strong> — {lang === "vi" ? "Thêm API keys, test kết nối, health check" : "Add API keys, test connections, health check"}</li>
+                <li><strong>{lang === "vi" ? "Live Testing" : "Live Testing"}</strong> — {lang === "vi" ? "Playground tương tác với preview ảnh, audio player" : "Interactive playground with image preview, audio player"}</li>
+                <li><strong>{lang === "vi" ? "Tích hợp Proxy" : "Proxy Integration"}</strong> — {lang === "vi" ? "Route qua SOCKS5/HTTP proxies" : "Route through SOCKS5/HTTP proxies per account"}</li>
+                <li><strong>{lang === "vi" ? "Auto-sync" : "Auto-sync"}</strong> — {lang === "vi" ? "Provider configs tự động cập nhật khi khởi động" : "Provider configs auto-update on startup"}</li>
+              </ul>
+            </div>
+          )}
+
+          {activeSection === "proxy-pools" && (
+            <div className="docsSection">
+              <h2>🔀 Proxy Pools</h2>
+              <p>{lang === "vi" ? "Proxy pools cho phép route gateway requests qua SOCKS5/HTTP proxies hoặc Vercel relay endpoints. Hữu ích để bypass IP-based rate limits hoặc geo-restrictions." : "Proxy pools let you route gateway requests through SOCKS5/HTTP proxies or Vercel relay endpoints. Useful for bypassing IP-based rate limits or geo-restrictions."}</p>
+
+              <h3>{lang === "vi" ? "Khái niệm" : "Concepts"}</h3>
+              <table className="docsTable">
+                <thead><tr><th>{lang === "vi" ? "Thuật ngữ" : "Term"}</th><th>{lang === "vi" ? "Mô tả" : "Description"}</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>Proxy Pool</strong></td><td>{lang === "vi" ? "Tập hợp proxy URLs có tên, với health tracking" : "A named collection of proxy URLs with health tracking"}</td></tr>
+                  <tr><td><strong>Vercel Relay</strong></td><td>{lang === "vi" ? "Serverless relay trên Vercel chuyển tiếp requests" : "A serverless relay deployed on Vercel that forwards requests"}</td></tr>
+                  <tr><td><strong>Strict mode</strong></td><td>{lang === "vi" ? "Proxy lỗi → request lỗi (không fallback direct)" : "If proxy fails, request fails (no direct fallback)"}</td></tr>
+                  <tr><td><strong>Non-strict mode</strong></td><td>{lang === "vi" ? "Proxy lỗi → fallback kết nối trực tiếp" : "If proxy fails, falls back to direct connection"}</td></tr>
+                </tbody>
+              </table>
+
+              <h3>{lang === "vi" ? "Tạo Proxy Pool" : "Creating a Proxy Pool"}</h3>
+              <p>{lang === "vi" ? "Dashboard → Proxy Pools → Add Pool, hoặc qua API:" : "Dashboard → Proxy Pools → Add Pool, or via API:"}</p>
+              <pre className="docsCode">{`# SOCKS5 Proxy
+curl -X POST http://localhost:3100/admin/v1/proxy-pools \\
+  -H "Authorization: Bearer ADMIN_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "My Proxies",
+    "type": "socks5",
+    "proxyUrl": "socks5://user:pass@proxy.example.com:1080",
+    "strictProxy": false
+  }'
+
+# Vercel Relay
+curl -X POST http://localhost:3100/admin/v1/proxy-pools \\
+  -H "Authorization: Bearer ADMIN_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "Vercel Relay",
+    "type": "vercel",
+    "proxyUrl": "https://my-relay.vercel.app",
+    "strictProxy": false
+  }'`}</pre>
+
+              <h3>{lang === "vi" ? "Batch Import" : "Batch Import"}</h3>
+              <p>{lang === "vi" ? "Dashboard → Proxy Pools → Batch Import — paste danh sách proxy URLs (mỗi dòng 1 URL):" : "Dashboard → Proxy Pools → Batch Import — paste a list of proxy URLs (one per line):"}</p>
+              <pre className="docsCode">{`socks5://user:pass@1.2.3.4:1080
+http://user:pass@5.6.7.8:8080
+socks5://9.10.11.12:1080
+https://my-relay-1.vercel.app
+https://my-relay-2.vercel.app`}</pre>
+
+              <h3>{lang === "vi" ? "Health Testing" : "Health Testing"}</h3>
+              <p>{lang === "vi" ? "Dashboard → Proxy Pools → chọn pool → Health Check. Gateway test mỗi proxy bằng request đến endpoint đã biết và đánh dấu proxy active/dead. Dead proxies tự động bị disable." : "Dashboard → Proxy Pools → select pool → Health Check. The gateway tests each proxy by making a request to a known endpoint and marks proxies as active/dead. Dead proxies are automatically disabled."}</p>
+
+              <h3>{lang === "vi" ? "Gán cho Provider Account" : "Assigning to Provider Accounts"}</h3>
+              <p>{lang === "vi" ? "Dashboard → Providers → chọn provider → chọn account → Proxy Pool dropdown. Tất cả requests từ account đó sẽ route qua proxy pool được gán." : "Dashboard → Providers → select provider → select account → Proxy Pool dropdown. All requests from that account will route through the assigned proxy pool."}</p>
+
+              <h3>{lang === "vi" ? "No-Proxy Patterns" : "No-Proxy Patterns"}</h3>
+              <p>{lang === "vi" ? "Loại trừ domains cụ thể khỏi proxy routing:" : "Exclude specific domains from proxy routing:"}</p>
+              <pre className="docsCode">{`{
+  "noProxy": "localhost,127.0.0.1,*.internal.company.com"
+}`}</pre>
+
+              <h3>{lang === "vi" ? "Cách hoạt động" : "How It Works"}</h3>
+              <pre className="docsCode">{`Request → MediaRouter/ChatRouter
+  │
+  ├─ Account has proxyPoolId?
+  │   ├─ YES → Resolve pool → proxyAwareFetch(url, proxyOptions)
+  │   │         ├─ Pool type "vercel" → Forward via Vercel relay URL
+  │   │         └─ Pool type "socks5"/"http" → Connect via SOCKS5/HTTP proxy
+  │   │
+  │   └─ NO → Direct fetch (no proxy)
+  │
+  └─ strictProxy?
+      ├─ true  → Proxy fails = request fails
+      └─ false → Proxy fails = retry direct`}</pre>
+            </div>
+          )}
+
         </article>
       </div>
     </div>
@@ -7654,6 +8032,26 @@ function parseCsv(value: string): string[] {
 
 function formatLimit(used = 0, limit = 0): string {
   return limit > 0 ? `${used}/${limit}` : `${used}/unlimited`;
+}
+
+function isQuotaExhausted(
+  limits?: {
+    minuteRequests?: number;
+    requestsPerMinuteLimit?: number;
+    dailyRequests?: number;
+    dailyRequestQuota?: number;
+    dailyTokens?: number;
+    dailyTokenQuota?: number;
+  }
+): boolean {
+  if (!limits) return false;
+  const rpmHit = (limits.requestsPerMinuteLimit ?? 0) > 0 &&
+    (limits.minuteRequests ?? 0) >= (limits.requestsPerMinuteLimit ?? 0);
+  const dailyHit = (limits.dailyRequestQuota ?? 0) > 0 &&
+    (limits.dailyRequests ?? 0) >= (limits.dailyRequestQuota ?? 0);
+  const tokenHit = (limits.dailyTokenQuota ?? 0) > 0 &&
+    (limits.dailyTokens ?? 0) >= (limits.dailyTokenQuota ?? 0);
+  return rpmHit || dailyHit || tokenHit;
 }
 
 function formatTokenTimeLeft(ms: number): string {

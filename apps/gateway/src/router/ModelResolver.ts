@@ -16,11 +16,15 @@ export type ResolvedModelCandidate = {
   capabilities: ProviderCapabilityFlag[];
 };
 
+export type ReasoningEffort = "high" | "medium" | "low";
+
 export type ResolvedModelRoute = {
   requestedModel: string;
   routeType: "fixed_model" | "routing_profile";
   fallback: boolean;
   candidates: ResolvedModelCandidate[];
+  /** Reasoning effort extracted from model name suffix (e.g. "claude-3-5-sonnet-high") */
+  reasoningEffort?: ReasoningEffort;
 };
 
 export class UnknownModelError extends Error {
@@ -44,21 +48,25 @@ export class ModelResolver {
     requestedModel: string,
     requiredCapabilities: ProviderCapabilityFlag[] = ["chat"]
   ): ResolvedModelRoute {
-    const fixedModel = this.modelRegistry.get(requestedModel);
+    // Extract reasoning effort suffix: model-high, model-medium, model-low
+    const { baseModel, reasoningEffort } = extractReasoningEffort(requestedModel);
+
+    const fixedModel = this.modelRegistry.get(baseModel);
 
     if (fixedModel) {
       return {
-        requestedModel,
+        requestedModel: baseModel,
         routeType: "fixed_model",
         fallback: false,
-        candidates: [this.toCandidate(this.assertCapabilities(fixedModel, requiredCapabilities))]
+        candidates: [this.toCandidate(this.assertCapabilities(fixedModel, requiredCapabilities))],
+        reasoningEffort
       };
     }
 
-    const profile = this.routingProfileRegistry.get(requestedModel);
+    const profile = this.routingProfileRegistry.get(baseModel);
 
     if (!profile || !profile.enabled) {
-      throw new UnknownModelError(requestedModel);
+      throw new UnknownModelError(baseModel);
     }
 
     const required = mergeCapabilities(profile.requiredCapabilities, requiredCapabilities);
@@ -75,10 +83,11 @@ export class ModelResolver {
     });
 
     return {
-      requestedModel,
+      requestedModel: baseModel,
       routeType: "routing_profile",
       fallback: profile.fallback,
-      candidates
+      candidates,
+      reasoningEffort
     };
   }
 
@@ -116,5 +125,26 @@ function mergeCapabilities(
   second: ProviderCapabilityFlag[]
 ): ProviderCapabilityFlag[] {
   return Array.from(new Set([...first, ...second]));
+}
+
+const REASONING_SUFFIXES: Record<string, ReasoningEffort> = {
+  "-high": "high",
+  "-medium": "medium",
+  "-low": "low",
+};
+
+function extractReasoningEffort(model: string): {
+  baseModel: string;
+  reasoningEffort?: ReasoningEffort;
+} {
+  for (const [suffix, effort] of Object.entries(REASONING_SUFFIXES)) {
+    if (model.endsWith(suffix)) {
+      return {
+        baseModel: model.slice(0, -suffix.length),
+        reasoningEffort: effort,
+      };
+    }
+  }
+  return { baseModel: model };
 }
 

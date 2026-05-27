@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { Plus, Users, Trash2, X } from "lucide-react";
 import { useLang } from "./i18n";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 
 export type Team = {
   id: string;
@@ -34,6 +35,7 @@ export function TeamsPage(props: { api: ApiClient; refresh: () => Promise<void> 
   const [loaded, setLoaded] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Team | null>(null);
 
   // Load teams on mount
   if (!loaded) {
@@ -46,7 +48,13 @@ export function TeamsPage(props: { api: ApiClient; refresh: () => Promise<void> 
   }
 
   async function deleteTeam(team: Team) {
-    if (!window.confirm(`Delete team "${team.name}"?`)) return;
+    setPendingDelete(team);
+  }
+
+  async function confirmDeleteTeam() {
+    const team = pendingDelete;
+    if (!team) return;
+    setPendingDelete(null);
     try {
       await props.api.delete(`/admin/v1/teams/${team.id}`);
       await reload();
@@ -120,6 +128,16 @@ export function TeamsPage(props: { api: ApiClient; refresh: () => Promise<void> 
           api={props.api}
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); void reload(); }}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("teams.deleteTeam") ?? "Delete team"}
+          message={`${t("teams.deleteConfirm") ?? "Delete team"} "${pendingDelete.name}"?`}
+          confirmLabel={t("common.delete") ?? "Delete"}
+          cancelLabel={t("common.cancel") ?? "Cancel"}
+          onConfirm={() => void confirmDeleteTeam()}
+          onCancel={() => setPendingDelete(null)}
         />
       )}
     </div>

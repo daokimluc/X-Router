@@ -5,9 +5,10 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil, X } from "lucide-react";
 import type { CatalogProvider, ServiceKind } from "../providerCatalog";
 import { ProviderAddConnectionModal } from "./ProviderAddConnectionModal";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type ApiClient = {
   get<T>(path: string): Promise<T>;
@@ -55,6 +56,8 @@ export function ProviderConnectionsCard({ api, provider }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<Account | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Account | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -77,8 +80,14 @@ export function ProviderConnectionsCard({ api, provider }: Props) {
     void fetchAll();
   }, [fetchAll]);
 
-  async function handleDelete(account: Account) {
-    if (!window.confirm(`Delete connection "${account.displayName}"?`)) return;
+  function handleDelete(account: Account) {
+    setPendingDelete(account);
+  }
+
+  async function confirmDelete() {
+    const account = pendingDelete;
+    if (!account) return;
+    setPendingDelete(null);
     try {
       await api.delete(`/admin/v1/accounts/${account.id}`);
       await fetchAll();
@@ -162,7 +171,8 @@ export function ProviderConnectionsCard({ api, provider }: Props) {
             <ConnectionRow
               key={account.id}
               account={account}
-              onDelete={() => void handleDelete(account)}
+              onEdit={() => setEditing(account)}
+              onDelete={() => handleDelete(account)}
             />
           ))}
         </div>
@@ -180,15 +190,39 @@ export function ProviderConnectionsCard({ api, provider }: Props) {
           }}
         />
       )}
+
+      {editing && (
+        <EditConnectionModal
+          api={api}
+          account={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void fetchAll();
+          }}
+        />
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete connection"
+          message={`Delete connection "${pendingDelete.displayName}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </article>
   );
 }
 
 function ConnectionRow({
   account,
+  onEdit,
   onDelete,
 }: {
   account: Account;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const total = account.runtime?.totalRequests ?? 0;
@@ -255,6 +289,15 @@ function ConnectionRow({
         <button
           type="button"
           className="iconButton"
+          onClick={onEdit}
+          title="Edit connection"
+          style={{ padding: 6 }}
+        >
+          <Pencil size={14} />
+        </button>
+        <button
+          type="button"
+          className="iconButton"
           onClick={onDelete}
           title="Delete connection"
           style={{ padding: 6, color: "var(--color-danger, #ef4444)" }}
@@ -270,4 +313,122 @@ function StatusBadge({ status }: { status: Account["status"] }) {
   const className =
     status === "active" ? "active" : status === "cooldown" ? "cooldown" : "disabled";
   return <span className={`statusBadge ${className}`}>{status}</span>;
+}
+
+function EditConnectionModal({
+  api,
+  account,
+  onClose,
+  onSaved,
+}: {
+  api: ApiClient;
+  account: Account;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [displayName, setDisplayName] = useState(account.displayName);
+  const [maxConcurrency, setMaxConcurrency] = useState(
+    account.maxConcurrency ? String(account.maxConcurrency) : ""
+  );
+  const [enabled, setEnabled] = useState(account.status !== "disabled");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const patch: Record<string, unknown> = {
+        displayName: displayName.trim(),
+      };
+      if (maxConcurrency.trim()) {
+        const parsed = parseInt(maxConcurrency, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) {
+          patch.maxConcurrency = parsed;
+        }
+      }
+      await api.patch(`/admin/v1/accounts/${account.id}`, patch);
+      const wasEnabled = account.status !== "disabled";
+      if (wasEnabled !== enabled) {
+        await api.post(
+          `/admin/v1/accounts/${account.id}/${enabled ? "enable" : "disable"}`,
+          {}
+        );
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update connection");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="modalOverlay"
+      role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="modalContent" style={{ maxWidth: 480 }}>
+        <div className="modalHeader">
+          <div className="modalDots">
+            <span />
+            <span />
+            <span />
+          </div>
+          <h2>Edit Connection</h2>
+          <button type="button" className="iconButton" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <form className="routeForm" onSubmit={(e) => void handleSave(e)} style={{ padding: "16px 20px" }}>
+          <label className="routeFormLabel">
+            Display Name
+            <input
+              className="routeNameInput"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="My connection"
+              required
+            />
+          </label>
+          <label className="routeFormLabel">
+            Max Concurrency
+            <input
+              className="routeNameInput"
+              type="number"
+              min={1}
+              value={maxConcurrency}
+              onChange={(e) => setMaxConcurrency(e.target.value)}
+              placeholder="3"
+            />
+          </label>
+          <label className="routeFormLabel" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+            Enabled
+          </label>
+          {error && (
+            <div className="endpointError" style={{ marginTop: 8 }}>
+              {error}
+            </div>
+          )}
+          <div className="routeModalFooter">
+            <button type="button" className="ghostButton" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="primaryButton" disabled={saving || !displayName.trim()}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }

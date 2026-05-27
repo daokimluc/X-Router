@@ -24,7 +24,8 @@ export async function registerAnthropicRoutes(
       preHandler: createAuthMiddleware(
         config,
         app.apiKeyService,
-        app.rateLimitService
+        app.rateLimitService,
+        app.teamService
       )
     },
     async (request, reply) => {
@@ -112,7 +113,8 @@ export async function registerAnthropicRoutes(
                 providerInstance,
                 account: lease.account,
                 requestId: request.id,
-                credentialPayload
+                credentialPayload,
+                reasoningEffort: route.reasoningEffort
               });
 
               if (isProviderStream(response)) {
@@ -153,6 +155,7 @@ export async function registerAnthropicRoutes(
               releaseProvider();
               app.circuitBreaker.recordSuccess(providerInstance.id);
               if (response.usage) {
+                const cachedTokens = response.usage.cached_tokens ?? 0;
                 app.usageService.record({
                   requestId: request.id,
                   protocol: "anthropic",
@@ -163,8 +166,21 @@ export async function registerAnthropicRoutes(
                   apiKeyHash: request.auth?.apiKeyHash,
                   promptTokens: response.usage.prompt_tokens,
                   completionTokens: response.usage.completion_tokens,
-                  totalTokens: response.usage.total_tokens
+                  totalTokens: response.usage.total_tokens,
+                  cachedTokens: cachedTokens || undefined,
+                  estimatedCost: app.modelPricingService.calculateCost(
+                    body.model,
+                    response.usage.prompt_tokens,
+                    response.usage.completion_tokens,
+                    cachedTokens
+                  ).totalCost || undefined
                 });
+                if (request.auth?.apiKeyHash) {
+                  app.rateLimitService.consumeTokens(
+                    request.auth.apiKeyHash,
+                    response.usage.total_tokens
+                  );
+                }
               }
               return toAnthropicResponse(response, body.model);
             } catch (error) {

@@ -130,6 +130,19 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
+      // Inject thinking budget if reasoning effort is specified
+      let requestBody: Record<string, unknown> = request as unknown as Record<string, unknown>;
+      if (context.reasoningEffort) {
+        const budgetMap = { high: 10000, medium: 5000, low: 2000 };
+        requestBody = {
+          ...requestBody,
+          thinking: {
+            type: "enabled",
+            budget_tokens: budgetMap[context.reasoningEffort]
+          }
+        };
+      }
+
       const response = await this.fetchImpl(url, {
         method: "POST",
         headers: {
@@ -137,7 +150,7 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
           "x-api-key": apiKey,
           "anthropic-version": ANTHROPIC_VERSION
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(requestBody),
         signal: abortController.signal
       });
 
@@ -425,7 +438,8 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
         ? {
             prompt_tokens: response.usage.input_tokens,
             completion_tokens: response.usage.output_tokens,
-            total_tokens: response.usage.input_tokens + response.usage.output_tokens
+            total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+            cached_tokens: response.usage.cache_read_input_tokens
           }
         : undefined
     };
@@ -477,16 +491,25 @@ function normalizeStopReason(
 
 function normalizeAnthropicUsage(
   usage: unknown
-): { input_tokens: number; output_tokens: number } | undefined {
+): { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | undefined {
   if (!usage || typeof usage !== "object") {
     return undefined;
   }
 
   const raw = usage as Record<string, unknown>;
-  return {
+  const result: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } = {
     input_tokens: typeof raw.input_tokens === "number" ? raw.input_tokens : 0,
     output_tokens: typeof raw.output_tokens === "number" ? raw.output_tokens : 0
   };
+
+  if (typeof raw.cache_read_input_tokens === "number" && raw.cache_read_input_tokens > 0) {
+    result.cache_read_input_tokens = raw.cache_read_input_tokens;
+  }
+  if (typeof raw.cache_creation_input_tokens === "number" && raw.cache_creation_input_tokens > 0) {
+    result.cache_creation_input_tokens = raw.cache_creation_input_tokens;
+  }
+
+  return result;
 }
 
 function mapAnthropicStopReason(

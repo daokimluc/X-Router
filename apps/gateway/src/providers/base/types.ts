@@ -1,6 +1,8 @@
 import type { ProviderAccount } from "./ProviderAccount.js";
 import type { ProviderInstance } from "./ProviderInstance.js";
 
+import type { ReasoningEffort } from "../../router/ModelResolver.js";
+
 export type ProviderModel = {
   id: string;
   displayName?: string;
@@ -17,6 +19,8 @@ export type ProviderRequestContext = ProviderContext & {
   account?: ProviderAccount;
   requestId: string;
   credentialPayload?: Record<string, unknown>;
+  /** Reasoning effort level extracted from model name suffix */
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type OpenAIChatMessage = {
@@ -50,6 +54,8 @@ export type NormalizedOpenAIResponse = {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    /** Tokens served from provider cache (Anthropic cache_read_input_tokens, OpenAI cached_tokens) */
+    cached_tokens?: number;
   };
 };
 
@@ -76,6 +82,8 @@ export type NormalizedAnthropicResponse = {
   usage?: {
     input_tokens: number;
     output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
 };
 
