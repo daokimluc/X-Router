@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.js";
 import { NoAvailableAccountError } from "../account-pool/AccountPool.js";
 import { CircuitBreakerOpenError } from "../services/CircuitBreaker.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
+import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 import { ProviderError } from "../providers/base/ProviderErrors.js";
 import type {
   NormalizedAnthropicResponse,
@@ -21,12 +22,19 @@ export async function registerAnthropicRoutes(
   app.post(
     "/v1/messages",
     {
-      preHandler: createAuthMiddleware(
-        config,
-        app.apiKeyService,
-        app.rateLimitService,
-        app.teamService
-      )
+      preHandler: [
+        createAuthMiddleware(
+          config,
+          app.apiKeyService,
+          app.rateLimitService,
+          app.teamService
+        ),
+        createKeyPolicyEnforcer({
+          apiKeyService: app.apiKeyService,
+          teamService: app.teamService,
+          getModel: (req) => (req.body as { model?: string } | undefined)?.model
+        })
+      ]
     },
     async (request, reply) => {
       const releaseGlobal = app.concurrencyLimiter.acquireGlobal();

@@ -447,6 +447,25 @@ const translations: Record<Lang, Record<string, string>> = {
     "apikey.topupSwitchWarning": "This key is currently unlimited. Topping up will switch it to balance-tracked mode.",
     "apikey.topupSuccess": "Added ${amount}. New balance: ${balance}",
 
+    // Phase 20a — Token hardening + batch
+    "apikey.tab.basic": "Basic",
+    "apikey.tab.limits": "Limits",
+    "apikey.tab.restrictions": "Restrictions",
+    "apikey.field.expiresAt": "Expires at",
+    "apikey.field.allowedModels": "Allowed models (whitelist)",
+    "apikey.field.allowedIps": "Allowed IPs (allowlist)",
+    "apikey.field.groupName": "Group name",
+    "apikey.expired": "Expired",
+    "apikey.modelsCount": "🎯 {n} models",
+    "apikey.ipsCount": "🛡 {n} IPs",
+    "apikey.batchMode": "Batch mode",
+    "apikey.batchDelete": "Delete selected",
+    "apikey.batchDisable": "Disable",
+    "apikey.batchEnable": "Enable",
+    "apikey.batchExport": "Export",
+    "apikey.batchSelectAll": "Select all",
+    "apikey.confirmBatchDelete": "Delete {n} API keys? This cannot be undone.",
+
     // Phase 19 — Model pricing
     "pricing.title": "Model Pricing",
     "pricing.subtitle": "Per-model token rates used to calculate request costs.",
@@ -891,6 +910,25 @@ const translations: Record<Lang, Record<string, string>> = {
     "apikey.topupQuick": "Nhanh:",
     "apikey.topupSwitchWarning": "Key này đang không giới hạn. Nạp sẽ chuyển sang chế độ theo dõi số dư.",
     "apikey.topupSuccess": "Đã nạp ${amount}. Số dư mới: ${balance}",
+
+    // Phase 20a — Token hardening + batch
+    "apikey.tab.basic": "Cơ bản",
+    "apikey.tab.limits": "Giới hạn",
+    "apikey.tab.restrictions": "Hạn chế",
+    "apikey.field.expiresAt": "Hết hạn lúc",
+    "apikey.field.allowedModels": "Model cho phép (whitelist)",
+    "apikey.field.allowedIps": "IP cho phép (allowlist)",
+    "apikey.field.groupName": "Tên nhóm",
+    "apikey.expired": "Đã hết hạn",
+    "apikey.modelsCount": "🎯 {n} model",
+    "apikey.ipsCount": "🛡 {n} IP",
+    "apikey.batchMode": "Chế độ batch",
+    "apikey.batchDelete": "Xóa đã chọn",
+    "apikey.batchDisable": "Tắt",
+    "apikey.batchEnable": "Bật",
+    "apikey.batchExport": "Xuất CSV",
+    "apikey.batchSelectAll": "Chọn tất cả",
+    "apikey.confirmBatchDelete": "Xóa {n} API key? Không thể hoàn tác.",
 
     // Phase 19 — Model pricing
     "pricing.title": "Giá Model",

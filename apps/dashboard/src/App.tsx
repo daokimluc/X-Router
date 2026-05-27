@@ -69,6 +69,8 @@ import { TopupModal } from "./components/TopupModal";
 import { ModelPricingSection } from "./components/ModelPricingSection";
 import { TestAllResultsModal, type TestAllPayload } from "./components/TestAllResultsModal";
 import { SyncModelsModal } from "./components/SyncModelsModal";
+import { ApiKeyEditModal, type ApiKeyForEdit } from "./components/ApiKeyEditModal";
+import { ApiKeyExportModal } from "./components/ApiKeyExportModal";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -250,6 +252,11 @@ type ApiKey = {
   enabled: boolean;
   owner?: string;
   balance?: number; // undefined = unlimited (no balance tracking)
+  expiresAt?: string;
+  allowedModels?: string[];
+  allowedIps?: string[];
+  groupName?: string;
+  teamId?: string;
   createdAt?: string;
   limits?: {
     minuteRequests: number;
@@ -420,7 +427,7 @@ type NavGroup = {
 
 const navGroups: Array<NavGroup> = [
   { label: "Dashboard", ids: ["overview", "usage"] },
-  { label: "Setup", ids: ["providers", "profiles", "endpoint", "cli", "proxyPools"] },
+  { label: "Setup", ids: ["providers", "models", "profiles", "endpoint", "cli", "proxyPools"] },
   {
     label: "Media Providers",
     parent: "mediaProviders",
@@ -4871,6 +4878,11 @@ function ApiKeysSection(props: {
   const [pendingDelete, setPendingDelete] = useState<ApiKey | null>(null);
   const [topupTarget, setTopupTarget] = useState<ApiKey | null>(null);
   const [topupToast, setTopupToast] = useState<string | null>(null);
+  const [editFullKey, setEditFullKey] = useState<ApiKey | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showExport, setShowExport] = useState(false);
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
 
   // Load teams for dropdown
   useEffect(() => {
@@ -4995,17 +5007,107 @@ function ApiKeysSection(props: {
           <KeyRound size={18} />
           <h2>{t("ep.apiKeys")}</h2>
         </div>
-        <button
-          type="button"
-          className="primaryButton"
-          onClick={() => {
-            setShowCreateForm(true);
-            setCreatedKey(null);
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-text-muted)" }}>
+            <input
+              type="checkbox"
+              checked={batchMode}
+              onChange={(e) => {
+                setBatchMode(e.target.checked);
+                if (!e.target.checked) setSelectedIds(new Set());
+              }}
+            />
+            {t("apikey.batchMode")}
+          </label>
+          <button
+            type="button"
+            className="ghostButton"
+            onClick={() => setShowExport(true)}
+          >
+            {t("apikey.batchExport")}
+          </button>
+          <button
+            type="button"
+            className="primaryButton"
+            onClick={() => {
+              setShowCreateForm(true);
+              setCreatedKey(null);
+            }}
+          >
+            <Plus size={16} /> {t("ep.createKey")}
+          </button>
+        </div>
+      </header>
+
+      {batchMode && (
+        <div
+          style={{
+            padding: "8px 16px",
+            background: "var(--color-surface-2)",
+            borderBottom: "1px solid var(--color-border)",
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+            fontSize: 12,
           }}
         >
-          <Plus size={16} /> {t("ep.createKey")}
-        </button>
-      </header>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={selectedIds.size > 0 && selectedIds.size === props.keys.length}
+              ref={(el) => {
+                if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < props.keys.length;
+              }}
+              onChange={(e) => {
+                if (e.target.checked) setSelectedIds(new Set(props.keys.map((k) => k.id)));
+                else setSelectedIds(new Set());
+              }}
+            />
+            {t("apikey.batchSelectAll")} ({selectedIds.size})
+          </label>
+          <button
+            type="button"
+            className="ghostButton"
+            disabled={selectedIds.size === 0}
+            onClick={() => setPendingBatchDelete(true)}
+          >
+            <Trash2 size={14} /> {t("apikey.batchDelete")}
+          </button>
+          <button
+            type="button"
+            className="ghostButton"
+            disabled={selectedIds.size === 0}
+            onClick={async () => {
+              await Promise.all(
+                Array.from(selectedIds).map((id) =>
+                  props.api.post(`/admin/v1/api-keys/${id}/disable`, {})
+                )
+              );
+              setSelectedIds(new Set());
+              await props.refresh();
+            }}
+          >
+            {t("apikey.batchDisable")}
+          </button>
+          <button
+            type="button"
+            className="ghostButton"
+            disabled={selectedIds.size === 0}
+            onClick={async () => {
+              await Promise.all(
+                Array.from(selectedIds).map((id) =>
+                  props.api.post(`/admin/v1/api-keys/${id}/enable`, {})
+                )
+              );
+              setSelectedIds(new Set());
+              await props.refresh();
+            }}
+          >
+            {t("apikey.batchEnable")}
+          </button>
+        </div>
+      )}
 
       <div className="endpointToggleRow">
         <div>
@@ -5159,6 +5261,21 @@ function ApiKeysSection(props: {
         <ul className="endpointKeyList">
           {props.keys.map((key) => (
             <li key={key.id} className="endpointKeyItem">
+              {batchMode && (
+                <input
+                  type="checkbox"
+                  style={{ marginRight: 8 }}
+                  checked={selectedIds.has(key.id)}
+                  onChange={(e) => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(key.id);
+                      else next.delete(key.id);
+                      return next;
+                    });
+                  }}
+                />
+              )}
               {editingKeyId === key.id ? (
                 <div className="endpointKeyEditForm">
                   <label>
@@ -5220,6 +5337,34 @@ function ApiKeysSection(props: {
                           {" · "}{t("ep.quotaExhausted")}
                         </span>
                       ) : null}
+                      {key.expiresAt && (() => {
+                        const expDate = new Date(key.expiresAt);
+                        const expired = expDate.getTime() < Date.now();
+                        return (
+                          <span
+                            style={{ marginLeft: 8, color: expired ? "#ef4444" : "var(--color-text-muted)" }}
+                            title={expDate.toLocaleString()}
+                          >
+                            ⏰ {expired ? t("apikey.expired") : expDate.toLocaleDateString()}
+                          </span>
+                        );
+                      })()}
+                      {key.allowedModels && key.allowedModels.length > 0 && (
+                        <span
+                          style={{ marginLeft: 8, color: "var(--color-text-muted)" }}
+                          title={key.allowedModels.join(", ")}
+                        >
+                          {t("apikey.modelsCount").replace("{n}", String(key.allowedModels.length))}
+                        </span>
+                      )}
+                      {key.allowedIps && key.allowedIps.length > 0 && (
+                        <span
+                          style={{ marginLeft: 8, color: "var(--color-text-muted)" }}
+                          title={key.allowedIps.join(", ")}
+                        >
+                          {t("apikey.ipsCount").replace("{n}", String(key.allowedIps.length))}
+                        </span>
+                      )}
                     </small>
                   </div>
                   <div className="endpointKeyActions">
@@ -5235,7 +5380,7 @@ function ApiKeysSection(props: {
                       type="button"
                       className="endpointKeyBtn"
                       title={t("ep.editTeamOwner")}
-                      onClick={() => void editKey(key)}
+                      onClick={() => setEditFullKey(key)}
                     >
                       {t("common.edit")}
                     </button>
@@ -5312,6 +5457,56 @@ function ApiKeysSection(props: {
         >
           {topupToast}
         </div>
+      )}
+      {editFullKey && (
+        <ApiKeyEditModal
+          apiKey={editFullKey as ApiKeyForEdit}
+          api={props.api}
+          teams={teams}
+          onClose={() => setEditFullKey(null)}
+          onSaved={async () => {
+            setEditFullKey(null);
+            await props.refresh();
+          }}
+        />
+      )}
+      {showExport && (
+        <ApiKeyExportModal
+          fetchCsv={async () => {
+            const adminKey = window.localStorage.getItem("gateway.adminKey") ?? "";
+            const response = await fetch("/admin/v1/api-keys/export?format=csv", {
+              headers: {
+                authorization: `Bearer ${adminKey}`
+              }
+            });
+            if (!response.ok) {
+              throw new Error(`Export failed: ${response.status}`);
+            }
+            return response.text();
+          }}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+      {pendingBatchDelete && (
+        <ConfirmDialog
+          title={t("apikey.batchDelete")}
+          message={t("apikey.confirmBatchDelete").replace("{n}", String(selectedIds.size))}
+          variant="danger"
+          confirmLabel={t("common.delete") ?? "Delete"}
+          onConfirm={async () => {
+            setPendingBatchDelete(false);
+            try {
+              await props.api.post("/admin/v1/api-keys/batch-delete", {
+                ids: Array.from(selectedIds)
+              });
+              setSelectedIds(new Set());
+              await props.refresh();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Batch delete failed");
+            }
+          }}
+          onCancel={() => setPendingBatchDelete(false)}
+        />
       )}
     </section>
   );

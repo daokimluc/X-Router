@@ -10,6 +10,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
+import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 
 export async function registerEmbeddingsRoutes(
   app: FastifyInstance,
@@ -18,11 +19,22 @@ export async function registerEmbeddingsRoutes(
   app.post(
     "/v1/embeddings",
     {
-      preHandler: createAuthMiddleware(
-        config,
-        app.apiKeyService,
-        app.rateLimitService
-      ),
+      preHandler: [
+        createAuthMiddleware(
+          config,
+          app.apiKeyService,
+          app.rateLimitService,
+          app.teamService
+        ),
+        createKeyPolicyEnforcer({
+          apiKeyService: app.apiKeyService,
+          teamService: app.teamService,
+          getModel: (req) => {
+            const body = req.body as { model?: string } | null;
+            return body?.model;
+          }
+        })
+      ],
     },
     async (request, reply) => {
       const body = request.body as Record<string, unknown> | null;

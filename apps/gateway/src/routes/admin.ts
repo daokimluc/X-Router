@@ -21,6 +21,7 @@ import {
 import type { ProviderAccount } from "../providers/base/ProviderAccount.js";
 import type { ProviderCapabilityFlag } from "../providers/base/ProviderCapabilities.js";
 import type { ProviderInstance } from "../providers/base/ProviderInstance.js";
+import { isValidIpOrCidr } from "../utils/ipMatch.js";
 
 const providerInstancePatchSchema = z.object({
   enabled: z.boolean().optional(),
@@ -155,7 +156,11 @@ const apiKeyCreateSchema = z.object({
   teamId: z.string().min(1).optional(),
   rpmLimit: z.number().int().min(0).optional(),
   dailyLimit: z.number().int().min(0).optional(),
-  dailyTokenLimit: z.number().int().min(0).optional()
+  dailyTokenLimit: z.number().int().min(0).optional(),
+  expiresAt: z.string().datetime().optional(),
+  allowedModels: z.array(z.string().min(1)).max(200).optional(),
+  allowedIps: z.array(z.string().min(1)).max(50).optional(),
+  groupName: z.string().min(1).max(64).optional()
 });
 const configDraftSchema = z.object({
   config: z.record(z.unknown())
@@ -1805,9 +1810,25 @@ export async function registerAdminRoutes(
     {
       preHandler: adminAuth
     },
-    async (request) => {
+    async (request, reply) => {
       const body = apiKeyCreateSchema.parse(request.body ?? {});
-      const apiKey = app.apiKeyService.create(body);
+
+      // Validate IP allowlist entries (single IP or CIDR)
+      if (body.allowedIps) {
+        for (const entry of body.allowedIps) {
+          if (!isValidIpOrCidr(entry)) {
+            await reply.code(400).send({
+              error: { type: "validation_error", message: `Invalid IP or CIDR: "${entry}"`, code: "invalid_ip_entry" }
+            });
+            return;
+          }
+        }
+      }
+
+      const apiKey = app.apiKeyService.create({
+        ...body,
+        expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined
+      });
       app.adminAuditService.record({
         action: "api_key.create",
         actorKeyHash: request.adminAuth?.apiKeyHash,
@@ -1832,9 +1853,29 @@ export async function registerAdminRoutes(
         rpmLimit: z.number().int().min(0).optional(),
         dailyLimit: z.number().int().min(0).optional(),
         dailyTokenLimit: z.number().int().min(0).optional(),
-        enabled: z.boolean().optional()
+        enabled: z.boolean().optional(),
+        expiresAt: z.union([z.string().datetime(), z.null()]).optional(),
+        allowedModels: z.array(z.string().min(1)).max(200).optional(),
+        allowedIps: z.array(z.string().min(1)).max(50).optional(),
+        groupName: z.union([z.string().min(1).max(64), z.null()]).optional()
       }).parse(request.body ?? {});
-      const updated = app.apiKeyService.update(params.id, body);
+
+      // Validate IP allowlist entries
+      if (body.allowedIps) {
+        for (const entry of body.allowedIps) {
+          if (!isValidIpOrCidr(entry)) {
+            await reply.code(400).send({
+              error: { type: "validation_error", message: `Invalid IP or CIDR: "${entry}"`, code: "invalid_ip_entry" }
+            });
+            return;
+          }
+        }
+      }
+
+      const updated = app.apiKeyService.update(params.id, {
+        ...body,
+        expiresAt: body.expiresAt === null ? null : body.expiresAt ? new Date(body.expiresAt) : undefined
+      });
       if (!updated) {
         await reply.code(404).send({ error: { type: "not_found", message: "Key not found" } });
         return;
@@ -1979,7 +2020,77 @@ export async function registerAdminRoutes(
     }
   );
 
-  // ─── Teams / Workspaces ──────────────────────────────────
+  // ─── API Key Batch Operations ───────────────────────────────
+
+  app.post(
+    "/admin/v1/api-keys/batch-delete",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = z.object({
+        ids: z.array(z.string().min(1)).min(1).max(500)
+      }).parse(request.body ?? {});
+
+      const result = app.apiKeyService.bulkDelete(body.ids);
+
+      app.adminAuditService.record({
+        action: "api_key.batch_delete",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "api_key",
+        targetId: "*",
+      });
+      await saveAdminRuntimeState(app);
+
+      return result;
+    }
+  );
+
+  app.get(
+    "/admin/v1/api-keys/export",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const query = z.object({
+        format: z.enum(["csv", "json"]).optional().default("json")
+      }).parse(request.query ?? {});
+
+      const keys = app.apiKeyService.list();
+
+      app.adminAuditService.record({
+        action: "api_key.export",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "api_key",
+        targetId: "*",
+      });
+
+      if (query.format === "csv") {
+        const header = [
+          "id", "owner", "teamId", "keyHash", "enabled", "createdAt",
+          "expiresAt", "balance", "rpmLimit", "dailyLimit", "dailyTokenLimit",
+          "allowedModels", "allowedIps", "groupName"
+        ].join(",");
+
+        const escape = (v: unknown): string => {
+          if (v === undefined || v === null) return "";
+          const s = Array.isArray(v) ? v.join(";") : String(v);
+          if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+          return s;
+        };
+
+        const rows = keys.map((k) => [
+          k.id, k.owner, k.teamId, k.keyHash, k.enabled,
+          k.createdAt instanceof Date ? k.createdAt.toISOString() : k.createdAt,
+          k.expiresAt instanceof Date ? k.expiresAt.toISOString() : k.expiresAt,
+          k.balance, k.rpmLimit, k.dailyLimit, k.dailyTokenLimit,
+          k.allowedModels, k.allowedIps, k.groupName
+        ].map(escape).join(","));
+
+        reply.header("content-type", "text/csv; charset=utf-8");
+        reply.header("content-disposition", "attachment; filename=api-keys.csv");
+        return [header, ...rows].join("\n");
+      }
+
+      return { data: keys };
+    }
+  );
 
   app.get(
     "/admin/v1/teams",

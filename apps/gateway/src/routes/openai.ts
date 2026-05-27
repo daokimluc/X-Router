@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.js";
 import { NoAvailableAccountError } from "../account-pool/AccountPool.js";
 import { CircuitBreakerOpenError } from "../services/CircuitBreaker.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
+import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 import { ProviderError } from "../providers/base/ProviderErrors.js";
 import { isProviderStream, writeOpenAIStream } from "../utils/sse.js";
 import { openAIChatCompletionRequestSchema } from "../validation/openaiSchemas.js";
@@ -15,12 +16,19 @@ export async function registerOpenAIRoutes(
   app.post(
     "/v1/chat/completions",
     {
-      preHandler: createAuthMiddleware(
-        config,
-        app.apiKeyService,
-        app.rateLimitService,
-        app.teamService
-      )
+      preHandler: [
+        createAuthMiddleware(
+          config,
+          app.apiKeyService,
+          app.rateLimitService,
+          app.teamService
+        ),
+        createKeyPolicyEnforcer({
+          apiKeyService: app.apiKeyService,
+          teamService: app.teamService,
+          getModel: (req) => (req.body as { model?: string } | undefined)?.model
+        })
+      ]
     },
     async (request, reply) => {
       let releaseGlobal: (() => void) | undefined;
@@ -45,38 +53,6 @@ export async function registerOpenAIRoutes(
       if (typeof directAccountId === "string" && directAccountId.length > 0) {
         const directResult = await handleDirectAccountRouting(app, request, reply, body, directAccountId, "openai_chat_completions");
         return directResult;
-      }
-
-      // Team enforcement: check allowedModels if key belongs to a team
-      if (request.auth?.apiKeyHash) {
-        const keyRecord = app.apiKeyService.findByHash(request.auth.apiKeyHash);
-        if (keyRecord?.teamId) {
-          const team = app.teamService.get(keyRecord.teamId);
-          if (team && team.enabled && team.allowedModels?.length) {
-            if (!team.allowedModels.includes(body.model)) {
-              await reply.code(403).send({
-                error: {
-                  type: "forbidden",
-                  message: `Team "${team.name}" does not allow model "${body.model}". Allowed: ${team.allowedModels.join(", ")}`,
-                  code: "team_model_not_allowed"
-                }
-              });
-              return reply;
-            }
-          }
-        }
-      }
-
-      // Balance check: reject if key has exhausted its token balance
-      if (request.auth?.apiKeyHash && !app.apiKeyService.hasBalance(request.auth.apiKeyHash)) {
-        await reply.code(402).send({
-          error: {
-            type: "insufficient_balance",
-            message: "API key token balance exhausted. Contact admin for top-up.",
-            code: "balance_exhausted"
-          }
-        });
-        return reply;
       }
 
       // Apply Token Saver compression to messages

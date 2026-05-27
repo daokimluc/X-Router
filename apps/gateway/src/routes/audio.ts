@@ -11,6 +11,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
+import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 
 export async function registerAudioRoutes(
   app: FastifyInstance,
@@ -19,8 +20,17 @@ export async function registerAudioRoutes(
   const authMiddleware = createAuthMiddleware(
     config,
     app.apiKeyService,
-    app.rateLimitService
+    app.rateLimitService,
+    app.teamService
   );
+  const policyMiddleware = createKeyPolicyEnforcer({
+    apiKeyService: app.apiKeyService,
+    teamService: app.teamService,
+    getModel: (req) => {
+      const body = req.body as { model?: string } | null;
+      return body?.model;
+    }
+  });
 
   // ==========================================================================
   // POST /v1/audio/speech — Text-to-Speech
@@ -28,7 +38,7 @@ export async function registerAudioRoutes(
   // ==========================================================================
   app.post(
     "/v1/audio/speech",
-    { preHandler: authMiddleware },
+    { preHandler: [authMiddleware, policyMiddleware] },
     async (request, reply) => {
       const body = request.body as Record<string, unknown> | null;
 
@@ -98,7 +108,7 @@ export async function registerAudioRoutes(
   // ==========================================================================
   app.post(
     "/v1/audio/transcriptions",
-    { preHandler: authMiddleware },
+    { preHandler: [authMiddleware, policyMiddleware] },
     async (request, reply) => {
       const contentType = request.headers["content-type"] || "";
 

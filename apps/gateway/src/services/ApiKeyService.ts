@@ -12,6 +12,14 @@ export type InternalApiKeyRecord = {
   dailyTokenLimit?: number;
   /** Token balance (credits). Infinity = unlimited. Deducted per request. */
   balance?: number;
+  /** Expiry timestamp. undefined = never expires. */
+  expiresAt?: Date;
+  /** Public model whitelist. undefined or empty = all models allowed. */
+  allowedModels?: string[];
+  /** Client IP allowlist. undefined or empty = all IPs allowed. Entries: single IP or CIDR (IPv4/IPv6). */
+  allowedIps?: string[];
+  /** Optional grouping label, reserved for Phase 20c routing. */
+  groupName?: string;
   createdAt: Date;
 };
 
@@ -84,7 +92,18 @@ export class ApiKeyService {
     return structuredClone(safeRecord);
   }
 
-  update(id: string, patch: { owner?: string; teamId?: string; rpmLimit?: number; dailyLimit?: number; dailyTokenLimit?: number; enabled?: boolean }): InternalApiKeyRecord | null {
+  update(id: string, patch: {
+    owner?: string;
+    teamId?: string;
+    rpmLimit?: number;
+    dailyLimit?: number;
+    dailyTokenLimit?: number;
+    enabled?: boolean;
+    expiresAt?: Date | null;
+    allowedModels?: string[];
+    allowedIps?: string[];
+    groupName?: string | null;
+  }): InternalApiKeyRecord | null {
     const record = Array.from(this.keys.values()).find((r) => r.id === id);
     if (!record) return null;
     if (patch.owner !== undefined) record.owner = patch.owner || undefined;
@@ -93,6 +112,10 @@ export class ApiKeyService {
     if (patch.dailyLimit !== undefined) record.dailyLimit = patch.dailyLimit > 0 ? patch.dailyLimit : undefined;
     if (patch.dailyTokenLimit !== undefined) record.dailyTokenLimit = patch.dailyTokenLimit > 0 ? patch.dailyTokenLimit : undefined;
     if (patch.enabled !== undefined) record.enabled = patch.enabled;
+    if (patch.expiresAt !== undefined) record.expiresAt = patch.expiresAt ?? undefined;
+    if (patch.allowedModels !== undefined) record.allowedModels = patch.allowedModels.length > 0 ? patch.allowedModels : undefined;
+    if (patch.allowedIps !== undefined) record.allowedIps = patch.allowedIps.length > 0 ? patch.allowedIps : undefined;
+    if (patch.groupName !== undefined) record.groupName = patch.groupName ?? undefined;
     const { key: _key, ...safeRecord } = record;
     return structuredClone(safeRecord);
   }
@@ -103,7 +126,17 @@ export class ApiKeyService {
     return record?.key || null;
   }
 
-  create(input: { owner?: string; teamId?: string; rpmLimit?: number; dailyLimit?: number; dailyTokenLimit?: number } = {}): CreatedInternalApiKey {
+  create(input: {
+    owner?: string;
+    teamId?: string;
+    rpmLimit?: number;
+    dailyLimit?: number;
+    dailyTokenLimit?: number;
+    expiresAt?: Date;
+    allowedModels?: string[];
+    allowedIps?: string[];
+    groupName?: string;
+  } = {}): CreatedInternalApiKey {
     const key = `igw_${randomBytes(24).toString("hex")}`;
     const record = {
       id: `internal_key_${this.keys.size + 1}`,
@@ -115,6 +148,10 @@ export class ApiKeyService {
       rpmLimit: input.rpmLimit && input.rpmLimit > 0 ? input.rpmLimit : undefined,
       dailyLimit: input.dailyLimit && input.dailyLimit > 0 ? input.dailyLimit : undefined,
       dailyTokenLimit: input.dailyTokenLimit && input.dailyTokenLimit > 0 ? input.dailyTokenLimit : undefined,
+      expiresAt: input.expiresAt,
+      allowedModels: input.allowedModels && input.allowedModels.length > 0 ? input.allowedModels : undefined,
+      allowedIps: input.allowedIps && input.allowedIps.length > 0 ? input.allowedIps : undefined,
+      groupName: input.groupName,
       createdAt: new Date()
     };
 
@@ -158,5 +195,27 @@ export class ApiKeyService {
   getBalance(id: string): number | undefined {
     const record = Array.from(this.keys.values()).find((r) => r.id === id);
     return record?.balance;
+  }
+
+  /** Returns true if the key has expired (expiresAt set and in the past). */
+  isExpired(record: Pick<InternalApiKeyRecord, "expiresAt">): boolean {
+    return record.expiresAt !== undefined && record.expiresAt.getTime() < Date.now();
+  }
+
+  /** Delete multiple keys atomically. Returns counts. */
+  bulkDelete(ids: string[]): { deleted: number; notFound: string[] } {
+    const idSet = new Set(ids);
+    const notFound: string[] = [];
+    const found = new Set<string>();
+    for (const [mapKey, record] of this.keys.entries()) {
+      if (idSet.has(record.id)) {
+        this.keys.delete(mapKey);
+        found.add(record.id);
+      }
+    }
+    for (const id of ids) {
+      if (!found.has(id)) notFound.push(id);
+    }
+    return { deleted: found.size, notFound };
   }
 }

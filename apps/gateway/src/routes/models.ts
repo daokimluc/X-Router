@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
+import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 
 export async function registerModelsRoute(
   app: FastifyInstance,
@@ -9,11 +10,19 @@ export async function registerModelsRoute(
   app.get(
     "/v1/models",
     {
-      preHandler: createAuthMiddleware(
-        config,
-        app.apiKeyService,
-        app.rateLimitService
-      )
+      preHandler: [
+        createAuthMiddleware(
+          config,
+          app.apiKeyService,
+          app.rateLimitService,
+          app.teamService
+        ),
+        createKeyPolicyEnforcer({
+          apiKeyService: app.apiKeyService,
+          teamService: app.teamService
+          // No getModel — list endpoint, model whitelist not applicable
+        })
+      ]
     },
     async () => {
       const fixedModels = app.modelRegistry.listPublicModels().map((mapping) => ({

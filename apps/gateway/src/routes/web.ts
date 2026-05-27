@@ -11,6 +11,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
+import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 
 export async function registerWebRoutes(
   app: FastifyInstance,
@@ -19,8 +20,17 @@ export async function registerWebRoutes(
   const authMiddleware = createAuthMiddleware(
     config,
     app.apiKeyService,
-    app.rateLimitService
+    app.rateLimitService,
+    app.teamService
   );
+  const policyMiddleware = createKeyPolicyEnforcer({
+    apiKeyService: app.apiKeyService,
+    teamService: app.teamService,
+    getModel: (req) => {
+      const body = req.body as { model?: string } | null;
+      return body?.model;
+    }
+  });
 
   // ==========================================================================
   // POST /v1/search — Web Search
@@ -28,7 +38,7 @@ export async function registerWebRoutes(
   // ==========================================================================
   app.post(
     "/v1/search",
-    { preHandler: authMiddleware },
+    { preHandler: [authMiddleware, policyMiddleware] },
     async (request, reply) => {
       const body = request.body as Record<string, unknown> | null;
 
@@ -66,7 +76,7 @@ export async function registerWebRoutes(
   // ==========================================================================
   app.post(
     "/v1/web/fetch",
-    { preHandler: authMiddleware },
+    { preHandler: [authMiddleware, policyMiddleware] },
     async (request, reply) => {
       const body = request.body as Record<string, unknown> | null;
 
