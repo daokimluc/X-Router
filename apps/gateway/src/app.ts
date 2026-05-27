@@ -17,6 +17,7 @@ import { registerProviderAccountManagementRoutes } from "./routes/admin/provider
 import { registerProxyPoolRoutes } from "./routes/admin/proxyPools.js";
 import { registerMediaProviderRoutes } from "./routes/admin/mediaProviders.js";
 import { registerEmbeddingsRoutes } from "./routes/embeddings.js";
+import { registerPublicRoutes } from "./routes/public.js";
 import { registerImagesRoutes } from "./routes/images.js";
 import { registerAudioRoutes } from "./routes/audio.js";
 import { registerWebRoutes } from "./routes/web.js";
@@ -356,6 +357,7 @@ export async function buildApp(
   await registerProxyPoolRoutes(app, config, proxyPoolService);
   await registerMediaProviderRoutes(app, config);
   await registerEmbeddingsRoutes(app, config);
+  await registerPublicRoutes(app);
   await registerImagesRoutes(app, config);
   await registerAudioRoutes(app, config);
   await registerWebRoutes(app, config);
