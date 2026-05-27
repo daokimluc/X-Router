@@ -5901,25 +5901,48 @@ function Playground(props: { models: ModelMapping[]; profiles: RoutingProfile[] 
 function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnType<typeof createApiClient>; refresh: () => Promise<void> }) {
   const { t } = useLang();
   const [filter, setFilter] = useState<"all" | "success" | "error">("all");
+  const [methodFilter, setMethodFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [visibleCols, setVisibleCols] = useState<{
+    method: boolean; route: boolean; status: boolean; duration: boolean; time: boolean; actor: boolean;
+  }>(() => {
+    const saved = window.localStorage.getItem("rl.columns");
+    if (saved) {
+      try { return JSON.parse(saved); } catch { /* ignore */ }
+    }
+    return { method: true, route: true, status: true, duration: true, time: true, actor: true };
+  });
   const perPage = 50;
+
+  useEffect(() => {
+    window.localStorage.setItem("rl.columns", JSON.stringify(visibleCols));
+  }, [visibleCols]);
+
+  const allMethods = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of logs) set.add(l.method);
+    return Array.from(set).sort();
+  }, [logs]);
 
   const filtered = useMemo(() => {
     let result = logs;
     if (filter === "success") result = result.filter((l) => l.statusCode < 400);
     if (filter === "error") result = result.filter((l) => l.statusCode >= 400);
+    if (methodFilter !== "all") result = result.filter((l) => l.method === methodFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((l) =>
         l.route.toLowerCase().includes(q) ||
         l.requestId.toLowerCase().includes(q) ||
-        l.method.toLowerCase().includes(q)
+        l.method.toLowerCase().includes(q) ||
+        (l.apiKeyHash ?? "").toLowerCase().includes(q)
       );
     }
     return result;
-  }, [logs, filter, search]);
+  }, [logs, filter, methodFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
   const paginated = useMemo(() => {
@@ -5928,7 +5951,7 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
   }, [filtered, page]);
 
   // Reset page when filter changes
-  useEffect(() => { setPage(1); }, [filter, search]);
+  useEffect(() => { setPage(1); }, [filter, methodFilter, search]);
 
   const stats = useMemo(() => {
     const total = logs.length;
@@ -6016,6 +6039,10 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
           <button className={`segmentedItem ${filter === "success" ? "active" : ""}`} onClick={() => setFilter("success")}>{t("rl.success")}</button>
           <button className={`segmentedItem ${filter === "error" ? "active" : ""}`} onClick={() => setFilter("error")}>{t("rl.errorsFilter")}</button>
         </div>
+        <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)} style={{ padding: "4px 8px", fontSize: 12 }}>
+          <option value="all">All methods</option>
+          {allMethods.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
         <input
           className="rlSearchInput"
           type="text"
@@ -6023,6 +6050,43 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            className="ghostButton"
+            onClick={() => setShowColumnMenu((v) => !v)}
+            style={{ fontSize: 12, padding: "4px 8px" }}
+          >
+            Columns
+          </button>
+          {showColumnMenu && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 6,
+                padding: 8,
+                zIndex: 50,
+                minWidth: 140,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              }}
+            >
+              {(Object.keys(visibleCols) as Array<keyof typeof visibleCols>).map((col) => (
+                <label key={col} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={visibleCols[col]}
+                    onChange={(e) => setVisibleCols({ ...visibleCols, [col]: e.target.checked })}
+                  />
+                  {col}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
         <span className="rlFilterCount">{filtered.length} {t("rl.results")}</span>
       </div>
 
@@ -6037,16 +6101,20 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
           paginated.map((log) => (
             <div key={log.id} className="rlItem">
               <div className="rlItemLeft">
-                <span className={`rlMethod rlMethod--${log.method.toLowerCase()}`}>{log.method}</span>
-                <span className="rlRoute">{log.route}</span>
-                <span className={`rlStatus rlStatus--${log.statusCode < 400 ? "ok" : log.statusCode < 500 ? "warn" : "err"}`}>
-                  {log.statusCode}
-                </span>
+                {visibleCols.method && (
+                  <span className={`rlMethod rlMethod--${log.method.toLowerCase()}`}>{log.method}</span>
+                )}
+                {visibleCols.route && <span className="rlRoute">{log.route}</span>}
+                {visibleCols.status && (
+                  <span className={`rlStatus rlStatus--${log.statusCode < 400 ? "ok" : log.statusCode < 500 ? "warn" : "err"}`}>
+                    {log.statusCode}
+                  </span>
+                )}
               </div>
               <div className="rlItemRight">
-                <span className="rlDuration">{log.durationMs.toFixed(1)}ms</span>
-                <span className="rlTime">{new Date(log.createdAt).toLocaleTimeString()}</span>
-                {log.apiKeyHash && <code className="rlActor">{log.apiKeyHash.slice(0, 8)}</code>}
+                {visibleCols.duration && <span className="rlDuration">{log.durationMs.toFixed(1)}ms</span>}
+                {visibleCols.time && <span className="rlTime">{new Date(log.createdAt).toLocaleTimeString()}</span>}
+                {visibleCols.actor && log.apiKeyHash && <code className="rlActor">{log.apiKeyHash.slice(0, 8)}</code>}
               </div>
             </div>
           ))
