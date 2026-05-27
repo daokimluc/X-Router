@@ -43,12 +43,15 @@ export class ModelResolver {
     private readonly routingProfileRegistry: RoutingProfileRegistry,
     private readonly capabilityMatcher = new CapabilityMatcher(),
     /** Optional priority lookup. Returns undefined for unknown instances; treated as 0. */
-    private readonly getInstancePriority?: (providerInstanceId: string) => number | undefined
+    private readonly getInstancePriority?: (providerInstanceId: string) => number | undefined,
+    /** Optional group lookup (Phase 20c). Returns undefined → instance has no group. */
+    private readonly getInstanceGroup?: (providerInstanceId: string) => string | undefined
   ) {}
 
   resolve(
     requestedModel: string,
-    requiredCapabilities: ProviderCapabilityFlag[] = ["chat"]
+    requiredCapabilities: ProviderCapabilityFlag[] = ["chat"],
+    context: { keyGroupName?: string; crossGroupRetry?: boolean } = {}
   ): ResolvedModelRoute {
     // Extract reasoning effort suffix: model-high, model-medium, model-low
     const { baseModel, reasoningEffort } = extractReasoningEffort(requestedModel);
@@ -72,7 +75,7 @@ export class ModelResolver {
     }
 
     const required = mergeCapabilities(profile.requiredCapabilities, requiredCapabilities);
-    const candidates = profile.candidates.map((candidateModel) => {
+    const allCandidates = profile.candidates.map((candidateModel) => {
       const mapping = this.modelRegistry.get(candidateModel);
 
       if (!mapping || !mapping.enabled) {
@@ -84,6 +87,24 @@ export class ModelResolver {
       return this.toCandidate(this.assertCapabilities(mapping, required));
     });
 
+    // Phase 20c — filter by group when key has groupName.
+    let candidates = allCandidates;
+    if (context.keyGroupName && this.getInstanceGroup) {
+      const lookup = this.getInstanceGroup;
+      const inGroup = allCandidates.filter(
+        (c) => lookup(c.providerInstanceId) === context.keyGroupName
+      );
+      if (inGroup.length > 0) {
+        candidates = inGroup;
+      } else if (context.crossGroupRetry) {
+        // No in-group match: fall back to all candidates
+        candidates = allCandidates;
+      } else {
+        // No in-group match and no cross-group fallback allowed
+        candidates = [];
+      }
+    }
+
     // Sort candidates by descending priority (Phase 20b). Stable: equal
     // priorities preserve registration order from the routing profile.
     if (this.getInstancePriority) {
@@ -94,15 +115,7 @@ export class ModelResolver {
         p: lookup(c.providerInstanceId) ?? 0,
       }));
       withPriority.sort((a, b) => (b.p - a.p) || (a.i - b.i));
-      const sorted = withPriority.map((entry) => entry.c);
-
-      return {
-        requestedModel: baseModel,
-        routeType: "routing_profile",
-        fallback: profile.fallback,
-        candidates: sorted,
-        reasoningEffort
-      };
+      candidates = withPriority.map((entry) => entry.c);
     }
 
     return {

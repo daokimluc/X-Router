@@ -40,6 +40,8 @@ export type ProviderInstance = {
   headerOverride?: Record<string, string>;
   /** Phase 20b — persisted but not yet consumed by routing logic. */
   statusCodeMapping?: Record<string, StatusCodeAction>;
+  /** Phase 20c — optional channel group label for group-based routing. */
+  groupName?: string;
 
   /** Array of media kinds this provider supports (e.g., embedding, tts, image) */
   serviceKinds?: MediaKind[];

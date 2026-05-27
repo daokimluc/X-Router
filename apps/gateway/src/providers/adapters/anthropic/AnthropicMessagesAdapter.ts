@@ -19,7 +19,8 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import { ModelCache } from "../../services/ModelCache.js";
-import { applyChannelOverrides } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -163,7 +164,7 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
       });
 
       if (!response.ok) {
-        throw await this.classifyHttpError(response, baseUrl, timeoutMs);
+        throw await this.classifyHttpError(response, baseUrl, timeoutMs, context.providerInstance);
       }
 
       if (request.stream) {
@@ -294,9 +295,22 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
   private async classifyHttpError(
     response: Response,
     baseUrl: string,
-    timeoutMs: number
+    timeoutMs: number,
+    instance?: ProviderInstance
   ): Promise<ProviderAuthError | ProviderRateLimitError | ProviderTimeoutError | ProviderUnavailableError> {
     const status = response.status;
+
+    // Phase 20c — instance-level statusCodeMapping override
+    if (instance) {
+      const action = interpretStatusCode(instance, status);
+      if (action === "disable") {
+        const body = await safeResponseText(response);
+        return new ProviderAuthError("anthropic", `Status ${status} mapped to disable${body ? `: ${body.slice(0, 200)}` : ""}`);
+      }
+      if (action === "retry") {
+        return new ProviderRateLimitError("anthropic", undefined);
+      }
+    }
 
     if (status === 401 || status === 403) {
       const body = await safeResponseText(response);

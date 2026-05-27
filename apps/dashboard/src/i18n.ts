@@ -479,6 +479,10 @@ const translations: Record<Lang, Record<string, string>> = {
     "channel.invalidJson": "Invalid JSON",
     "channel.reservedHeaderConflict": "Reserved headers cannot be overridden: {keys}",
     "channel.invalidStatusCodeKey": "Invalid status code key: {key}",
+    "channel.groupName": "Group name",
+    "channel.groupName.hint": "Channel group label. API keys with matching groupName route here first.",
+    "apikey.field.crossGroupRetry": "Cross-group retry fallback",
+    "apikey.field.crossGroupRetry.hint": "When enabled, fall back to all groups if no channel matches this key's group.",
 
     // Phase 19 — Model pricing
     "pricing.title": "Model Pricing",
@@ -957,6 +961,10 @@ const translations: Record<Lang, Record<string, string>> = {
     "channel.invalidJson": "JSON không hợp lệ",
     "channel.reservedHeaderConflict": "Không được đè header dành riêng: {keys}",
     "channel.invalidStatusCodeKey": "Key status code không hợp lệ: {key}",
+    "channel.groupName": "Tên nhóm",
+    "channel.groupName.hint": "Nhãn nhóm channel. API key có groupName trùng sẽ ưu tiên route đến đây.",
+    "apikey.field.crossGroupRetry": "Fallback cross-group",
+    "apikey.field.crossGroupRetry.hint": "Khi bật, nếu không có channel nào trong group thì fallback ra tất cả group.",
 
     // Phase 19 — Model pricing
     "pricing.title": "Giá Model",

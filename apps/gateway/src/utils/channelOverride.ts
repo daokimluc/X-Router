@@ -65,3 +65,21 @@ export function validateHeaderOverride(
   }
   return { valid: conflicts.length === 0, reservedConflicts: conflicts };
 }
+
+/**
+ * Phase 20c — interpret an upstream HTTP status against the instance's
+ * statusCodeMapping. Exact match wins over family match (e.g. "401" beats "4xx").
+ * Returns "passthrough" when there's no mapping or no match.
+ */
+export function interpretStatusCode(
+  instance: ProviderInstance,
+  statusCode: number
+): "retry" | "disable" | "passthrough" {
+  const mapping = instance.statusCodeMapping;
+  if (!mapping) return "passthrough";
+  const exactKey = String(statusCode);
+  if (mapping[exactKey]) return mapping[exactKey];
+  const family = `${Math.floor(statusCode / 100)}xx`;
+  if (mapping[family]) return mapping[family];
+  return "passthrough";
+}

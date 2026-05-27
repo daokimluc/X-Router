@@ -177,7 +177,8 @@ export async function buildApp(
     modelRegistry,
     routingProfileRegistry,
     undefined,
-    (id) => providerRuntimeRegistry.getProviderInstance(id)?.priority
+    (id) => providerRuntimeRegistry.getProviderInstance(id)?.priority,
+    (id) => providerRuntimeRegistry.getProviderInstance(id)?.groupName
   );
   const secretService =
     dependencies.secretService ??

@@ -20,6 +20,8 @@ export type InternalApiKeyRecord = {
   allowedIps?: string[];
   /** Optional grouping label, reserved for Phase 20c routing. */
   groupName?: string;
+  /** Phase 20c — when true, fall back to all groups if no candidate matches the key's group. */
+  crossGroupRetry?: boolean;
   createdAt: Date;
 };
 
@@ -103,6 +105,7 @@ export class ApiKeyService {
     allowedModels?: string[];
     allowedIps?: string[];
     groupName?: string | null;
+    crossGroupRetry?: boolean;
   }): InternalApiKeyRecord | null {
     const record = Array.from(this.keys.values()).find((r) => r.id === id);
     if (!record) return null;
@@ -116,6 +119,7 @@ export class ApiKeyService {
     if (patch.allowedModels !== undefined) record.allowedModels = patch.allowedModels.length > 0 ? patch.allowedModels : undefined;
     if (patch.allowedIps !== undefined) record.allowedIps = patch.allowedIps.length > 0 ? patch.allowedIps : undefined;
     if (patch.groupName !== undefined) record.groupName = patch.groupName ?? undefined;
+    if (patch.crossGroupRetry !== undefined) record.crossGroupRetry = patch.crossGroupRetry;
     const { key: _key, ...safeRecord } = record;
     return structuredClone(safeRecord);
   }
@@ -136,6 +140,7 @@ export class ApiKeyService {
     allowedModels?: string[];
     allowedIps?: string[];
     groupName?: string;
+    crossGroupRetry?: boolean;
   } = {}): CreatedInternalApiKey {
     const key = `igw_${randomBytes(24).toString("hex")}`;
     const record = {
@@ -152,6 +157,7 @@ export class ApiKeyService {
       allowedModels: input.allowedModels && input.allowedModels.length > 0 ? input.allowedModels : undefined,
       allowedIps: input.allowedIps && input.allowedIps.length > 0 ? input.allowedIps : undefined,
       groupName: input.groupName,
+      crossGroupRetry: input.crossGroupRetry,
       createdAt: new Date()
     };
 

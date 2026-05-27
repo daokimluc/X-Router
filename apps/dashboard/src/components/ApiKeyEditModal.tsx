@@ -27,6 +27,7 @@ export type ApiKeyForEdit = {
   allowedModels?: string[];
   allowedIps?: string[];
   groupName?: string;
+  crossGroupRetry?: boolean;
   teamId?: string;
 };
 
@@ -80,6 +81,7 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
   const [expiresLocal, setExpiresLocal] = useState(toDatetimeLocal(apiKey.expiresAt));
   const [allowedModels, setAllowedModels] = useState<string[]>(apiKey.allowedModels ?? []);
   const [allowedIps, setAllowedIps] = useState<string[]>(apiKey.allowedIps ?? []);
+  const [crossGroupRetry, setCrossGroupRetry] = useState(apiKey.crossGroupRetry ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,6 +110,7 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
         allowedModels,
         allowedIps,
         groupName: groupName.trim() || null,
+        crossGroupRetry,
       };
       await api.patch(`/admin/v1/api-keys/${apiKey.id}`, body);
       onSaved();
@@ -273,6 +276,18 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
                 <label style={{ fontSize: 12 }}>{t("apikey.field.allowedIps")}</label>
                 <IpAllowlistInput value={allowedIps} onChange={setAllowedIps} />
               </div>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={crossGroupRetry}
+                  onChange={(e) => setCrossGroupRetry(e.target.checked)}
+                />
+                {t("apikey.field.crossGroupRetry")}
+              </label>
+              <small style={{ color: "var(--color-text-muted)", fontSize: 11, marginTop: -8 }}>
+                {t("apikey.field.crossGroupRetry.hint")}
+              </small>
             </>
           )}
         </div>

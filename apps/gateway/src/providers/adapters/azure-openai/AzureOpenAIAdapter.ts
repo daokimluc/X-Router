@@ -19,7 +19,8 @@ import type {
   ProviderRequestContext,
   ProviderStream
 } from "../../base/types.js";
-import { applyChannelOverrides } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 export type AzureOpenAIConfig = {
   resourceName: string;
@@ -112,7 +113,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
       });
 
       if (!response.ok) {
-        throw await this.classifyHttpError(response, config);
+        throw await this.classifyHttpError(response, config, context.providerInstance);
       }
 
       // Streaming response
@@ -225,9 +226,21 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
 
   private async classifyHttpError(
     response: Response,
-    config: AzureOpenAIConfig
+    config: AzureOpenAIConfig,
+    instance?: ProviderInstance
   ): Promise<ProviderAuthError | ProviderRateLimitError | ProviderTimeoutError | ProviderUnavailableError> {
     const status = response.status;
+
+    // Phase 20c — instance-level statusCodeMapping override
+    if (instance) {
+      const action = interpretStatusCode(instance, status);
+      if (action === "disable") {
+        return new ProviderAuthError(this.type, `Status ${status} mapped to disable`);
+      }
+      if (action === "retry") {
+        return new ProviderRateLimitError(this.type, undefined);
+      }
+    }
 
     if (status === 401 || status === 403) {
       return new ProviderAuthError(

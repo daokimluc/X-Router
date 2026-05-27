@@ -199,6 +199,7 @@ type ProviderInstance = {
   paramOverride?: Record<string, unknown>;
   headerOverride?: Record<string, string>;
   statusCodeMapping?: Record<string, "retry" | "disable" | "passthrough">;
+  groupName?: string;
   circuitBreaker: {
     enabled: boolean;
     failureThreshold: number;
@@ -261,6 +262,7 @@ type ApiKey = {
   allowedModels?: string[];
   allowedIps?: string[];
   groupName?: string;
+  crossGroupRetry?: boolean;
   teamId?: string;
   createdAt?: string;
   limits?: {

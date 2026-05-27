@@ -18,6 +18,7 @@ export type ProviderInstanceShape = {
   id: string;
   name: string;
   priority?: number;
+  groupName?: string;
   paramOverride?: Record<string, unknown>;
   headerOverride?: Record<string, string>;
   statusCodeMapping?: Record<string, "retry" | "disable" | "passthrough">;
@@ -76,6 +77,7 @@ function checkStatusCodeMapping(map: Record<string, unknown>): { invalidKeys: st
 export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
   const { t } = useLang();
   const [priority, setPriority] = useState(String(instance.priority ?? 0));
+  const [groupName, setGroupName] = useState(instance.groupName ?? "");
   const [paramText, setParamText] = useState(JSON.stringify(instance.paramOverride ?? {}, null, 2));
   const [headerText, setHeaderText] = useState(JSON.stringify(instance.headerOverride ?? {}, null, 2));
   const [statusText, setStatusText] = useState(JSON.stringify(instance.statusCodeMapping ?? {}, null, 2));
@@ -85,6 +87,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
 
   useEffect(() => {
     setPriority(String(instance.priority ?? 0));
+    setGroupName(instance.groupName ?? "");
     setParamText(JSON.stringify(instance.paramOverride ?? {}, null, 2));
     setHeaderText(JSON.stringify(instance.headerOverride ?? {}, null, 2));
     setStatusText(JSON.stringify(instance.statusCodeMapping ?? {}, null, 2));
@@ -118,6 +121,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
       const priorityNum = Number.parseInt(priority, 10);
       await api.patch(`/admin/v1/provider-instances/${instance.id}`, {
         priority: Number.isFinite(priorityNum) ? priorityNum : 0,
+        groupName: groupName.trim() || null,
         paramOverride: paramParse.ok ? paramParse.value : {},
         headerOverride: headerParse.ok ? headerParse.value as Record<string, string> : {},
         statusCodeMapping: statusParse.ok ? statusParse.value : {},
@@ -134,6 +138,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
 
   function reset() {
     setPriority(String(instance.priority ?? 0));
+    setGroupName(instance.groupName ?? "");
     setParamText(JSON.stringify(instance.paramOverride ?? {}, null, 2));
     setHeaderText(JSON.stringify(instance.headerOverride ?? {}, null, 2));
     setStatusText(JSON.stringify(instance.statusCodeMapping ?? {}, null, 2));
@@ -180,6 +185,19 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
       </summary>
 
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 14, borderTop: "1px solid var(--color-border)" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+          {t("channel.groupName")}
+          <input
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="(optional, e.g. premium / free)"
+            style={{ width: 240 }}
+          />
+          <small style={{ color: "var(--color-text-muted)", fontSize: 11 }}>
+            {t("channel.groupName.hint")}
+          </small>
+        </label>
+
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
           {t("channel.priority")}
           <input

@@ -35,7 +35,7 @@ const mappings: ModelMapping[] = [
 
 const profile: RoutingProfile = {
   id: "test-profile",
-  description: "Test",
+  displayName: "Test",
   enabled: true,
   fallback: false,
   requiredCapabilities: ["chat"],

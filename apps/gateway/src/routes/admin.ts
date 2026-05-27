@@ -39,7 +39,8 @@ const providerInstancePatchSchema = z.object({
     .optional(),
   paramOverride: z.record(z.unknown()).optional(),
   headerOverride: z.record(z.string()).optional(),
-  statusCodeMapping: z.record(z.enum(["retry", "disable", "passthrough"])).optional()
+  statusCodeMapping: z.record(z.enum(["retry", "disable", "passthrough"])).optional(),
+  groupName: z.union([z.string().min(1).max(64), z.null()]).optional()
 });
 const capabilitySchema = z.enum([
   "chat",
@@ -164,7 +165,8 @@ const apiKeyCreateSchema = z.object({
   expiresAt: z.string().datetime().optional(),
   allowedModels: z.array(z.string().min(1)).max(200).optional(),
   allowedIps: z.array(z.string().min(1)).max(50).optional(),
-  groupName: z.string().min(1).max(64).optional()
+  groupName: z.string().min(1).max(64).optional(),
+  crossGroupRetry: z.boolean().optional()
 });
 const configDraftSchema = z.object({
   config: z.record(z.unknown())
@@ -861,7 +863,10 @@ export async function registerAdminRoutes(
 
       const updated = app.providerRuntimeRegistry.updateProviderInstance(
         params.id,
-        patch
+        {
+          ...patch,
+          groupName: patch.groupName === null ? undefined : patch.groupName
+        }
       );
       app.adminAuditService.record({
         action: "provider_instance.update",
@@ -1891,7 +1896,8 @@ export async function registerAdminRoutes(
         expiresAt: z.union([z.string().datetime(), z.null()]).optional(),
         allowedModels: z.array(z.string().min(1)).max(200).optional(),
         allowedIps: z.array(z.string().min(1)).max(50).optional(),
-        groupName: z.union([z.string().min(1).max(64), z.null()]).optional()
+        groupName: z.union([z.string().min(1).max(64), z.null()]).optional(),
+        crossGroupRetry: z.boolean().optional()
       }).parse(request.body ?? {});
 
       // Validate IP allowlist entries

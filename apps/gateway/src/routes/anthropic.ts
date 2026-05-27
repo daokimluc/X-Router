@@ -50,7 +50,14 @@ export async function registerAnthropicRoutes(
           return directResult;
         }
 
-        const route = app.modelResolver.resolve(body.model, ["chat"]);
+        const route = app.modelResolver.resolve(body.model, ["chat"], (() => {
+          if (!request.auth?.apiKeyHash) return {};
+          const keyRecord = app.apiKeyService.findByHash(request.auth.apiKeyHash);
+          return {
+            keyGroupName: keyRecord?.groupName,
+            crossGroupRetry: keyRecord?.crossGroupRetry
+          };
+        })());
         let lastError: unknown;
 
         for (const candidate of route.candidates) {
