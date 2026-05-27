@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   applyChannelOverrides,
+  applyChannelInputPolicies,
+  estimateRequestTokens,
   isValidStatusCodeMappingKey,
   validateHeaderOverride,
+  MaxInputTokensExceededError,
   RESERVED_HEADER_KEYS,
 } from "../utils/channelOverride.js";
 import type { ProviderInstance } from "../providers/base/ProviderInstance.js";
@@ -79,6 +82,22 @@ describe("applyChannelOverrides", () => {
     expect(body).toEqual({ model: "gpt-4", max_tokens: 100 });
     expect(headers).toEqual({ x: "y" });
   });
+
+  it("override replaces existing header even with different case (no duplicate)", () => {
+    const instance = makeInstance({ headerOverride: { "X-Custom": "v2" } });
+    const result = applyChannelOverrides(
+      {},
+      { "x-custom": "v1", "Other-Header": "k" },
+      instance
+    );
+    // Only one X-Custom should remain — the override wins.
+    const customKeys = Object.keys(result.headers).filter(
+      (k) => k.toLowerCase() === "x-custom"
+    );
+    expect(customKeys).toHaveLength(1);
+    expect(result.headers[customKeys[0]]).toBe("v2");
+    expect(result.headers["Other-Header"]).toBe("k");
+  });
 });
 
 describe("isValidStatusCodeMappingKey", () => {
@@ -115,5 +134,72 @@ describe("validateHeaderOverride", () => {
       const result = validateHeaderOverride({ [reserved]: "x" });
       expect(result.valid).toBe(false);
     }
+  });
+});
+
+describe("applyChannelInputPolicies (Phase 25)", () => {
+  it("is a no-op when neither systemPromptOverride nor maxInputTokens set", () => {
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    const result = applyChannelInputPolicies(body, makeInstance());
+    expect(result).toBe(body);
+  });
+
+  it("prepends systemPromptOverride to OpenAI messages", () => {
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    const result = applyChannelInputPolicies(body, makeInstance({ systemPromptOverride: "Be terse." }));
+    expect(result.messages).toEqual([
+      { role: "system", content: "Be terse." },
+      { role: "user", content: "hi" }
+    ]);
+  });
+
+  it("replaces existing system message in OpenAI messages", () => {
+    const body = { messages: [
+      { role: "system", content: "old" },
+      { role: "user", content: "hi" }
+    ]};
+    const result = applyChannelInputPolicies(body, makeInstance({ systemPromptOverride: "new" }));
+    expect((result.messages as Array<{ role: string; content: string }>)[0]).toEqual({
+      role: "system",
+      content: "new"
+    });
+  });
+
+  it("sets Anthropic top-level system field", () => {
+    const body = { model: "claude", max_tokens: 100, messages: [{ role: "user", content: "hi" }], system: "old" };
+    const result = applyChannelInputPolicies(body as Record<string, unknown>, makeInstance({ systemPromptOverride: "new" }));
+    expect(result.system).toBe("new");
+  });
+
+  it("throws MaxInputTokensExceededError when estimate exceeds limit", () => {
+    const body = { messages: [{ role: "user", content: "x".repeat(1000) }] };
+    expect(() =>
+      applyChannelInputPolicies(body, makeInstance({ maxInputTokens: 100 }))
+    ).toThrow(MaxInputTokensExceededError);
+  });
+
+  it("does not throw when within limit", () => {
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    expect(() =>
+      applyChannelInputPolicies(body, makeInstance({ maxInputTokens: 1000 }))
+    ).not.toThrow();
+  });
+});
+
+describe("estimateRequestTokens (Phase 25)", () => {
+  it("rough character/4 estimate from messages", () => {
+    // "user" (4) + "abcd" (4) = 8 chars / 4 = 2
+    const body = { messages: [{ role: "user", content: "abcd" }] };
+    expect(estimateRequestTokens(body)).toBe(2);
+  });
+
+  it("includes nested content array entries", () => {
+    // "user" (4) + "text" (4) + "abcdefgh" (8) = 16 / 4 = 4
+    const body = {
+      messages: [
+        { role: "user", content: [{ type: "text", text: "abcdefgh" }] }
+      ]
+    };
+    expect(estimateRequestTokens(body)).toBe(4);
   });
 });

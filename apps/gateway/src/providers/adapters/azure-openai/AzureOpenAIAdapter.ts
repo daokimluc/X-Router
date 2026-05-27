@@ -19,7 +19,7 @@ import type {
   ProviderRequestContext,
   ProviderStream
 } from "../../base/types.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 export type AzureOpenAIConfig = {
@@ -99,8 +99,12 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         "api-key": credential.apiKey,
         "Content-Type": "application/json"
       };
-      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      const policied = applyChannelInputPolicies(
         request as unknown as Record<string, unknown>,
+        context.providerInstance
+      );
+      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+        policied,
         baseHeaders,
         context.providerInstance
       );

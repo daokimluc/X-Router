@@ -30,11 +30,26 @@ export function applyChannelOverrides(
     return { body: finalBody, headers };
   }
 
-  const finalHeaders = { ...headers };
+  // Build a case-insensitive lookup of existing headers so that an
+  // override key (any case) replaces the existing one instead of
+  // creating a duplicate header with different casing.
+  const finalHeaders: Record<string, string> = {};
+  const lowerToOriginal = new Map<string, string>();
+  for (const [key, value] of Object.entries(headers)) {
+    finalHeaders[key] = value;
+    lowerToOriginal.set(key.toLowerCase(), key);
+  }
+
   for (const [key, value] of Object.entries(instance.headerOverride)) {
     const lower = key.toLowerCase();
     if (RESERVED_HEADER_KEYS.has(lower)) continue;
+    const existingKey = lowerToOriginal.get(lower);
+    if (existingKey && existingKey !== key) {
+      // Replace existing header (different case) — drop old, set new.
+      delete finalHeaders[existingKey];
+    }
     finalHeaders[key] = value;
+    lowerToOriginal.set(lower, key);
   }
   return { body: finalBody, headers: finalHeaders };
 }
@@ -82,4 +97,85 @@ export function interpretStatusCode(
   const family = `${Math.floor(statusCode / 100)}xx`;
   if (mapping[family]) return mapping[family];
   return "passthrough";
+}
+
+/**
+ * Phase 25 — Approximate token count by character count / 4 (rough English heuristic).
+ * Used for `maxInputTokens` enforcement before forwarding upstream.
+ */
+export function estimateRequestTokens(body: Record<string, unknown>): number {
+  let chars = 0;
+  const visit = (val: unknown): void => {
+    if (typeof val === "string") {
+      chars += val.length;
+      return;
+    }
+    if (Array.isArray(val)) {
+      for (const item of val) visit(item);
+      return;
+    }
+    if (val && typeof val === "object") {
+      for (const v of Object.values(val as Record<string, unknown>)) visit(v);
+    }
+  };
+  visit(body.messages);
+  visit(body.system);
+  visit(body.input);
+  visit(body.prompt);
+  return Math.ceil(chars / 4);
+}
+
+/**
+ * Phase 25 — error thrown when a request exceeds `instance.maxInputTokens`.
+ */
+export class MaxInputTokensExceededError extends Error {
+  readonly statusCode = 400;
+  readonly code = "max_input_tokens_exceeded";
+  constructor(public readonly limit: number, public readonly estimated: number) {
+    super(`Request exceeds max_input_tokens: estimated ${estimated} > limit ${limit}`);
+    this.name = "MaxInputTokensExceededError";
+  }
+}
+
+/**
+ * Phase 25 — Enforce maxInputTokens (rough heuristic) and inject systemPromptOverride.
+ * Mutates a shallow copy of the body when systemPromptOverride is set.
+ *
+ * For OpenAI chat: prepend a system message at index 0 (or replace existing system msg).
+ * For Anthropic: set/override top-level `system` string.
+ * Other shapes: no-op.
+ */
+export function applyChannelInputPolicies(
+  body: Record<string, unknown>,
+  instance: ProviderInstance
+): Record<string, unknown> {
+  let result = body;
+
+  if (instance.systemPromptOverride) {
+    const sys = instance.systemPromptOverride;
+    // Anthropic shape: top-level `system` field present (string or array).
+    // Detected when body has both messages and system field, or only system field.
+    const hasAnthropicSystem = "system" in body;
+    if (hasAnthropicSystem) {
+      result = { ...result, system: sys };
+    } else if (Array.isArray(body.messages)) {
+      const messages = (body.messages as Array<Record<string, unknown>>).slice();
+      const firstIsSystem = messages[0]?.role === "system";
+      if (firstIsSystem) {
+        messages[0] = { ...messages[0], content: sys };
+      } else {
+        messages.unshift({ role: "system", content: sys });
+      }
+      result = { ...result, messages };
+    }
+  }
+
+  if (typeof instance.maxInputTokens === "number" && instance.maxInputTokens > 0) {
+    const estimated = estimateRequestTokens(result);
+    if (estimated > instance.maxInputTokens) {
+      throw new MaxInputTokensExceededError(instance.maxInputTokens, estimated);
+    }
+  }
+
+  return result;
 }

@@ -22,6 +22,7 @@ export type ProviderAccount = {
   priority?: number;
   maxConcurrency: number;
   credentialRef: string;
+  proxyPoolId?: string;
   allowedModels?: string[];
   tags?: string[];
   owner?: string;

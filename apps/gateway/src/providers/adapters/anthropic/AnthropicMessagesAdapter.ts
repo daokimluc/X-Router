@@ -19,7 +19,7 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import { ModelCache } from "../../services/ModelCache.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -150,8 +150,9 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
         "x-api-key": apiKey,
         "anthropic-version": ANTHROPIC_VERSION
       };
+      const policied = applyChannelInputPolicies(requestBody, context.providerInstance);
       const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
-        requestBody,
+        policied,
         baseHeaders,
         context.providerInstance
       );

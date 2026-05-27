@@ -193,6 +193,20 @@ export class KiroProviderAdapter implements AIProviderAdapter {
     credential: KiroCredentialPayload,
     accountId?: string
   ): Promise<KiroCredentialPayload> {
+    const raw = credential as Record<string, unknown>;
+
+    // If apiKey is provided but no accessToken/refreshToken, detect what it is
+    if (!credential.accessToken && !credential.refreshToken && raw.apiKey && typeof raw.apiKey === "string") {
+      const apiKey = raw.apiKey as string;
+      if (apiKey.startsWith("aorAAAAAG")) {
+        // It's a refresh token — set it and let the refresh flow handle it
+        credential = { ...credential, refreshToken: apiKey };
+      } else {
+        // Treat as access token
+        credential = { ...credential, accessToken: apiKey };
+      }
+    }
+
     if (credential.accessToken && !shouldRefreshKiroCredential(credential)) {
       return credential;
     }

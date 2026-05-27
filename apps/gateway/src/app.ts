@@ -54,6 +54,7 @@ import { ModelPricingService } from "./services/ModelPricingService.js";
 import { TokenSaverService } from "./services/TokenSaverService.js";
 import { RequestQueueService } from "./services/RequestQueueService.js";
 import { TeamService } from "./services/TeamService.js";
+import { AccountQuotaService } from "./services/AccountQuotaService.js";
 import { RateLimitService } from "./services/RateLimitService.js";
 import { WebhookService } from "./services/WebhookService.js";
 import {
@@ -111,6 +112,7 @@ declare module "fastify" {
     proxyPoolService: ProxyPoolService;
     modelPricingService: ModelPricingService;
     mediaRouter: MediaRouter;
+    accountQuotaService: AccountQuotaService;
   }
 }
 
@@ -311,6 +313,7 @@ export async function buildApp(
   app.decorate("proxyPoolService", proxyPoolService);
   app.decorate("modelPricingService", modelPricingService);
   app.decorate("mediaRouter", mediaRouter);
+  app.decorate("accountQuotaService", new AccountQuotaService());
 
   app.addHook("onSend", async (request, reply, payload) => {
     if (

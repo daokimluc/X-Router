@@ -11,6 +11,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     dataFile: "data/test-gateway-state.json",
     internalRateLimitPerMinute: 0,
     internalDailyRequestQuota: 0,
+    internalDailyTokenQuota: 0,
     addAccountRateLimitPerMinute: 10,
     logLevel: "silent",
     ...overrides

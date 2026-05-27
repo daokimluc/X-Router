@@ -5,7 +5,8 @@ export type AccountSelectionStrategy =
   | "weighted_round_robin"
   | "least_busy"
   | "lowest_error_rate"
-  | "lowest_latency";
+  | "lowest_latency"
+  | "priority";
 
 export type ProviderCircuitBreakerConfig = {
   enabled: boolean;
@@ -42,6 +43,12 @@ export type ProviderInstance = {
   statusCodeMapping?: Record<string, StatusCodeAction>;
   /** Phase 20c — optional channel group label for group-based routing. */
   groupName?: string;
+  /** Phase 25 — single tag for batch operations. */
+  tag?: string;
+  /** Phase 25 — maximum input tokens; reject upstream call if request exceeds this estimate. */
+  maxInputTokens?: number;
+  /** Phase 25 — system prompt prepended to every request (or replaces existing system message). */
+  systemPromptOverride?: string;
 
   /** Array of media kinds this provider supports (e.g., embedding, tts, image) */
   serviceKinds?: MediaKind[];

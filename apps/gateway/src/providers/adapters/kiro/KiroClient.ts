@@ -34,7 +34,7 @@ export class KiroClient {
 
     const baseUrl =
       options.config.baseUrl ??
-      "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse";
+      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region);
     const path = options.config.chatCompletionsPath ?? "";
     const url = new URL(path, baseUrl);
     const abortController = new AbortController();
@@ -140,7 +140,7 @@ export class KiroClient {
 
     const baseUrl =
       options.config.baseUrl ??
-      "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse";
+      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region);
     const path = options.config.chatCompletionsPath ?? "";
     const url = new URL(path, baseUrl);
     const abortController = new AbortController();
@@ -586,6 +586,11 @@ async function safeResponseText(response: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+function resolveKiroApiUrl(region?: string): string {
+  const r = region ?? "us-east-1";
+  return `https://codewhisperer.${r}.amazonaws.com/generateAssistantResponse`;
 }
 
 function isJsonResponse(response: Response): boolean {

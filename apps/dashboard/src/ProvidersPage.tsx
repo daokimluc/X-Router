@@ -15,6 +15,11 @@ import {
   Puzzle,
   X,
   AlertCircle,
+  Check,
+  Trash2,
+  PowerOff,
+  Power,
+  ListChecks,
 } from "lucide-react";
 import { useLang } from "./i18n";
 import { TestAllResultsModal, type TestAllPayload } from "./components/TestAllResultsModal";
@@ -219,6 +224,11 @@ export function ProvidersPage(props: {
   const [testResult, setTestResult] = useState<TestAllPayload | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [customProviderModal, setCustomProviderModal] = useState<"openai" | "anthropic" | null>(null);
+  // Phase 25 — batch mode for bulk enable/disable/delete
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchResult, setBatchResult] = useState<string | null>(null);
 
   // Merge API provider types with static catalog
   const registeredTypes = new Set((props.providerTypes ?? []).map((p) => p.type));
@@ -317,6 +327,47 @@ export function ProvidersPage(props: {
     }
   };
 
+  // Phase 25 — collect provider instance ids for currently selected provider types
+  const selectedInstanceIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const inst of props.providerInstances) {
+      if (selectedTypes.has(inst.type)) ids.push(inst.id);
+    }
+    return ids;
+  }, [props.providerInstances, selectedTypes]);
+
+  const handleBatchAction = async (action: "enable" | "disable" | "delete") => {
+    if (batchBusy || !props.api || selectedInstanceIds.length === 0) return;
+    if (action === "delete" && !window.confirm(`Delete ${selectedInstanceIds.length} provider instance(s)? This cannot be undone.`)) return;
+    setBatchBusy(true);
+    setBatchResult(null);
+    try {
+      const result = await props.api.post(
+        "/admin/v1/provider-instances/batch",
+        { ids: selectedInstanceIds, action }
+      ) as { action: string; updated: number; ids: string[]; notFound: string[] };
+      setBatchResult(`${action}: ${result.updated} updated${result.notFound.length ? `, ${result.notFound.length} not found` : ""}`);
+      window.setTimeout(() => setBatchResult(null), 4000);
+      setSelectedTypes(new Set());
+      setBatchMode(false);
+      await props.refresh?.();
+    } catch (err) {
+      setBatchResult(`Error: ${err instanceof Error ? err.message : "batch failed"}`);
+      window.setTimeout(() => setBatchResult(null), 5000);
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  const toggleProviderSelection = (type: string) => {
+    setSelectedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
+
   if (allProviders.length === 0 && (props.providerTypes ?? []).length === 0) {
     return (
       <div className="providersPage">
@@ -340,6 +391,18 @@ export function ProvidersPage(props: {
           <p className="providersPageSubtitle">{t("prov.subtitle")}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            type="button"
+            className={batchMode ? "primaryButton" : "ghostButton"}
+            onClick={() => {
+              setBatchMode((v) => !v);
+              setSelectedTypes(new Set());
+            }}
+            title="Toggle batch mode for bulk enable/disable/delete"
+          >
+            <ListChecks size={14} />
+            {batchMode ? "Batch on" : "Batch"}
+          </button>
           <button
             type="button"
             className="primaryButton"
@@ -366,6 +429,70 @@ export function ProvidersPage(props: {
           </div>
         </div>
       </div>
+
+      {/* Batch action bar (Phase 25) */}
+      {batchMode && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "10px 14px",
+            margin: "12px 0",
+            background: "rgba(59,130,246,0.08)",
+            border: "1px solid rgba(59,130,246,0.3)",
+            borderRadius: 8,
+            fontSize: 13,
+          }}
+        >
+          <strong>
+            {selectedTypes.size === 0
+              ? "Select providers to perform a bulk action"
+              : `${selectedTypes.size} provider type(s) selected · ${selectedInstanceIds.length} instance(s)`}
+          </strong>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="ghostButton"
+            disabled={batchBusy || selectedInstanceIds.length === 0}
+            onClick={() => void handleBatchAction("enable")}
+          >
+            <Power size={14} /> Enable
+          </button>
+          <button
+            type="button"
+            className="ghostButton"
+            disabled={batchBusy || selectedInstanceIds.length === 0}
+            onClick={() => void handleBatchAction("disable")}
+          >
+            <PowerOff size={14} /> Disable
+          </button>
+          <button
+            type="button"
+            className="ghostButton"
+            style={{ color: "#ef4444" }}
+            disabled={batchBusy || selectedInstanceIds.length === 0}
+            onClick={() => void handleBatchAction("delete")}
+          >
+            <Trash2 size={14} /> Delete
+          </button>
+        </div>
+      )}
+      {batchResult && (
+        <div
+          style={{
+            padding: "8px 14px",
+            margin: "8px 0",
+            background: batchResult.startsWith("Error") ? "rgba(239,68,68,0.1)" : "rgba(16,185,129,0.1)",
+            color: batchResult.startsWith("Error") ? "#ef4444" : "#10b981",
+            border: "1px solid",
+            borderRadius: 6,
+            fontSize: 12,
+          }}
+        >
+          {batchResult}
+        </div>
+      )}
 
       {/* No results */}
       {!hasAnyResult && (
@@ -426,7 +553,15 @@ export function ProvidersPage(props: {
                   key={provider.type}
                   provider={provider}
                   stats={getProviderStats(provider.type, props.accounts, props.providerInstances)}
-                  onClick={() => props.onSelectProvider?.(provider.type)}
+                  onClick={() => {
+                    if (batchMode) {
+                      toggleProviderSelection(provider.type);
+                    } else {
+                      props.onSelectProvider?.(provider.type);
+                    }
+                  }}
+                  batchMode={batchMode}
+                  selected={selectedTypes.has(provider.type)}
                 />
               ))}
             </div>
@@ -493,18 +628,49 @@ function ProviderCard(props: {
   };
   stats: ReturnType<typeof getProviderStats>;
   onClick: () => void;
+  batchMode?: boolean;
+  selected?: boolean;
 }) {
-  const { provider, stats, onClick } = props;
+  const { provider, stats, onClick, batchMode, selected } = props;
   const { connected, error, allDisabled, hasInstance, errorTime } = stats;
 
   const cardClass = [
     "providerCard2",
     allDisabled ? "providerCard2--disabled" : "",
     !provider.isRegistered ? "providerCard2--unregistered" : "",
+    batchMode && selected ? "providerCard2--selected" : "",
   ].filter(Boolean).join(" ");
 
   return (
-    <button type="button" className={cardClass} onClick={onClick}>
+    <button
+      type="button"
+      className={cardClass}
+      onClick={onClick}
+      style={{
+        position: "relative",
+        ...(batchMode && selected ? { outline: "2px solid #3b82f6", outlineOffset: -2 } : {})
+      }}
+    >
+      {batchMode && (
+        <div
+          style={{
+            position: "absolute",
+            top: 8,
+            left: 8,
+            width: 20,
+            height: 20,
+            borderRadius: 4,
+            border: selected ? "2px solid #3b82f6" : "2px solid var(--color-border)",
+            background: selected ? "#3b82f6" : "transparent",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1,
+          }}
+        >
+          {selected && <Check size={14} color="white" />}
+        </div>
+      )}
       {/* Icon */}
       <div
         className="providerCard2IconWrap"

@@ -5,9 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/admin": "http://127.0.0.1:8080",
-      "/v1": "http://127.0.0.1:8080",
-      "/healthz": "http://127.0.0.1:8080"
+      "/admin": "http://127.0.0.1:3100",
+      "/v1": "http://127.0.0.1:3100",
+      "/healthz": "http://127.0.0.1:3100"
     }
   }
 });

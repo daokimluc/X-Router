@@ -14,6 +14,7 @@ export type ModelMapping = {
 export class ModelRegistry {
   private readonly mappings = new Map<string, ModelMapping>();
   private readonly aliases = new Map<string, string>(); // alias → publicModel
+  private readonly patternMappings: Array<{ pattern: RegExp; mapping: ModelMapping }> = [];
 
   constructor(initialMappings: ModelMapping[] = []) {
     for (const mapping of initialMappings) {
@@ -22,6 +23,14 @@ export class ModelRegistry {
   }
 
   register(mapping: ModelMapping): void {
+    if (mapping.publicModel.includes("*")) {
+      const regex = new RegExp(
+        "^" + mapping.publicModel.replace(/\*/g, ".*") + "$"
+      );
+      this.patternMappings.push({ pattern: regex, mapping: structuredClone(mapping) });
+      return;
+    }
+
     if (this.mappings.has(mapping.publicModel)) {
       throw new ProviderConfigError(
         `Model mapping already registered for ${mapping.publicModel}`
@@ -45,9 +54,28 @@ export class ModelRegistry {
   }
 
   get(publicModel: string): ModelMapping | undefined {
-    // Check direct mapping first, then aliases
-    const mapping = this.mappings.get(publicModel) ?? this.mappings.get(this.aliases.get(publicModel) ?? "");
-    return mapping ? structuredClone(mapping) : undefined;
+    // 1. Exact match
+    const exact = this.mappings.get(publicModel);
+    if (exact) return structuredClone(exact);
+
+    // 2. Alias resolution
+    const aliasTarget = this.aliases.get(publicModel);
+    if (aliasTarget) {
+      const aliased = this.mappings.get(aliasTarget);
+      if (aliased) return structuredClone(aliased);
+    }
+
+    // 3. Pattern (wildcard) match — first match wins
+    for (const { pattern, mapping } of this.patternMappings) {
+      if (pattern.test(publicModel)) {
+        return {
+          ...structuredClone(mapping),
+          publicModel
+        };
+      }
+    }
+
+    return undefined;
   }
 
   listPublicModels(): ModelMapping[] {
@@ -57,9 +85,13 @@ export class ModelRegistry {
   }
 
   listModelMappings(): ModelMapping[] {
-    return Array.from(this.mappings.values()).map((mapping) =>
+    const exact = Array.from(this.mappings.values()).map((mapping) =>
       structuredClone(mapping)
     );
+    const patterns = this.patternMappings.map(({ mapping }) =>
+      structuredClone(mapping)
+    );
+    return [...exact, ...patterns];
   }
 
   updateById(
@@ -70,19 +102,32 @@ export class ModelRegistry {
       (mapping) => mapping.id === id
     );
 
-    if (!current) {
-      throw new ProviderConfigError(`Model mapping ${id} not found`);
+    if (current) {
+      const updated: ModelMapping = {
+        ...current,
+        ...patch,
+        id: current.id,
+        publicModel: current.publicModel
+      };
+      this.mappings.set(current.publicModel, structuredClone(updated));
+      return structuredClone(updated);
     }
 
-    const updated: ModelMapping = {
-      ...current,
-      ...patch,
-      id: current.id,
-      publicModel: current.publicModel
-    };
+    const patternEntry = this.patternMappings.find(
+      ({ mapping }) => mapping.id === id
+    );
+    if (patternEntry) {
+      const updated: ModelMapping = {
+        ...patternEntry.mapping,
+        ...patch,
+        id: patternEntry.mapping.id,
+        publicModel: patternEntry.mapping.publicModel
+      };
+      patternEntry.mapping = structuredClone(updated);
+      return structuredClone(updated);
+    }
 
-    this.mappings.set(current.publicModel, structuredClone(updated));
-    return structuredClone(updated);
+    throw new ProviderConfigError(`Model mapping ${id} not found`);
   }
 
   deleteById(id: string): ModelMapping {
@@ -90,12 +135,20 @@ export class ModelRegistry {
       (mapping) => mapping.id === id
     );
 
-    if (!current) {
-      throw new ProviderConfigError(`Model mapping ${id} not found`);
+    if (current) {
+      this.mappings.delete(current.publicModel);
+      return structuredClone(current);
     }
 
-    this.mappings.delete(current.publicModel);
-    return structuredClone(current);
+    const patternIdx = this.patternMappings.findIndex(
+      ({ mapping }) => mapping.id === id
+    );
+    if (patternIdx >= 0) {
+      const removed = this.patternMappings.splice(patternIdx, 1)[0];
+      return structuredClone(removed.mapping);
+    }
+
+    throw new ProviderConfigError(`Model mapping ${id} not found`);
   }
 }
 

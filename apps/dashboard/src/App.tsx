@@ -48,7 +48,8 @@ import {
   Wand2,
   X,
   XCircle,
-  Zap
+  Zap,
+  Copy
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UsagePage } from "./UsagePage";
@@ -72,6 +73,7 @@ import { SyncModelsModal } from "./components/SyncModelsModal";
 import { ApiKeyEditModal, type ApiKeyForEdit } from "./components/ApiKeyEditModal";
 import { ApiKeyExportModal } from "./components/ApiKeyExportModal";
 import { ChannelOverridesEditor } from "./components/ChannelOverridesEditor";
+import { CopyChannelModal } from "./components/CopyChannelModal";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -215,6 +217,7 @@ type Account = {
   status: "active" | "cooldown" | "disabled";
   maxConcurrency: number;
   credentialRef?: string;
+  proxyPoolId?: string;
   runtime: {
     activeRequests: number;
     totalRequests: number;
@@ -225,6 +228,11 @@ type Account = {
   metadata?: {
     healthCheckStatus?: "healthy" | "unhealthy" | "timeout";
     healthCheckMessage?: string;
+    suspended?: boolean;
+    suspensionReason?: string;
+    machineId?: string;
+    proxyPoolName?: string;
+    [key: string]: unknown;
   };
   tokenStatus?: {
     expiresAt: string | null;
@@ -2303,6 +2311,7 @@ function ProviderDetail(props: {
   const [testResult, setTestResult] = useState<AccountTestResult | null>(null);
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
+  const [copyChannelModalOpen, setCopyChannelModalOpen] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState<Account | null>(null);
   const [deleteModelCandidate, setDeleteModelCandidate] = useState<ModelMapping | null>(null);
   const [editAccountCandidate, setEditAccountCandidate] = useState<Account | null>(null);
@@ -2418,10 +2427,12 @@ function ProviderDetail(props: {
           ? "/admin/v1/oauth/kiro/import-local"
           : props.provider.type === "windsurf"
             ? "/admin/v1/oauth/windsurf/import-local"
-            : "";
+            : props.provider.type === "codex"
+              ? "/admin/v1/oauth/codex/import-local"
+              : "";
 
       if (!path) {
-        setMessage({ type: "error", text: "Provider này sẽ được triển khai ở phase sau." });
+        setMessage({ type: "error", text: "Provider này chưa hỗ trợ import local." });
         return;
       }
 
@@ -2459,6 +2470,19 @@ function ProviderDetail(props: {
       setMessage({
         type: "error",
         text: caught instanceof Error ? caught.message : "Could not update account"
+      });
+    }
+  }
+
+  async function resetSuspension(accountId: string) {
+    try {
+      await props.api.post(`/admin/v1/accounts/${accountId}/reset-suspension`, {});
+      setMessage({ type: "success", text: "Suspension cleared, account re-enabled" });
+      await props.refresh();
+    } catch (caught) {
+      setMessage({
+        type: "error",
+        text: caught instanceof Error ? caught.message : "Could not reset suspension"
       });
     }
   }
@@ -2678,6 +2702,16 @@ function ProviderDetail(props: {
           <p>{props.accounts.length} {t("prov.connections")} · {props.models.length} {t("prov.models")}</p>
         </div>
         <div className="providerDetailHeaderActions">
+          {props.instances[0] && (
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={() => setCopyChannelModalOpen(true)}
+              title="Duplicate this channel with a new id"
+            >
+              <Copy size={16} /> Copy
+            </button>
+          )}
           <button className="primaryButton" type="button" onClick={() => setAddAccountModalOpen(true)}>
             <Plus size={16} /> {t("prov.addAccountBtn")}
           </button>
@@ -2751,9 +2785,14 @@ function ProviderDetail(props: {
         {props.accounts.length ? (
           <div className="connectionList">
             {props.accounts.map((account, index) => {
-              const isUnhealthy = account.metadata?.healthCheckStatus === "unhealthy" || (account.status === "cooldown" && account.runtime.consecutiveFailures > 0);
+              const meta = (account.metadata ?? {}) as Record<string, unknown>;
+              const acct = account as unknown as { proxyPoolId?: string };
+              const isUnhealthy = meta.healthCheckStatus === "unhealthy" || (account.status === "cooldown" && account.runtime.consecutiveFailures > 0);
               const isExpired = account.runtime.lastError?.toLowerCase().includes("expired") || account.runtime.lastError?.toLowerCase().includes("token");
-              const healthTooltip = account.metadata?.healthCheckMessage ?? account.runtime.lastError ?? "";
+              const isSuspended = meta.suspended === true || account.runtime.lastError?.toLowerCase().includes("suspended");
+              const healthTooltip = (meta.healthCheckMessage as string | undefined) ?? account.runtime.lastError ?? "";
+              const machineId = (meta.machineId as string | undefined) ?? "";
+              const proxyPoolName = (meta.proxyPoolName as string | undefined) ?? (acct.proxyPoolId ? `Pool: ${acct.proxyPoolId.slice(0, 8)}...` : "");
               const tokenExpiry = account.tokenStatus?.expiresAt ? new Date(account.tokenStatus.expiresAt) : null;
               const tokenTimeLeft = tokenExpiry ? tokenExpiry.getTime() - Date.now() : null;
               const tokenIsExpired = tokenTimeLeft !== null && tokenTimeLeft <= 0;
@@ -2797,8 +2836,20 @@ function ProviderDetail(props: {
                         <AlertCircle size={12} /> expired
                       </span>
                     )}
+                    {isSuspended && (
+                      <span className="healthBadge healthBadge--unhealthy" title="Account suspended by provider">
+                        <AlertCircle size={12} /> suspended
+                      </span>
+                    )}
                     {account.runtime.totalRequests > 0 && <span className="connectionReqCount">{account.runtime.totalRequests.toLocaleString()} reqs</span>}
                   </span>
+                  {/* MachineId + Proxy info */}
+                  {(machineId || proxyPoolName) && (
+                    <span className="tokenStatusLine" style={{ fontSize: 11, opacity: 0.7 }}>
+                      {machineId && <span title={machineId} style={{ fontFamily: "monospace" }}>ID: {machineId.slice(0, 12)}...</span>}
+                      {proxyPoolName && <span style={{ marginLeft: machineId ? 8 : 0 }}>{proxyPoolName}</span>}
+                    </span>
+                  )}
                   {/* Token status line */}
                   {account.tokenStatus && account.tokenStatus.credentialType !== "api_key" && (
                     <span className="tokenStatusLine">
@@ -2824,6 +2875,11 @@ function ProviderDetail(props: {
                   )}
                 </div>
                 <div className="connectionActions">
+                  {isSuspended && (
+                    <button className="iconTextButton" type="button" title="Reset suspension" onClick={() => void resetSuspension(account.id)}>
+                      <RefreshCw size={14} /> Unsuspend
+                    </button>
+                  )}
                   <button className="iconButton" type="button" title="Edit connection" onClick={() => setEditAccountCandidate(account)}><Pencil size={14} /></button>
                   <button className="iconTextButton" type="button" onClick={() => void testAccount(account)}><FlaskConical size={16} /> {t("common.test")}</button>
                   <label className="switchControl">
@@ -2961,6 +3017,20 @@ function ProviderDetail(props: {
           instance={props.instances[0]}
           api={props.api}
           onSaved={() => void props.refresh()}
+        />
+      )}
+
+      {copyChannelModalOpen && props.instances[0] && (
+        <CopyChannelModal
+          sourceId={props.instances[0].id}
+          sourceName={props.instances[0].name ?? props.instances[0].id}
+          api={props.api}
+          onClose={() => setCopyChannelModalOpen(false)}
+          onSuccess={async (newId) => {
+            setCopyChannelModalOpen(false);
+            setMessage({ type: "success", text: `Channel copied to "${newId}". The copy starts disabled — enable it after configuring credentials.` });
+            await props.refresh();
+          }}
         />
       )}
 
@@ -3462,6 +3532,110 @@ function Accounts(props: {
     }
   }
 
+  async function importCodexLocalToken() {
+    try {
+      const response = await props.api.post<{ data: Account }>(
+        "/admin/v1/oauth/codex/import-local",
+        {
+          providerInstanceId: draft.providerInstanceId,
+          accountId: draft.id,
+          displayName: draft.displayName,
+          owner: draft.owner || undefined,
+          maxConcurrency: Number(draft.maxConcurrency),
+          weight: Number(draft.weight),
+          allowedModels: parseCsv(draft.allowedModels),
+          tags: parseCsv(draft.tags)
+        }
+      );
+      await props.refresh();
+      setMessage({ type: "success", text: `Imported Codex local token: ${response.data.id}` });
+    } catch (caught) {
+      setMessage({ type: "error", text: caught instanceof Error ? caught.message : "Codex local token import failed. Run `codex login` first." });
+    }
+  }
+
+  async function startGitHubDeviceCode() {
+    try {
+      const response = await props.api.post<{ data: { deviceCode: string; userCode: string; verificationUri: string; expiresIn: number; interval: number } }>(
+        "/admin/v1/oauth/github-copilot/device-code/start",
+        {
+          providerInstanceId: draft.providerInstanceId,
+          accountId: draft.id,
+          displayName: draft.displayName,
+          owner: draft.owner || undefined,
+          maxConcurrency: Number(draft.maxConcurrency),
+          weight: Number(draft.weight),
+          allowedModels: parseCsv(draft.allowedModels),
+          tags: parseCsv(draft.tags)
+        }
+      );
+      const { userCode, verificationUri, deviceCode, interval } = response.data;
+      setMessage({ type: "success", text: `Enter code ${userCode} at ${verificationUri}` });
+      window.open(verificationUri, "_blank");
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const pollResult = await props.api.post<{ data: { status?: string; id?: string } }>(
+            "/admin/v1/oauth/github-copilot/device-code/poll",
+            {
+              deviceCode,
+              providerInstanceId: draft.providerInstanceId,
+              accountId: draft.id,
+              displayName: draft.displayName,
+              owner: draft.owner || undefined,
+              maxConcurrency: Number(draft.maxConcurrency),
+              weight: Number(draft.weight),
+              allowedModels: parseCsv(draft.allowedModels),
+              tags: parseCsv(draft.tags)
+            }
+          );
+          if (pollResult.data.status !== "pending") {
+            clearInterval(pollInterval);
+            setMessage({ type: "success", text: `GitHub Copilot account added: ${pollResult.data.id ?? draft.id}` });
+            await props.refresh();
+          }
+        } catch {
+          // 202 = still pending, keep polling
+        }
+      }, (interval || 5) * 1000);
+
+      setTimeout(() => clearInterval(pollInterval), 600_000);
+    } catch (caught) {
+      setMessage({ type: "error", text: caught instanceof Error ? caught.message : "GitHub device code flow failed" });
+    }
+  }
+
+  async function importKiroIdc() {
+    const { refreshToken, clientId, clientSecret, region } = draft.credentialValues;
+    if (!refreshToken || !clientId || !clientSecret) {
+      setMessage({ type: "error", text: "refreshToken, clientId, and clientSecret are required for IDC import" });
+      return;
+    }
+    try {
+      const response = await props.api.post<{ data: Account }>(
+        "/admin/v1/oauth/kiro/import-idc",
+        {
+          providerInstanceId: draft.providerInstanceId,
+          accountId: draft.id,
+          displayName: draft.displayName,
+          refreshToken,
+          clientId,
+          clientSecret,
+          region: region || "us-east-1",
+          owner: draft.owner || undefined,
+          maxConcurrency: Number(draft.maxConcurrency),
+          weight: Number(draft.weight),
+          allowedModels: parseCsv(draft.allowedModels),
+          tags: parseCsv(draft.tags)
+        }
+      );
+      await props.refresh();
+      setMessage({ type: "success", text: `Imported Kiro IDC account: ${response.data.id}` });
+    } catch (caught) {
+      setMessage({ type: "error", text: caught instanceof Error ? caught.message : "Kiro IDC import failed" });
+    }
+  }
+
   async function create(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
@@ -3570,6 +3744,9 @@ function Accounts(props: {
               <button className="primaryButton" type="button" onClick={() => void importKiroLocalToken()}>
                 <KeyRound size={16} />Use Kiro App Session
               </button>
+              <button className="textButton" type="button" onClick={() => void importKiroIdc()} style={{ marginTop: 8 }}>
+                <KeyRound size={16} />Import IDC (clientId + clientSecret)
+              </button>
             </div>
           ) : null}
           {selectedInstance?.type === "windsurf" ? (
@@ -3580,6 +3757,28 @@ function Accounts(props: {
               </div>
               <button className="primaryButton" type="button" onClick={() => void importWindsurfLocalToken()}>
                 <KeyRound size={16} />Use Windsurf App Session
+              </button>
+            </div>
+          ) : null}
+          {selectedInstance?.type === "codex" ? (
+            <div className="quickConnectPanel">
+              <div>
+                <strong>Use Codex Local Session</strong>
+                <span>Run `codex login` first, then click to import the local token.</span>
+              </div>
+              <button className="primaryButton" type="button" onClick={() => void importCodexLocalToken()}>
+                <KeyRound size={16} />Import Codex Token
+              </button>
+            </div>
+          ) : null}
+          {(selectedInstance?.type === "github_copilot" || selectedInstance?.type === "github-copilot") ? (
+            <div className="quickConnectPanel">
+              <div>
+                <strong>GitHub Copilot Device Code</strong>
+                <span>Click to start device code flow. You'll get a code to enter on GitHub.</span>
+              </div>
+              <button className="primaryButton" type="button" onClick={() => void startGitHubDeviceCode()}>
+                <KeyRound size={16} />Start Device Code Login
               </button>
             </div>
           ) : null}
@@ -3683,9 +3882,24 @@ function Accounts(props: {
                       <KeyRound size={16} />Import Local Token
                     </button>
                   ) : null}
+                  {selectedInstance?.type === "kiro" ? (
+                    <button className="textButton" type="button" onClick={() => void importKiroIdc()}>
+                      <KeyRound size={16} />Import IDC
+                    </button>
+                  ) : null}
                   {selectedInstance?.type === "windsurf" ? (
                     <button className="textButton" type="button" onClick={() => void importWindsurfLocalToken()}>
                       <KeyRound size={16} />Import Local Token
+                    </button>
+                  ) : null}
+                  {selectedInstance?.type === "codex" ? (
+                    <button className="textButton" type="button" onClick={() => void importCodexLocalToken()}>
+                      <KeyRound size={16} />Import Local Token
+                    </button>
+                  ) : null}
+                  {selectedInstance?.type === "github_copilot" || selectedInstance?.type === "github-copilot" ? (
+                    <button className="textButton" type="button" onClick={() => void startGitHubDeviceCode()}>
+                      <KeyRound size={16} />Device Code Login
                     </button>
                   ) : null}
                   <button className="textButton" type="button" onClick={() => void checkOAuthCallback()}>
@@ -7863,6 +8077,31 @@ Team "Senior Dev":
                 </tbody>
               </table>
 
+              <h3>Public endpoints (không cần auth)</h3>
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 8 }}>
+                Các endpoint công khai cho end-user / khách hàng tra cứu trước khi xin API key.
+              </p>
+              <table className="docsTable docsTable--api">
+                <thead><tr><th>Method</th><th>Endpoint</th><th>Mô tả</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>GET</td>
+                    <td><a href="/pricing.html" target="_blank" rel="noreferrer" style={{ color: "var(--color-primary, #3b82f6)" }}>/pricing.html</a></td>
+                    <td>Trang HTML tra cứu giá model — share link cho team / khách hàng</td>
+                  </tr>
+                  <tr>
+                    <td>GET</td>
+                    <td><a href="/v1/pricing" target="_blank" rel="noreferrer" style={{ color: "var(--color-primary, #3b82f6)" }}>/v1/pricing</a></td>
+                    <td>JSON API list pricing — fetch để build UI riêng</td>
+                  </tr>
+                  <tr>
+                    <td>GET</td>
+                    <td><a href="/v1/public/models" target="_blank" rel="noreferrer" style={{ color: "var(--color-primary, #3b82f6)" }}>/v1/public/models</a></td>
+                    <td>Public model list — không cần API key, dùng cho landing page</td>
+                  </tr>
+                </tbody>
+              </table>
+
               <h3>Cài đặt & Webhooks</h3>
               <table className="docsTable docsTable--api">
                 <thead><tr><th>Method</th><th>Endpoint</th><th>Mô tả</th></tr></thead>
@@ -7962,6 +8201,31 @@ Team "Senior Dev":
                   <tr><td>GET</td><td>/admin/v1/request-logs</td><td>List request logs</td></tr>
                   <tr><td>DELETE</td><td>/admin/v1/request-logs</td><td>Delete all request logs</td></tr>
                   <tr><td>GET</td><td>/admin/v1/audit-logs</td><td>Admin action history</td></tr>
+                </tbody>
+              </table>
+
+              <h3>Public endpoints (no auth required)</h3>
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 8 }}>
+                Public endpoints for end-users to inspect before requesting an API key.
+              </p>
+              <table className="docsTable docsTable--api">
+                <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>GET</td>
+                    <td><a href="/pricing.html" target="_blank" rel="noreferrer" style={{ color: "var(--color-primary, #3b82f6)" }}>/pricing.html</a></td>
+                    <td>Pricing lookup HTML page — shareable link for team / customers</td>
+                  </tr>
+                  <tr>
+                    <td>GET</td>
+                    <td><a href="/v1/pricing" target="_blank" rel="noreferrer" style={{ color: "var(--color-primary, #3b82f6)" }}>/v1/pricing</a></td>
+                    <td>Pricing JSON API — fetch to build your own UI</td>
+                  </tr>
+                  <tr>
+                    <td>GET</td>
+                    <td><a href="/v1/public/models" target="_blank" rel="noreferrer" style={{ color: "var(--color-primary, #3b82f6)" }}>/v1/public/models</a></td>
+                    <td>Public model list — no API key needed, useful for landing pages</td>
+                  </tr>
                 </tbody>
               </table>
 

@@ -5,11 +5,15 @@ export type KiroProviderConfig = {
   defaultModel?: string;
 };
 
+export type KiroAuthMethod = "social" | "idc";
+
 export type KiroCredentialPayload = {
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: string;
   region?: string;
+  authRegion?: string;
+  apiRegion?: string;
   profileArn?: string;
   clientId?: string;
   clientSecret?: string;
@@ -18,6 +22,10 @@ export type KiroCredentialPayload = {
   codeChallenge?: string;
   redirectUri?: string;
   tokenType?: string;
+  authMethod?: KiroAuthMethod;
+  machineId?: string;
+  suspendedAt?: string;
+  suspensionReason?: string;
 };
 
 export type KiroChatRequest = {
@@ -50,4 +58,10 @@ export type KiroChatResponse = {
     };
     finish_reason?: "stop" | "length" | "tool_calls" | "content_filter" | null;
   }>;
+};
+
+export type KiroContextUsageEvent = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
 };

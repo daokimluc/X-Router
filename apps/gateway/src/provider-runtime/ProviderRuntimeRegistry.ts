@@ -29,6 +29,13 @@ export class ProviderRuntimeRegistry {
     this.providerInstances.set(providerInstance.id, structuredClone(providerInstance));
   }
 
+  /** Phase 25 — remove a provider instance and its account pool. */
+  removeProviderInstance(providerInstanceId: string): boolean {
+    const had = this.providerInstances.delete(providerInstanceId);
+    this.accountPools.delete(providerInstanceId);
+    return had;
+  }
+
   registerAccountPool(providerInstanceId: string, accountPool: AccountPool): void {
     this.accountPools.set(providerInstanceId, accountPool);
   }

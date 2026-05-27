@@ -3,26 +3,34 @@
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  line-height: 1.6;
   --color-primary: #0ea5e9;
   --color-primary-hover: #0284c7;
-  --color-bg: #FDFAF6;
-  --color-bg-alt: #F7F3EE;
+  --color-primary-subtle: rgba(14, 165, 233, 0.08);
+  --color-bg: #f8fafc;
+  --color-bg-alt: #f1f5f9;
   --color-surface: #ffffff;
-  --color-surface-2: #f4f4f5;
-  --color-surface-3: #e7e7e9;
-  --color-sidebar: rgba(255, 255, 255, 0.72);
-  --color-border: #e5e7eb;
-  --color-border-subtle: #f1f1f3;
-  --color-text-main: #1e293b;
+  --color-surface-2: #f8fafc;
+  --color-surface-3: #e2e8f0;
+  --color-sidebar: rgba(255, 255, 255, 0.82);
+  --color-border: #e2e8f0;
+  --color-border-subtle: #f1f5f9;
+  --color-text-main: #0f172a;
   --color-text-muted: #64748b;
   --color-text-subtle: #94a3b8;
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-danger: #ef4444;
-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-elev: 0 12px 28px -4px rgba(60, 50, 45, 0.08), 0 4px 10px -4px rgba(60, 50, 45, 0.04);
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-card: 0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03);
+  --shadow-elev: 0 16px 32px -6px rgba(15, 23, 42, 0.08), 0 6px 12px -4px rgba(15, 23, 42, 0.04);
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
   --radius: 10px;
+  --radius-sm: 8px;
   --radius-lg: 14px;
+  --radius-xl: 16px;
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--color-text-main);
   background: var(--color-bg);
 }
@@ -31,6 +39,7 @@
   color-scheme: dark;
   --color-primary: #38bdf8;
   --color-primary-hover: #0ea5e9;
+  --color-primary-subtle: rgba(56, 189, 248, 0.1);
   --color-bg: #0f172a;
   --color-bg-alt: #1e293b;
   --color-surface: #1e293b;
@@ -42,8 +51,10 @@
   --color-text-main: #f1f5f9;
   --color-text-muted: #94a3b8;
   --color-text-subtle: #64748b;
-  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-elev: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-card: 0 2px 8px -2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-elev: 0 16px 32px -6px rgba(0, 0, 0, 0.5), 0 6px 12px -4px rgba(0, 0, 0, 0.3);
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 * {
@@ -68,28 +79,48 @@ button {
   user-select: none;
 }
 
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-subtle) 30%, transparent);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-text-subtle) 50%, transparent);
+}
+
 .appShell {
   height: 100vh;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  background:
-    linear-gradient(180deg, var(--color-bg-alt) 0, var(--color-bg) 270px),
-    var(--color-bg);
+  grid-template-columns: 260px minmax(0, 1fr);
+  background: var(--color-bg);
   overflow: hidden;
 }
 
 .sidebar {
   height: 100vh;
-  padding: 20px 16px;
+  padding: 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  border-right: 1px solid var(--color-border-subtle);
-  background: var(--color-sidebar);
-  backdrop-filter: blur(24px);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
   overflow-y: auto;
   position: sticky;
   top: 0;
+  transition: width var(--transition), padding var(--transition);
 }
 
 .trafficLights {
@@ -176,10 +207,10 @@ button {
   gap: 10px;
   align-items: center;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 
 .navItem span {
@@ -194,6 +225,11 @@ button {
 .navItem:hover {
   background: var(--color-surface-2);
   color: var(--color-text-main);
+}
+
+.navItem:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 .navItem.active {
@@ -262,7 +298,7 @@ button {
   font-size: 22px;
   line-height: 1.2;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .topbar p {
@@ -317,11 +353,11 @@ button {
   background: var(--color-surface);
   color: var(--color-text-main);
   min-height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 0 11px;
   cursor: pointer;
   box-shadow: var(--shadow-soft);
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .textButton,
@@ -342,9 +378,9 @@ button {
   display: inline-grid;
   place-items: center;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 
 .textButton:hover,
@@ -354,23 +390,31 @@ button {
   color: var(--color-text-main);
 }
 
+.textButton:focus-visible,
+.iconButton:focus-visible,
+.primaryButton:focus-visible,
+.actionButton:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
 .primaryButton {
   border: none;
   color: #ffffff;
-  background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 50%, #0284c7 100%);
   box-shadow: 0 4px 14px -4px rgba(14, 165, 233, 0.35);
   font-weight: 600;
 }
 
 .primaryButton:hover {
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
-  box-shadow: 0 6px 18px -4px rgba(14, 165, 233, 0.45);
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  box-shadow: 0 6px 20px -4px rgba(14, 165, 233, 0.45);
   transform: translateY(-1px);
 }
 
 .actionButton {
   min-height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 9px;
   font-size: 12px;
   color: var(--color-text-muted);
@@ -380,14 +424,15 @@ button {
 .iconButton:active,
 .primaryButton:active,
 .actionButton:active {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 
 .textButton:disabled,
 .primaryButton:disabled,
 .actionButton:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .contentBand {
@@ -432,14 +477,14 @@ button {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   border-radius: 12px;
-  box-shadow: var(--shadow-soft);
-  transition: box-shadow 0.2s, transform 0.2s;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .itemCard:hover,
 .providerCard:hover {
   box-shadow: var(--shadow-elev);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .metric {
@@ -476,7 +521,8 @@ button {
 .metric strong {
   font-size: 30px;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric p {
@@ -510,13 +556,14 @@ button {
 .providerCard {
   min-height: 148px;
   padding: 13px;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition), box-shadow var(--transition);
 }
 
 .providerCard:hover {
   border-color: color-mix(in srgb, var(--color-primary) 26%, var(--color-border));
   background: color-mix(in srgb, var(--color-primary) 2%, var(--color-surface));
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-elev);
 }
 
 .providerCardTop,
@@ -815,7 +862,7 @@ td code {
 .formPanel select:focus,
 .formPanel textarea:focus {
   border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .formPanel textarea {
@@ -1370,16 +1417,16 @@ td code {
   border-radius: 12px;
   color: var(--color-text-main);
   background: var(--color-surface);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+  box-shadow: var(--shadow-card);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition), transform var(--transition);
 }
 
 .providerHubCard:hover {
   border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-elev);
+  transform: translateY(-2px);
 }
 
 .providerHubCard.disabled {
@@ -2295,7 +2342,7 @@ td code {
   color: var(--color-text-main);
   background: var(--color-bg);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .providerOption {
@@ -2427,7 +2474,7 @@ td code {
 .credentialGrid input:focus,
 .credentialGrid textarea:focus {
   border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .oauthTools {
@@ -2567,6 +2614,9 @@ td code {
     min-height: auto;
     position: static;
     overflow-y: visible;
+    padding: 16px 14px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-subtle);
   }
 
   .mainPanel {
@@ -2600,6 +2650,7 @@ td code {
     align-items: stretch;
     flex-direction: column;
     padding: 16px;
+    min-height: auto;
   }
 
   .topbarActions {
@@ -2612,6 +2663,18 @@ td code {
 
   .contentBand {
     padding: 16px;
+  }
+
+  .navItem {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .textButton,
+  .primaryButton,
+  .actionButton {
+    min-height: 40px;
+    padding: 0 14px;
   }
 
   .formPanel,
@@ -2628,6 +2691,16 @@ td code {
 
   .navList {
     grid-template-columns: 1fr;
+  }
+
+  .modalContent,
+  .addModelModal,
+  .confirmModal,
+  .addAccountModal,
+  .addAccountModalV2 {
+    max-width: 100%;
+    border-radius: 12px;
+    margin: 8px;
   }
 }
 
@@ -2872,7 +2945,7 @@ td code {
 .addAccField textarea:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .addAccField textarea {
@@ -3651,12 +3724,12 @@ td code {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform var(--transition), box-shadow var(--transition);
 }
 
 .usageCard:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-elev);
 }
 
 .usageCardLabel {
@@ -3672,6 +3745,7 @@ td code {
   font-weight: 700;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 .usageCard--default .usageCardValue { color: var(--color-text-main); }
@@ -3694,7 +3768,7 @@ td code {
 }
 
 .usageTopologyWrap {
-  background: var(--color-bg, #fdfaf6);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   overflow: hidden;
@@ -3979,11 +4053,12 @@ td code {
   border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 16px 20px;
-  transition: box-shadow 0.15s;
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .routeCard:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
 }
 
 .routeCard--disabled {
@@ -4100,6 +4175,7 @@ td code {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
+  color: var(--color-text-main);
 }
 
 .routeFormLabel small {
@@ -4109,17 +4185,20 @@ td code {
 }
 
 .routeNameInput {
+  width: 100%;
   padding: 10px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 15px;
-  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .routeNameInput:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .routeModelList {
@@ -4361,7 +4440,7 @@ td code {
 
 .loginForm label:focus-within {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .loginForm label svg {
@@ -4449,7 +4528,7 @@ td code {
 
 .providersSearchWrap:focus-within {
   border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .providersSearchWrap svg {
@@ -4651,14 +4730,14 @@ td code {
   border: 1px solid var(--color-border);
   border-radius: 12px;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s, background 0.15s;
+  transition: border-color var(--transition-fast), box-shadow var(--transition), transform var(--transition), background var(--transition-fast);
   min-height: 64px;
 }
 
 .providerCard2:hover {
   border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-elev);
+  transform: translateY(-2px);
   background: color-mix(in srgb, var(--color-primary) 2%, var(--color-surface));
 }
 
@@ -5061,7 +5140,7 @@ img.providerCard2Logo {
 .endpointCreateForm select:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .endpointCreateFormActions {
@@ -5262,7 +5341,7 @@ img.providerCard2Logo {
 .settingsEditor:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .settingsEditorActions {
@@ -5382,12 +5461,12 @@ img.providerCard2Logo {
   border: 1px solid var(--color-border);
   border-radius: 12px;
   overflow: hidden;
-  transition: box-shadow 0.2s, transform 0.2s;
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .cliToolCard:hover {
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-primary) 8%, transparent);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-elev);
+  transform: translateY(-2px);
 }
 
 .cliToolCardHeader {
@@ -5615,7 +5694,7 @@ img.providerCard2Logo {
 .pgField select:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 10%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .pgField input[type="range"] {
@@ -5898,7 +5977,7 @@ img.providerCard2Logo {
 .rlSearchInput:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 10%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .rlList {
@@ -6183,7 +6262,7 @@ img.providerCard2Logo {
 }
 
 .toggleSwitch input:focus-visible + .toggleSlider {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 /* Settings reset button */
@@ -6388,13 +6467,13 @@ img.providerCard2Logo {
   padding: 18px 20px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 14px;
-  transition: box-shadow 0.2s, transform 0.2s;
+  border-radius: var(--radius-xl);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .ovMetricCard:hover {
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-primary) 8%, transparent);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-elev);
+  transform: translateY(-2px);
 }
 
 .ovMetricCard--primary {
@@ -6426,6 +6505,7 @@ img.providerCard2Logo {
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .ovMetricLabel {
@@ -6972,7 +7052,7 @@ code.ovInfoValue {
 .aliasForm input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 10%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -7287,4 +7367,519 @@ code.ovInfoValue {
 .balanceBadge[data-tone="unlimited"] {
   color: #10b981;
   border-color: rgba(16, 185, 129, 0.4);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Modal Form Fields (shared)
+   ═══════════════════════════════════════════════════════════ */
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-main);
+}
+
+.formField > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.formField input,
+.formField select,
+.formField textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.formField input:focus,
+.formField select:focus,
+.formField textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.formField input::placeholder,
+.formField textarea::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.formField textarea {
+  min-height: 80px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.formHint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-subtle);
+  line-height: 1.4;
+}
+
+.formError {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-danger);
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-danger) 20%, var(--color-border));
+  border-radius: var(--radius-sm);
+  margin: 0;
+}
+
+.formRow2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Custom Provider Modal */
+.customProviderModal {
+  width: min(440px, calc(100vw - 32px));
+}
+
+.customProviderForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.customProviderForm .routeNameInput,
+.customProviderForm input,
+.customProviderForm select,
+.customProviderForm textarea {
+  width: 100%;
+}
+
+/* Edit Account Modal */
+.editAccountModal {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.editAccountBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+/* Ensure modalFooter inside custom forms has proper spacing */
+.customProviderForm .modalFooter,
+.editAccountBody + .modalFooter {
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: 4px;
+}
+
+/* Route modal form fields (used in ProviderConnectionsCard edit) */
+.routeForm .routeFormLabel .routeNameInput {
+  width: 100%;
+}
+
+/* Inline style overrides for modals using routeForm pattern */
+.routeForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ─── Modal body default padding ─── */
+.modalContent > div:not(.modalHeader):not(.routeModalFooter):not(.modalFooter) {
+  padding: 20px 24px;
+}
+
+/* ─── Route modal sizing ─── */
+.routeModal {
+  max-width: 520px;
+}
+
+/* ─── Utility: info box inside modals ─── */
+.infoBox {
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 20%, var(--color-border));
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.infoBox strong {
+  color: var(--color-text-main);
+}
+
+/* ─── ProxyPools page cards ─── */
+.proxyPoolCard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  transition: box-shadow var(--transition), transform var(--transition);
+}
+
+.proxyPoolCard:hover {
+  box-shadow: var(--shadow-card);
+}
+
+/* ─── Media Providers page cards ─── */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow var(--transition), transform var(--transition);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-elev);
+  transform: translateY(-1px);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Channel Overrides Editor
+   ═══════════════════════════════════════════════════════════ */
+
+.channelOverrides {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  margin-top: 16px;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.channelOverrides__summary {
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  transition: background var(--transition-fast);
+}
+
+.channelOverrides__summary:hover {
+  background: var(--color-surface-2);
+}
+
+.channelOverrides__summary::-webkit-details-marker {
+  display: none;
+}
+
+.channelOverrides__badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+  border-radius: 4px;
+}
+
+.channelOverrides__body {
+  padding: 16px 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.channelOverrides__shortInput {
+  max-width: 160px;
+}
+
+.channelOverrides__invalid {
+  border-color: var(--color-danger) !important;
+}
+
+.channelOverrides__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.formFieldError {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-danger);
+}
+
+.formFieldSuccess {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Global Form & Input Normalization
+   Ensures ALL inputs/selects/textareas in the app look consistent
+   even when no specific class is applied
+   ═══════════════════════════════════════════════════════════ */
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--color-text-main);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+select,
+textarea {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-subtle);
+}
+
+textarea {
+  min-height: 80px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+/* Monospace textareas (JSON editors, code) */
+textarea[spellcheck="false"],
+.formField textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Labels in modal/form contexts without specific class */
+.modalContent label:not([class]),
+.customProviderForm label:not([class]),
+.editAccountBody label:not([class]),
+.routeForm label:not(.routeFormLabel):not([class]) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-main);
+}
+
+/* Small hints under fields */
+label small,
+.formHint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Wizard / Step Indicator
+   ═══════════════════════════════════════════════════════════ */
+
+.wizardSteps {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.wizardStep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.wizardStep--active {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.wizardStep--done {
+  color: var(--color-text-main);
+}
+
+.wizardStepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.wizardStep--active .wizardStepNum {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.wizardStep--done .wizardStepNum {
+  background: var(--color-success);
+  color: #fff;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Picker / Selection Cards (used in wizards, modals)
+   ═══════════════════════════════════════════════════════════ */
+
+.pickerCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.pickerCard:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  background: var(--color-primary-subtle);
+  transform: translateY(-1px);
+}
+
+.pickerCard__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pickerCard__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.pickerCard__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.pickerCard__desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Details/Summary pattern (collapsible sections)
+   ═══════════════════════════════════════════════════════════ */
+
+details {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+details > summary {
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  transition: background var(--transition-fast);
+}
+
+details > summary:hover {
+  background: var(--color-surface-2);
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details[open] > summary {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Table normalization (ensure all tables look good)
+   ═══════════════════════════════════════════════════════════ */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+}
+
+td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr {
+  transition: background var(--transition-fast);
+}
+
+tbody tr:hover td {
+  background: color-mix(in srgb, var(--color-primary) 3%, transparent);
 }

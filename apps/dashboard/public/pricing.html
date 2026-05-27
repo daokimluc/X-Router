@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Model Pricing</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #1e293b;
+    }
+    h1 { font-size: 28px; font-weight: 700; }
+    .subtitle { color: #94a3b8; font-size: 14px; margin-top: 4px; }
+    .search-bar {
+      width: 100%;
+      max-width: 400px;
+      padding: 10px 14px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 14px;
+    }
+    .search-bar:focus { outline: none; border-color: #3b82f6; }
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      flex: 1;
+      background: #1e293b;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    .stat-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; }
+    .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #1e293b;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #334155; }
+    th {
+      background: #0f172a;
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    th.right, td.right { text-align: right; }
+    tr:hover td { background: rgba(59, 130, 246, 0.05); }
+    code {
+      background: #0f172a;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: "SF Mono", Monaco, monospace;
+      font-size: 13px;
+    }
+    .price { font-variant-numeric: tabular-nums; color: #10b981; }
+    .price-cached { color: #f59e0b; }
+    .empty {
+      text-align: center;
+      padding: 64px 16px;
+      color: #64748b;
+    }
+    .footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid #1e293b;
+      text-align: center;
+      color: #64748b;
+      font-size: 12px;
+    }
+    .footer a { color: #3b82f6; text-decoration: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Model Pricing</h1>
+        <div class="subtitle">Per-token rates (USD per 1M tokens)</div>
+      </div>
+      <input id="search" class="search-bar" placeholder="Search models..." autofocus />
+    </header>
+
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-label">Models</div>
+        <div class="stat-value" id="stat-count">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Cheapest input</div>
+        <div class="stat-value" id="stat-min">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Most expensive output</div>
+        <div class="stat-value" id="stat-max">—</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th class="right">Input / 1M</th>
+          <th class="right">Output / 1M</th>
+          <th class="right">Cached / 1M</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="4" class="empty">Loading...</td></tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      Pricing data from gateway. <a href="/">Back to dashboard</a>.
+    </div>
+  </div>
+
+  <script>
+    let allEntries = [];
+
+    function fmt(n) {
+      if (n === undefined || n === null) return '<span style="color:#64748b">—</span>';
+      if (n === 0) return '<span class="price">$0.00</span>';
+      if (n < 0.01) return `<span class="price">$${n.toFixed(4)}</span>`;
+      return `<span class="price">$${n.toFixed(2)}</span>`;
+    }
+
+    function fmtCached(n) {
+      if (n === undefined || n === null) return '<span style="color:#64748b">—</span>';
+      if (n === 0) return '<span class="price-cached">$0.00</span>';
+      if (n < 0.01) return `<span class="price-cached">$${n.toFixed(4)}</span>`;
+      return `<span class="price-cached">$${n.toFixed(2)}</span>`;
+    }
+
+    function render(filter = "") {
+      const q = filter.trim().toLowerCase();
+      const filtered = q
+        ? allEntries.filter(e => e.model.toLowerCase().includes(q) || (e.label || "").toLowerCase().includes(q))
+        : allEntries;
+      const sorted = [...filtered].sort((a, b) => a.model.localeCompare(b.model));
+
+      const tbody = document.getElementById("rows");
+      if (sorted.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No matching models</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = sorted.map(e => `
+        <tr>
+          <td><code>${escapeHtml(e.model)}</code>${e.label ? `<span class="badge">${escapeHtml(e.label)}</span>` : ''}</td>
+          <td class="right">${fmt(e.inputRate)}</td>
+          <td class="right">${fmt(e.outputRate)}</td>
+          <td class="right">${fmtCached(e.cachedInputRate)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+
+    function renderStats() {
+      document.getElementById("stat-count").textContent = String(allEntries.length);
+      const ins = allEntries.map(e => e.inputRate).filter(n => Number.isFinite(n) && n > 0);
+      const outs = allEntries.map(e => e.outputRate).filter(n => Number.isFinite(n) && n > 0);
+      const minIn = ins.length ? Math.min(...ins) : 0;
+      const maxOut = outs.length ? Math.max(...outs) : 0;
+      document.getElementById("stat-min").innerHTML = fmt(minIn);
+      document.getElementById("stat-max").innerHTML = fmt(maxOut);
+    }
+
+    fetch("/v1/pricing")
+      .then(r => r.json())
+      .then(payload => {
+        allEntries = payload.data || payload || [];
+        renderStats();
+        render();
+      })
+      .catch(() => {
+        document.getElementById("rows").innerHTML = '<tr><td colspan="4" class="empty">Failed to load pricing data</td></tr>';
+      });
+
+    document.getElementById("search").addEventListener("input", e => render(e.target.value));
+  </script>
+</body>
+</html>

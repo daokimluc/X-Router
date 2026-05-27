@@ -3,6 +3,7 @@ import type { ProviderAccount } from "../providers/base/ProviderAccount.js";
 export type AccountSelectionContext = {
   model?: string;
   now: Date;
+  quotaFilter?: (accountId: string) => boolean;
 };
 
 export type AccountSelectionStrategy = {

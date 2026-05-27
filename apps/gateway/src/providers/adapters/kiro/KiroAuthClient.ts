@@ -84,28 +84,11 @@ export class KiroAuthClient {
       });
     }
 
-    if (credential.clientId && credential.clientSecret) {
-      const region = credential.region ?? DEFAULT_REGION;
-      const response = await fetch(`https://oidc.${region}.amazonaws.com/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json"
-        },
-        body: JSON.stringify({
-          clientId: credential.clientId,
-          clientSecret: credential.clientSecret,
-          refreshToken: credential.refreshToken,
-          grantType: "refresh_token"
-        })
-      });
-
-      return parseKiroTokenResponse(response, "Kiro AWS token refresh failed", {
-        refreshToken: credential.refreshToken
-      });
+    if (credential.authMethod === "idc" || (credential.clientId && credential.clientSecret)) {
+      return this.refreshIdcToken(credential);
     }
 
-    const response = await fetch(`${getAuthBaseUrl(credential.region)}/refreshToken`, {
+    const response = await fetch(`${getAuthBaseUrl(credential.authRegion ?? credential.region)}/refreshToken`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -118,6 +101,32 @@ export class KiroAuthClient {
     });
 
     return parseKiroTokenResponse(response, "Kiro token refresh failed", {
+      refreshToken: credential.refreshToken
+    });
+  }
+
+  private async refreshIdcToken(credential: KiroCredentialPayload): Promise<KiroTokenResult> {
+    const region = credential.authRegion ?? credential.region ?? DEFAULT_REGION;
+    const endpoint = `https://oidc.${region}.amazonaws.com/token`;
+
+    const body: Record<string, string> = {
+      refreshToken: credential.refreshToken!,
+      grantType: "refresh_token"
+    };
+
+    if (credential.clientId) body.clientId = credential.clientId;
+    if (credential.clientSecret) body.clientSecret = credential.clientSecret;
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    return parseKiroTokenResponse(response, "Kiro IDC token refresh failed", {
       refreshToken: credential.refreshToken
     });
   }

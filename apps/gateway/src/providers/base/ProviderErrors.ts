@@ -6,24 +6,28 @@ export type ProviderErrorCode =
   | "provider_bad_response"
   | "provider_unavailable"
   | "provider_config_error"
+  | "provider_account_suspended"
   | "unsupported_capability";
 
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly retryable: boolean;
   readonly statusCode?: number;
+  readonly metadata?: Record<string, unknown>;
 
   constructor(options: {
     code: ProviderErrorCode;
     message: string;
     retryable?: boolean;
     statusCode?: number;
+    metadata?: Record<string, unknown>;
   }) {
     super(options.message);
     this.name = "ProviderError";
     this.code = options.code;
     this.retryable = options.retryable ?? false;
     this.statusCode = options.statusCode;
+    this.metadata = options.metadata;
   }
 }
 
@@ -99,5 +103,21 @@ export class ProviderUnavailableError extends ProviderError {
       statusCode
     });
     this.name = "ProviderUnavailableError";
+  }
+}
+
+export class ProviderAccountSuspendedError extends ProviderError {
+  readonly suspensionReason: string;
+
+  constructor(providerType: string, reason: string, statusCode = 403) {
+    super({
+      code: "provider_account_suspended",
+      message: `[${providerType}] Account suspended: ${reason}`,
+      retryable: false,
+      statusCode,
+      metadata: { suspended: true, suspensionReason: reason }
+    });
+    this.name = "ProviderAccountSuspendedError";
+    this.suspensionReason = reason;
   }
 }

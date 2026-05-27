@@ -11,6 +11,7 @@ export type AppConfig = {
   dataFile: string;
   internalRateLimitPerMinute: number;
   internalDailyRequestQuota: number;
+  internalDailyTokenQuota: number;
   addAccountRateLimitPerMinute: number;
 };
 
@@ -26,6 +27,7 @@ const envSchema = z.object({
   DATA_FILE: z.string().min(1).default("data/gateway-state.json"),
   INTERNAL_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(0),
   INTERNAL_DAILY_REQUEST_QUOTA: z.coerce.number().int().min(0).default(0),
+  INTERNAL_DAILY_TOKEN_QUOTA: z.coerce.number().int().min(0).default(0),
   ADD_ACCOUNT_RATE_LIMIT_PER_MIN: z.string().optional(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
@@ -86,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dataFile: parsed.DATA_FILE,
     internalRateLimitPerMinute: parsed.INTERNAL_RATE_LIMIT_PER_MINUTE,
     internalDailyRequestQuota: parsed.INTERNAL_DAILY_REQUEST_QUOTA,
+    internalDailyTokenQuota: parsed.INTERNAL_DAILY_TOKEN_QUOTA,
     addAccountRateLimitPerMinute: parseAddAccountRateLimit(parsed.ADD_ACCOUNT_RATE_LIMIT_PER_MIN)
   };
 }

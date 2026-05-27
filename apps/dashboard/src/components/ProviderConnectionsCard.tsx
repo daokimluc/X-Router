@@ -384,7 +384,7 @@ function EditConnectionModal({
             <X size={18} />
           </button>
         </div>
-        <form className="routeForm" onSubmit={(e) => void handleSave(e)} style={{ padding: "16px 20px" }}>
+        <form className="customProviderForm" onSubmit={(e) => void handleSave(e)}>
           <label className="routeFormLabel">
             Display Name
             <input

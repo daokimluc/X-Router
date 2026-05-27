@@ -273,7 +273,7 @@ export function ProviderAddConnectionModal({
 
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          style={{ display: "flex", flexDirection: "column", gap: 14, padding: "20px 24px" }}
+          className="customProviderForm"
         >
           <Field label="Display Name">
             <input
@@ -322,7 +322,7 @@ export function ProviderAddConnectionModal({
             />
           </Field>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="formRow2col">
             <Field label="Max Concurrency">
               <input
                 type="number"
@@ -344,7 +344,7 @@ export function ProviderAddConnectionModal({
           </div>
 
           {error && (
-            <p style={{ margin: 0, color: "var(--color-danger, #ef4444)", fontSize: 12 }}>
+            <p className="formError">
               {error}
             </p>
           )}
@@ -373,24 +373,12 @@ export function ProviderAddConnectionModal({
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 12px",
-  fontSize: 13,
-  border: "1px solid var(--color-border, #e5e7eb)",
-  borderRadius: 8,
-  background: "var(--color-surface, #ffffff)",
-  color: "var(--color-text-main)",
-  outline: "none",
-  fontFamily: "inherit",
-};
+const inputStyle: React.CSSProperties = {};
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: 11, color: "var(--color-text-muted, #6b7280)", fontWeight: 500 }}>
-        {label}
-      </span>
+    <label className="formField">
+      <span>{label}</span>
       {children}
     </label>
   );

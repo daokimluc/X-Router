@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -34,13 +35,17 @@ const providerInstancePatchSchema = z.object({
       "weighted_round_robin",
       "least_busy",
       "lowest_error_rate",
-      "lowest_latency"
+      "lowest_latency",
+      "priority"
     ])
     .optional(),
   paramOverride: z.record(z.unknown()).optional(),
   headerOverride: z.record(z.string()).optional(),
   statusCodeMapping: z.record(z.enum(["retry", "disable", "passthrough"])).optional(),
-  groupName: z.union([z.string().min(1).max(64), z.null()]).optional()
+  groupName: z.union([z.string().min(1).max(64), z.null()]).optional(),
+  tag: z.union([z.string().min(1).max(64), z.null()]).optional(),
+  maxInputTokens: z.union([z.number().int().positive(), z.null()]).optional(),
+  systemPromptOverride: z.union([z.string().max(8000), z.null()]).optional()
 });
 const capabilitySchema = z.enum([
   "chat",
@@ -67,7 +72,8 @@ const providerInstanceCreateSchema = z.object({
       "weighted_round_robin",
       "least_busy",
       "lowest_error_rate",
-      "lowest_latency"
+      "lowest_latency",
+      "priority"
     ])
     .default("round_robin"),
   maxConcurrentRequests: z.number().int().positive().default(20),
@@ -228,6 +234,51 @@ const kiroCockpitImportSchema = z.object({
   region: z.string().min(1).default("us-east-1")
 });
 const windsurfLocalImportSchema = z.object({
+  providerInstanceId: z.string().min(1),
+  accountId: z.string().min(1),
+  displayName: z.string().min(1),
+  owner: z.string().min(1).optional(),
+  maxConcurrency: z.number().int().positive().default(3),
+  weight: z.number().int().positive().default(1),
+  allowedModels: z.array(z.string().min(1)).optional(),
+  tags: z.array(z.string().min(1)).optional()
+});
+const githubDeviceCodeStartSchema = z.object({
+  providerInstanceId: z.string().min(1),
+  accountId: z.string().min(1),
+  displayName: z.string().min(1),
+  owner: z.string().min(1).optional(),
+  maxConcurrency: z.number().int().positive().default(3),
+  weight: z.number().int().positive().default(1),
+  allowedModels: z.array(z.string().min(1)).optional(),
+  tags: z.array(z.string().min(1)).optional()
+});
+const githubDeviceCodePollSchema = z.object({
+  deviceCode: z.string().min(1),
+  providerInstanceId: z.string().min(1),
+  accountId: z.string().min(1),
+  displayName: z.string().min(1),
+  owner: z.string().min(1).optional(),
+  maxConcurrency: z.number().int().positive().default(3),
+  weight: z.number().int().positive().default(1),
+  allowedModels: z.array(z.string().min(1)).optional(),
+  tags: z.array(z.string().min(1)).optional()
+});
+const kiroIdcImportSchema = z.object({
+  providerInstanceId: z.string().min(1),
+  accountId: z.string().min(1),
+  displayName: z.string().min(1),
+  refreshToken: z.string().min(1),
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  region: z.string().min(1).default("us-east-1"),
+  owner: z.string().min(1).optional(),
+  maxConcurrency: z.number().int().positive().default(3),
+  weight: z.number().int().positive().default(1),
+  allowedModels: z.array(z.string().min(1)).optional(),
+  tags: z.array(z.string().min(1)).optional()
+});
+const codexLocalImportSchema = z.object({
   providerInstanceId: z.string().min(1),
   accountId: z.string().min(1),
   displayName: z.string().min(1),
@@ -479,8 +530,11 @@ export async function registerAdminRoutes(
         provider: "kiro",
         grantType: "import_refresh_token",
         refreshToken: detected.refreshToken,
-        region: body.region,
-        source: detected.source
+        region: detected.region ?? body.region,
+        source: detected.source,
+        authMethod: detected.authMethod as "social" | "idc" | undefined,
+        clientId: detected.clientId,
+        clientSecret: detected.clientSecret
       };
       const token = await new KiroAuthClient().refreshToken(baseCredential);
       const credentialPayload = {
@@ -762,6 +816,247 @@ export async function registerAdminRoutes(
     }
   );
 
+  // ============================================================================
+  // GitHub Copilot Device Code Flow
+  // ============================================================================
+  app.post(
+    "/admin/v1/oauth/github-copilot/device-code/start",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = githubDeviceCodeStartSchema.parse(request.body);
+      const { GitHubCopilotAdapter } = await import("../providers/adapters/github-copilot/GitHubCopilotAdapter.js");
+      const adapter = new GitHubCopilotAdapter();
+      const result = await adapter.startDeviceCodeFlow();
+
+      if (!result) {
+        reply.code(502);
+        return { error: { type: "upstream_error", message: "Failed to start GitHub device code flow", code: "device_code_start_failed" } };
+      }
+
+      app.adminAuditService.record({
+        action: "oauth.github_device_code_start",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: body.providerInstanceId
+      });
+
+      return {
+        data: {
+          deviceCode: result.deviceCode,
+          userCode: result.userCode,
+          verificationUri: result.verificationUri,
+          expiresIn: result.expiresIn,
+          interval: result.interval,
+          accountId: body.accountId
+        }
+      };
+    }
+  );
+
+  app.post(
+    "/admin/v1/oauth/github-copilot/device-code/poll",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = githubDeviceCodePollSchema.parse(request.body);
+      const { GitHubCopilotAdapter } = await import("../providers/adapters/github-copilot/GitHubCopilotAdapter.js");
+      const adapter = new GitHubCopilotAdapter();
+      const result = await adapter.pollDeviceCode(body.deviceCode);
+
+      if (!result) {
+        reply.code(202);
+        return { data: { status: "pending", message: "Waiting for user to authorize" } };
+      }
+
+      const providerInstance = app.providerRuntimeRegistry.getProviderInstance(body.providerInstanceId);
+      if (!providerInstance || providerInstance.type !== "github_copilot") {
+        reply.code(404);
+        return { error: { type: "not_found", message: "GitHub Copilot provider instance not found", code: "provider_instance_not_found" } };
+      }
+
+      const accountPool = app.providerRuntimeRegistry.getAccountPool(providerInstance.id);
+      if (!accountPool) throw new Error(`Account pool ${providerInstance.id} not found`);
+
+      const now = new Date();
+      const credentialRef = `secret_${body.accountId}`;
+      const account: ProviderAccount = {
+        id: body.accountId,
+        providerInstanceId: providerInstance.id,
+        providerType: "github_copilot",
+        displayName: body.displayName,
+        status: "active",
+        weight: body.weight,
+        maxConcurrency: body.maxConcurrency,
+        credentialRef,
+        allowedModels: body.allowedModels,
+        tags: body.tags,
+        owner: body.owner,
+        runtime: { activeRequests: 0, totalRequests: 0, failedRequests: 0, consecutiveFailures: 0 },
+        createdAt: now,
+        updatedAt: now
+      };
+
+      app.secretService.addCredentialPayload({
+        id: credentialRef,
+        accountId: account.id,
+        credentialType: "oauth",
+        credentialPayload: {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken
+        }
+      });
+      accountPool.addAccount(account);
+      app.adminAuditService.record({
+        action: "account.github_copilot_device_code",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "account",
+        targetId: account.id
+      });
+      await saveAdminRuntimeState(app);
+
+      return { data: { ...account, credentialRef: "[REDACTED]" } };
+    }
+  );
+
+  // ============================================================================
+  // Kiro IDC Import (clientId + clientSecret + refreshToken)
+  // ============================================================================
+  app.post(
+    "/admin/v1/oauth/kiro/import-idc",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = kiroIdcImportSchema.parse(request.body);
+      const providerInstance = app.providerRuntimeRegistry.getProviderInstance(body.providerInstanceId);
+
+      if (!providerInstance || providerInstance.type !== "kiro") {
+        reply.code(404);
+        return { error: { type: "not_found", message: "Kiro provider instance not found", code: "provider_instance_not_found" } };
+      }
+
+      const accountPool = app.providerRuntimeRegistry.getAccountPool(providerInstance.id);
+      if (!accountPool) throw new Error(`Account pool ${providerInstance.id} not found`);
+
+      const idcCredential = {
+        refreshToken: body.refreshToken,
+        clientId: body.clientId,
+        clientSecret: body.clientSecret,
+        region: body.region,
+        authMethod: "idc" as const
+      };
+
+      const token = await new KiroAuthClient().refreshToken(idcCredential);
+      const credentialPayload = {
+        ...idcCredential,
+        ...applyKiroToken(idcCredential, token),
+        tokenType: token.tokenType,
+        importedAt: new Date().toISOString()
+      };
+
+      const now = new Date();
+      const credentialRef = `secret_${body.accountId}`;
+      const account: ProviderAccount = {
+        id: body.accountId,
+        providerInstanceId: providerInstance.id,
+        providerType: "kiro",
+        displayName: body.displayName,
+        status: "active",
+        weight: body.weight,
+        maxConcurrency: body.maxConcurrency,
+        credentialRef,
+        allowedModels: body.allowedModels,
+        tags: body.tags,
+        owner: body.owner,
+        runtime: { activeRequests: 0, totalRequests: 0, failedRequests: 0, consecutiveFailures: 0 },
+        metadata: { authMethod: "idc", region: body.region },
+        createdAt: now,
+        updatedAt: now
+      };
+
+      app.secretService.addCredentialPayload({
+        id: credentialRef,
+        accountId: account.id,
+        credentialType: "custom_json",
+        credentialPayload
+      });
+      accountPool.addAccount(account);
+      app.adminAuditService.record({
+        action: "account.kiro_import_idc",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "account",
+        targetId: account.id
+      });
+      await saveAdminRuntimeState(app);
+
+      return { data: { ...account, credentialRef: "[REDACTED]" } };
+    }
+  );
+
+  // ============================================================================
+  // Codex Local Import (reads from ~/.codex/ or ~/.config/codex/)
+  // ============================================================================
+  app.post(
+    "/admin/v1/oauth/codex/import-local",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = codexLocalImportSchema.parse(request.body);
+      const providerInstance = app.providerRuntimeRegistry.getProviderInstance(body.providerInstanceId);
+
+      if (!providerInstance || providerInstance.type !== "codex") {
+        reply.code(404);
+        return { error: { type: "not_found", message: "Codex provider instance not found", code: "provider_instance_not_found" } };
+      }
+
+      const accountPool = app.providerRuntimeRegistry.getAccountPool(providerInstance.id);
+      if (!accountPool) throw new Error(`Account pool ${providerInstance.id} not found`);
+
+      const detected = await findCodexLocalCredential();
+      if (!detected) {
+        reply.code(404);
+        return { error: { type: "not_found", message: "Codex local auth not found. Run `codex login` first.", code: "codex_local_token_not_found" } };
+      }
+
+      const now = new Date();
+      const credentialRef = `secret_${body.accountId}`;
+      const account: ProviderAccount = {
+        id: body.accountId,
+        providerInstanceId: providerInstance.id,
+        providerType: "codex",
+        displayName: body.displayName,
+        status: "active",
+        weight: body.weight,
+        maxConcurrency: body.maxConcurrency,
+        credentialRef,
+        allowedModels: body.allowedModels,
+        tags: body.tags,
+        owner: body.owner,
+        runtime: { activeRequests: 0, totalRequests: 0, failedRequests: 0, consecutiveFailures: 0 },
+        metadata: { authMethod: "local_import", source: detected.source },
+        createdAt: now,
+        updatedAt: now
+      };
+
+      app.secretService.addCredentialPayload({
+        id: credentialRef,
+        accountId: account.id,
+        credentialType: "oauth",
+        credentialPayload: {
+          accessToken: detected.accessToken,
+          refreshToken: detected.refreshToken,
+          expiresAt: detected.expiresAt
+        }
+      });
+      accountPool.addAccount(account);
+      app.adminAuditService.record({
+        action: "account.codex_import_local",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "account",
+        targetId: account.id
+      });
+      await saveAdminRuntimeState(app);
+
+      return { data: { ...account, credentialRef: "[REDACTED]" } };
+    }
+  );
+
   app.get(
     "/admin/v1/provider-types",
     {
@@ -865,7 +1160,10 @@ export async function registerAdminRoutes(
         params.id,
         {
           ...patch,
-          groupName: patch.groupName === null ? undefined : patch.groupName
+          groupName: patch.groupName === null ? undefined : patch.groupName,
+          tag: patch.tag === null ? undefined : patch.tag,
+          maxInputTokens: patch.maxInputTokens === null ? undefined : patch.maxInputTokens,
+          systemPromptOverride: patch.systemPromptOverride === null ? undefined : patch.systemPromptOverride
         }
       );
       app.adminAuditService.record({
@@ -895,6 +1193,89 @@ export async function registerAdminRoutes(
     }
   );
 
+  // Phase 25 — duplicate a provider instance with a new id and name.
+  app.post(
+    "/admin/v1/provider-instances/:id/copy",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const body = z.object({
+        newId: z.string().min(1),
+        newName: z.string().min(1).optional()
+      }).parse(request.body ?? {});
+
+      const source = app.providerRuntimeRegistry.getProviderInstance(params.id);
+      if (!source) {
+        return reply.code(404).send({
+          error: { type: "not_found", message: `Provider instance "${params.id}" not found`, code: "not_found" }
+        });
+      }
+      if (app.providerRuntimeRegistry.getProviderInstance(body.newId)) {
+        return reply.code(409).send({
+          error: { type: "conflict", message: `Provider instance "${body.newId}" already exists`, code: "id_conflict" }
+        });
+      }
+
+      const copy: ProviderInstance = {
+        ...structuredClone(source),
+        id: body.newId,
+        name: body.newName ?? `${source.name} (copy)`,
+        enabled: false, // copies start disabled to avoid accidental traffic
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      app.providerRuntimeRegistry.registerProviderInstance(copy);
+      app.adminAuditService.record({
+        action: "provider_instance.copy",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: body.newId
+      });
+      await saveAdminRuntimeState(app);
+      return copy;
+    }
+  );
+
+  // Phase 25 — batch operations on provider instances.
+  app.post(
+    "/admin/v1/provider-instances/batch",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = z.object({
+        ids: z.array(z.string().min(1)).min(1).max(200),
+        action: z.enum(["enable", "disable", "delete"])
+      }).parse(request.body ?? {});
+
+      const updated: string[] = [];
+      const notFound: string[] = [];
+      for (const id of body.ids) {
+        if (body.action === "delete") {
+          const had = app.providerRuntimeRegistry.removeProviderInstance(id);
+          if (had) updated.push(id);
+          else notFound.push(id);
+        } else {
+          const inst = app.providerRuntimeRegistry.getProviderInstance(id);
+          if (!inst) {
+            notFound.push(id);
+            continue;
+          }
+          app.providerRuntimeRegistry.updateProviderInstance(id, {
+            enabled: body.action === "enable"
+          });
+          updated.push(id);
+        }
+      }
+      app.adminAuditService.record({
+        action: `provider_instance.batch_${body.action}`,
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: "*"
+      });
+      await saveAdminRuntimeState(app);
+      return { action: body.action, updated: updated.length, ids: updated, notFound };
+    }
+  );
+
   app.get(
     "/admin/v1/accounts",
     {
@@ -904,9 +1285,22 @@ export async function registerAdminRoutes(
       return {
         data: app.providerRuntimeRegistry.listAccounts().map((account) => {
           const secret = app.secretService.getSecretForAccount(account.id);
+          const payload = secret ? app.secretService.decryptSecretPayload(secret) : null;
+          const p = payload as Record<string, unknown> | null;
+          let machineId = p?.machineId as string | undefined;
+          if (!machineId && p?.refreshToken && typeof p.refreshToken === "string") {
+            machineId = createHash("sha256").update(p.refreshToken).digest("hex");
+          }
+          if (!machineId && account.providerType === "kiro") {
+            machineId = createHash("sha256").update(account.id).digest("hex");
+          }
           return {
             ...account,
             credentialRef: account.credentialRef ? "[REDACTED]" : undefined,
+            metadata: {
+              ...account.metadata,
+              ...(machineId ? { machineId } : {}),
+            },
             tokenStatus: secret ? {
               expiresAt: secret.expiresAt?.toISOString() ?? null,
               lastRefreshedAt: secret.updatedAt?.toISOString() ?? null,
@@ -965,11 +1359,37 @@ export async function registerAdminRoutes(
         updatedAt: now
       };
 
+      // Auto-refresh Kiro token when adding with refreshToken
+      let finalCredentialPayload = body.credentialPayload;
+      const effectiveType = body.providerType ?? providerInstance.type;
+      if (effectiveType === "kiro" && body.credentialPayload.refreshToken && typeof body.credentialPayload.refreshToken === "string") {
+        try {
+          const kiroCredential = body.credentialPayload as Record<string, unknown>;
+          const token = await new KiroAuthClient().refreshToken({
+            refreshToken: kiroCredential.refreshToken as string,
+            clientId: kiroCredential.clientId as string | undefined,
+            clientSecret: kiroCredential.clientSecret as string | undefined,
+            region: (kiroCredential.region as string) ?? "us-east-1",
+            authMethod: (kiroCredential.authMethod as "social" | "idc") ?? (kiroCredential.clientId ? "idc" : "social")
+          });
+          finalCredentialPayload = {
+            ...kiroCredential,
+            accessToken: token.accessToken,
+            refreshToken: token.refreshToken ?? kiroCredential.refreshToken,
+            expiresAt: token.expiresAt ?? (token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : undefined),
+            profileArn: token.profileArn,
+            tokenType: token.tokenType
+          };
+        } catch {
+          // If refresh fails, store as-is — user can refresh later
+        }
+      }
+
       app.secretService.addCredentialPayload({
         id: credentialRef,
         accountId: account.id,
         credentialType: body.credentialType,
-        credentialPayload: body.credentialPayload
+        credentialPayload: finalCredentialPayload
       });
       accountPool.addAccount(account);
       app.adminAuditService.record({
@@ -1153,6 +1573,19 @@ export async function registerAdminRoutes(
       await saveAdminRuntimeState(app);
 
       return { status: "ok", message: "Suspension cleared, account re-enabled" };
+    }
+  );
+
+  app.get(
+    "/admin/v1/accounts/:id/quota",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      if (!app.accountQuotaService) {
+        return { data: { requests: 0, tokens: 0, exhausted: false, dailyRequestLimit: 0, dailyTokenLimit: 0 } };
+      }
+      const snapshot = app.accountQuotaService.getSnapshot(params.id);
+      return { data: snapshot };
     }
   );
 
@@ -2792,7 +3225,7 @@ function resolveAccountTestModel(
 }
 
 async function findKiroRefreshToken(): Promise<
-  { refreshToken: string; source: string } | undefined
+  { refreshToken: string; accessToken?: string; clientId?: string; clientSecret?: string; authMethod?: string; region?: string; source: string } | undefined
 > {
   const cachePath = join(homedir(), ".aws", "sso", "cache");
   let files: string[];
@@ -2808,25 +3241,60 @@ async function findKiroRefreshToken(): Promise<
     ...files.filter((file) => file.endsWith(".json") && file !== "kiro-auth-token.json")
   ];
 
+  let tokenFile: { refreshToken: string; accessToken?: string; authMethod?: string; clientIdHash?: string; region?: string; source: string } | undefined;
+
   for (const file of orderedFiles) {
     try {
       const raw = await readFile(join(cachePath, file), "utf8");
-      const parsed = JSON.parse(raw) as { refreshToken?: unknown };
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
       if (
         typeof parsed.refreshToken === "string" &&
-        parsed.refreshToken.startsWith("aorAAAAAG")
+        (parsed.refreshToken as string).startsWith("aorAAAAAG")
       ) {
-        return {
-          refreshToken: parsed.refreshToken,
+        tokenFile = {
+          refreshToken: parsed.refreshToken as string,
+          accessToken: typeof parsed.accessToken === "string" ? parsed.accessToken as string : undefined,
+          authMethod: typeof parsed.authMethod === "string" ? parsed.authMethod as string : undefined,
+          clientIdHash: typeof parsed.clientIdHash === "string" ? parsed.clientIdHash as string : undefined,
+          region: typeof parsed.region === "string" ? parsed.region as string : undefined,
           source: join(cachePath, file)
         };
+        break;
       }
     } catch {
       continue;
     }
   }
 
-  return undefined;
+  if (!tokenFile) return undefined;
+
+  // If IdC auth, look up clientId/clientSecret from the corresponding client registration file
+  if (tokenFile.authMethod === "IdC" && tokenFile.clientIdHash) {
+    const clientFile = join(cachePath, `${tokenFile.clientIdHash}.json`);
+    try {
+      const raw = await readFile(clientFile, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return {
+        refreshToken: tokenFile.refreshToken,
+        accessToken: tokenFile.accessToken,
+        clientId: typeof parsed.clientId === "string" ? parsed.clientId : undefined,
+        clientSecret: typeof parsed.clientSecret === "string" ? parsed.clientSecret : undefined,
+        authMethod: "idc",
+        region: tokenFile.region,
+        source: tokenFile.source
+      };
+    } catch {
+      // Fall through — return without client credentials
+    }
+  }
+
+  return {
+    refreshToken: tokenFile.refreshToken,
+    accessToken: tokenFile.accessToken,
+    authMethod: tokenFile.authMethod === "IdC" ? "idc" : "social",
+    region: tokenFile.region,
+    source: tokenFile.source
+  };
 }
 
 async function findKiroCockpitCredentials(): Promise<
@@ -3103,4 +3571,38 @@ function csvEscape(value: unknown): string {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+async function findCodexLocalCredential(): Promise<
+  | { accessToken: string; refreshToken?: string; expiresAt?: string; source: string }
+  | undefined
+> {
+  const candidates = [
+    join(homedir(), ".codex", "auth.json"),
+    join(homedir(), ".config", "codex", "auth.json"),
+    join(homedir(), "AppData", "Roaming", "codex", "auth.json")
+  ];
+
+  for (const filePath of candidates) {
+    try {
+      const content = await readFile(filePath, "utf-8");
+      const data = JSON.parse(content) as Record<string, unknown>;
+      const accessToken =
+        (data.access_token as string) ?? (data.accessToken as string);
+      if (accessToken) {
+        return {
+          accessToken,
+          refreshToken:
+            (data.refresh_token as string) ?? (data.refreshToken as string),
+          expiresAt:
+            (data.expires_at as string) ?? (data.expiresAt as string),
+          source: filePath
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
 }

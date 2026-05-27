@@ -20,7 +20,7 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import { ModelCache } from "../../services/ModelCache.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 export type GenericOpenAIConfig = {
@@ -184,8 +184,12 @@ export class GenericOpenAIAdapter implements AIProviderAdapter {
         "Authorization": `Bearer ${credential.apiKey}`,
         "Content-Type": "application/json"
       };
-      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      const policied = applyChannelInputPolicies(
         requestBody as Record<string, unknown>,
+        context.providerInstance
+      );
+      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+        policied,
         baseHeaders,
         context.providerInstance
       );

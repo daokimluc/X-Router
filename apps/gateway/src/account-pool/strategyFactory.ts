@@ -1,4 +1,5 @@
 import { LeastBusyStrategy } from "./LeastBusyStrategy.js";
+import { PriorityStrategy } from "./PriorityStrategy.js";
 import { RoundRobinStrategy } from "./RoundRobinStrategy.js";
 import type { AccountSelectionStrategy } from "./types.js";
 import { WeightedRoundRobinStrategy } from "./WeightedRoundRobinStrategy.js";
@@ -12,6 +13,8 @@ export function createAccountSelectionStrategy(
       return new WeightedRoundRobinStrategy();
     case "least_busy":
       return new LeastBusyStrategy();
+    case "priority":
+      return new PriorityStrategy();
     case "round_robin":
     case "lowest_error_rate":
     case "lowest_latency":

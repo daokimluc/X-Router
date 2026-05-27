@@ -71,6 +71,20 @@ export async function registerOpenAIRoutes(
       })());
       let lastError: unknown;
 
+      // Phase 20c — group routing may filter out all candidates without
+      // crossGroupRetry. Return a clear 404 instead of falling through to
+      // the generic "no available account" error.
+      if (route.candidates.length === 0) {
+        await reply.code(404).send({
+          error: {
+            type: "not_found",
+            message: `No provider in your group can serve model "${body.model}"`,
+            code: "no_provider_in_group"
+          }
+        });
+        return reply;
+      }
+
       for (const candidate of route.candidates) {
         const providerInstance = app.providerRuntimeRegistry.getProviderInstance(
           candidate.providerInstanceId
@@ -443,6 +457,10 @@ function handleProviderAccountState(
   }
 
   if (error.code === "provider_auth_error") {
+    accountPool.disable(accountId, error.message);
+  }
+
+  if (error.code === "provider_account_suspended") {
     accountPool.disable(accountId, error.message);
   }
 }

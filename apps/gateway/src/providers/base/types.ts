@@ -66,7 +66,9 @@ export type AnthropicMessagesRequest = {
     role: "user" | "assistant";
     content: string | Array<Record<string, unknown>>;
   }>;
+  system?: string | Array<Record<string, unknown>>;
   stream?: boolean;
+  temperature?: number;
 };
 
 export type NormalizedAnthropicResponse = {

@@ -1,11 +1,13 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppConfig } from "../config.js";
 import type { ApiKeyService } from "../services/ApiKeyService.js";
-import type { RateLimitService } from "../services/RateLimitService.js";
+import type { RateLimitService, PerKeyLimits } from "../services/RateLimitService.js";
+import type { TeamService } from "../services/TeamService.js";
 import { hashApiKey } from "../utils/hash.js";
 
 export type AuthContext = {
   apiKeyHash: string;
+  teamId?: string;
 };
 
 declare module "fastify" {
@@ -17,7 +19,8 @@ declare module "fastify" {
 export function createAuthMiddleware(
   config: AppConfig,
   apiKeyService?: ApiKeyService,
-  rateLimitService?: RateLimitService
+  rateLimitService?: RateLimitService,
+  teamService?: TeamService
 ) {
   const validKeys = new Set(config.internalApiKeys);
 
@@ -40,14 +43,40 @@ export function createAuthMiddleware(
     }
 
     const apiKeyHash = hashApiKey(token);
-    
-    // Get per-key rate limits if available
+
     const keyRecord = apiKeyService?.findByHash(apiKeyHash);
-    const perKeyLimits = keyRecord?.rpmLimit || keyRecord?.dailyLimit
-      ? { requestsPerMinute: keyRecord.rpmLimit ?? 0, dailyRequestQuota: keyRecord.dailyLimit ?? 0 }
+    const team = keyRecord?.teamId
+      ? teamService?.get(keyRecord.teamId)
       : undefined;
-    
-    const rateLimitDecision = rateLimitService?.checkAndConsume(apiKeyHash, perKeyLimits);
+
+    if (team && team.enabled === false) {
+      await reply.code(403).send({
+        error: {
+          type: "forbidden",
+          message: `Team ${team.id} is disabled`,
+          code: "team_disabled"
+        }
+      });
+      return;
+    }
+
+    // Effective limits = strictest of (per-key, team).
+    const perKeyLimits = mergeLimits(
+      {
+        requestsPerMinute: keyRecord?.rpmLimit,
+        dailyRequestQuota: keyRecord?.dailyLimit,
+        dailyTokenQuota: keyRecord?.dailyTokenLimit
+      },
+      {
+        requestsPerMinute: team?.rpmLimit,
+        dailyRequestQuota: team?.dailyLimit
+      }
+    );
+
+    const rateLimitDecision = rateLimitService?.checkAndConsume(
+      apiKeyHash,
+      perKeyLimits
+    );
 
     if (rateLimitDecision && !rateLimitDecision.allowed) {
       await reply.code(429).send({
@@ -61,9 +90,29 @@ export function createAuthMiddleware(
     }
 
     request.auth = {
-      apiKeyHash
+      apiKeyHash,
+      teamId: keyRecord?.teamId
     };
   };
+}
+
+function mergeLimits(
+  a: PerKeyLimits,
+  b: PerKeyLimits
+): PerKeyLimits | undefined {
+  const out: PerKeyLimits = {};
+  for (const k of [
+    "requestsPerMinute",
+    "dailyRequestQuota",
+    "dailyTokenQuota"
+  ] as const) {
+    const av = a[k];
+    const bv = b[k];
+    if (av && bv) out[k] = Math.min(av, bv);
+    else if (av) out[k] = av;
+    else if (bv) out[k] = bv;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function parseBearerToken(value: string | undefined): string | null {

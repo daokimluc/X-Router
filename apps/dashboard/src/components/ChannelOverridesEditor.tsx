@@ -19,9 +19,18 @@ export type ProviderInstanceShape = {
   name: string;
   priority?: number;
   groupName?: string;
+  tag?: string;
+  maxInputTokens?: number;
+  systemPromptOverride?: string;
   paramOverride?: Record<string, unknown>;
   headerOverride?: Record<string, string>;
   statusCodeMapping?: Record<string, "retry" | "disable" | "passthrough">;
+  circuitBreaker?: {
+    enabled: boolean;
+    failureThreshold: number;
+    cooldownMs: number;
+    halfOpenMaxRequests?: number;
+  };
 };
 
 type Props = {
@@ -78,6 +87,14 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
   const { t } = useLang();
   const [priority, setPriority] = useState(String(instance.priority ?? 0));
   const [groupName, setGroupName] = useState(instance.groupName ?? "");
+  const [tag, setTag] = useState(instance.tag ?? "");
+  const [maxInputTokens, setMaxInputTokens] = useState(
+    instance.maxInputTokens === undefined ? "" : String(instance.maxInputTokens)
+  );
+  const [systemPromptOverride, setSystemPromptOverride] = useState(instance.systemPromptOverride ?? "");
+  const [autoBanEnabled, setAutoBanEnabled] = useState<boolean>(instance.circuitBreaker?.enabled ?? true);
+  const [failureThreshold, setFailureThreshold] = useState(String(instance.circuitBreaker?.failureThreshold ?? 5));
+  const [cooldownMs, setCooldownMs] = useState(String(instance.circuitBreaker?.cooldownMs ?? 60000));
   const [paramText, setParamText] = useState(JSON.stringify(instance.paramOverride ?? {}, null, 2));
   const [headerText, setHeaderText] = useState(JSON.stringify(instance.headerOverride ?? {}, null, 2));
   const [statusText, setStatusText] = useState(JSON.stringify(instance.statusCodeMapping ?? {}, null, 2));
@@ -88,6 +105,12 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
   useEffect(() => {
     setPriority(String(instance.priority ?? 0));
     setGroupName(instance.groupName ?? "");
+    setTag(instance.tag ?? "");
+    setMaxInputTokens(instance.maxInputTokens === undefined ? "" : String(instance.maxInputTokens));
+    setSystemPromptOverride(instance.systemPromptOverride ?? "");
+    setAutoBanEnabled(instance.circuitBreaker?.enabled ?? true);
+    setFailureThreshold(String(instance.circuitBreaker?.failureThreshold ?? 5));
+    setCooldownMs(String(instance.circuitBreaker?.cooldownMs ?? 60000));
     setParamText(JSON.stringify(instance.paramOverride ?? {}, null, 2));
     setHeaderText(JSON.stringify(instance.headerOverride ?? {}, null, 2));
     setStatusText(JSON.stringify(instance.statusCodeMapping ?? {}, null, 2));
@@ -119,12 +142,26 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
     setSaved(false);
     try {
       const priorityNum = Number.parseInt(priority, 10);
+      const maxInputTokensNum = maxInputTokens.trim() === "" ? null : Number.parseInt(maxInputTokens, 10);
+      const failureThresholdNum = Math.max(1, Number.parseInt(failureThreshold, 10) || 5);
+      const cooldownMsNum = Math.max(1000, Number.parseInt(cooldownMs, 10) || 60000);
       await api.patch(`/admin/v1/provider-instances/${instance.id}`, {
         priority: Number.isFinite(priorityNum) ? priorityNum : 0,
         groupName: groupName.trim() || null,
+        tag: tag.trim() || null,
+        maxInputTokens: maxInputTokensNum === null
+          ? null
+          : (Number.isFinite(maxInputTokensNum) && maxInputTokensNum > 0 ? maxInputTokensNum : null),
+        systemPromptOverride: systemPromptOverride.trim() || null,
         paramOverride: paramParse.ok ? paramParse.value : {},
         headerOverride: headerParse.ok ? headerParse.value as Record<string, string> : {},
         statusCodeMapping: statusParse.ok ? statusParse.value : {},
+        circuitBreaker: {
+          enabled: autoBanEnabled,
+          failureThreshold: failureThresholdNum,
+          cooldownMs: cooldownMsNum,
+          halfOpenMaxRequests: instance.circuitBreaker?.halfOpenMaxRequests ?? 1,
+        },
       });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);
@@ -139,6 +176,12 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
   function reset() {
     setPriority(String(instance.priority ?? 0));
     setGroupName(instance.groupName ?? "");
+    setTag(instance.tag ?? "");
+    setMaxInputTokens(instance.maxInputTokens === undefined ? "" : String(instance.maxInputTokens));
+    setSystemPromptOverride(instance.systemPromptOverride ?? "");
+    setAutoBanEnabled(instance.circuitBreaker?.enabled ?? true);
+    setFailureThreshold(String(instance.circuitBreaker?.failureThreshold ?? 5));
+    setCooldownMs(String(instance.circuitBreaker?.cooldownMs ?? 60000));
     setParamText(JSON.stringify(instance.paramOverride ?? {}, null, 2));
     setHeaderText(JSON.stringify(instance.headerOverride ?? {}, null, 2));
     setStatusText(JSON.stringify(instance.statusCodeMapping ?? {}, null, 2));
@@ -146,151 +189,164 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
   }
 
   return (
-    <details
-      style={{
-        border: "1px solid var(--color-border)",
-        borderRadius: 8,
-        padding: 0,
-        marginTop: 16,
-      }}
-    >
-      <summary
-        style={{
-          padding: "12px 16px",
-          cursor: "pointer",
-          listStyle: "none",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontWeight: 500,
-        }}
-      >
+    <details className="channelOverrides">
+      <summary className="channelOverrides__summary">
         <Settings2 size={16} />
         {t("channel.advanced")}
         {isActive && (
-          <span
-            style={{
-              marginLeft: 8,
-              padding: "2px 8px",
-              fontSize: 11,
-              background: "rgba(16,185,129,0.15)",
-              color: "#10b981",
-              border: "1px solid rgba(16,185,129,0.4)",
-              borderRadius: 4,
-            }}
-          >
-            {t("channel.overridesActive")}
-          </span>
+          <span className="channelOverrides__badge">{t("channel.overridesActive")}</span>
         )}
       </summary>
 
-      <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 14, borderTop: "1px solid var(--color-border)" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-          {t("channel.groupName")}
+      <div className="channelOverrides__body">
+        <label className="formField">
+          <span>{t("channel.groupName")}</span>
           <input
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             placeholder="(optional, e.g. premium / free)"
-            style={{ width: 240 }}
           />
-          <small style={{ color: "var(--color-text-muted)", fontSize: 11 }}>
-            {t("channel.groupName.hint")}
-          </small>
+          <small className="formHint">{t("channel.groupName.hint")}</small>
         </label>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-          {t("channel.priority")}
+        <label className="formField">
+          <span>{t("channel.priority")}</span>
           <input
             type="number"
             value={priority}
             onChange={(e) => setPriority(e.target.value)}
-            style={{ width: 120 }}
+            className="channelOverrides__shortInput"
           />
         </label>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12 }}>{t("channel.paramOverride")}</label>
+        <label className="formField">
+          <span>{t("channel.tag")}</span>
+          <input
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            placeholder="(optional, used for batch operations)"
+          />
+          <small className="formHint">{t("channel.tag.hint")}</small>
+        </label>
+
+        <label className="formField">
+          <span>{t("channel.maxInputTokens")}</span>
+          <input
+            type="number"
+            min="1"
+            value={maxInputTokens}
+            onChange={(e) => setMaxInputTokens(e.target.value)}
+            placeholder="(empty = no limit)"
+            className="channelOverrides__shortInput"
+          />
+          <small className="formHint">{t("channel.maxInputTokens.hint")}</small>
+        </label>
+
+        <label className="formField">
+          <span>{t("channel.systemPromptOverride")}</span>
+          <textarea
+            value={systemPromptOverride}
+            onChange={(e) => setSystemPromptOverride(e.target.value)}
+            rows={3}
+            placeholder="(optional)"
+          />
+          <small className="formHint">{t("channel.systemPromptOverride.hint")}</small>
+        </label>
+
+        <fieldset style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "10px 12px", margin: 0 }}>
+          <legend style={{ fontSize: 12, fontWeight: 500, padding: "0 6px" }}>{t("channel.autoBan")}</legend>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              checked={autoBanEnabled}
+              onChange={(e) => setAutoBanEnabled(e.target.checked)}
+            />
+            {t("channel.autoBan.enabled")}
+          </label>
+          <small className="formHint" style={{ display: "block", marginBottom: 10 }}>{t("channel.autoBan.hint")}</small>
+          <div style={{ display: "flex", gap: 12 }}>
+            <label className="formField" style={{ flex: 1 }}>
+              <span>{t("channel.failureThreshold")}</span>
+              <input
+                type="number"
+                min="1"
+                value={failureThreshold}
+                onChange={(e) => setFailureThreshold(e.target.value)}
+                disabled={!autoBanEnabled}
+              />
+            </label>
+            <label className="formField" style={{ flex: 1 }}>
+              <span>{t("channel.cooldownMs")}</span>
+              <input
+                type="number"
+                min="1000"
+                step="1000"
+                value={cooldownMs}
+                onChange={(e) => setCooldownMs(e.target.value)}
+                disabled={!autoBanEnabled}
+              />
+            </label>
+          </div>
+        </fieldset>
+
+        <div className="formField">
+          <span>{t("channel.paramOverride")}</span>
           <textarea
             value={paramText}
             onChange={(e) => setParamText(e.target.value)}
             rows={5}
-            style={{
-              fontFamily: "monospace",
-              fontSize: 12,
-              padding: 8,
-              border: paramParse.ok ? "1px solid var(--color-border)" : "1px solid #ef4444",
-              borderRadius: 6,
-              resize: "vertical",
-            }}
+            className={!paramParse.ok ? "channelOverrides__invalid" : ""}
             spellCheck={false}
           />
-          {!paramParse.ok && <small style={{ color: "#ef4444", fontSize: 11 }}>{t("channel.invalidJson")}: {paramParse.error}</small>}
-          <small style={{ color: "var(--color-text-muted)", fontSize: 11 }}>{t("channel.paramOverride.hint")}</small>
+          {!paramParse.ok && <small className="formFieldError">{t("channel.invalidJson")}: {paramParse.error}</small>}
+          <small className="formHint">{t("channel.paramOverride.hint")}</small>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12 }}>{t("channel.headerOverride")}</label>
+        <div className="formField">
+          <span>{t("channel.headerOverride")}</span>
           <textarea
             value={headerText}
             onChange={(e) => setHeaderText(e.target.value)}
             rows={5}
-            style={{
-              fontFamily: "monospace",
-              fontSize: 12,
-              padding: 8,
-              border: headerParse.ok && reservedConflicts.length === 0
-                ? "1px solid var(--color-border)"
-                : "1px solid #ef4444",
-              borderRadius: 6,
-              resize: "vertical",
-            }}
+            className={!headerParse.ok || reservedConflicts.length > 0 ? "channelOverrides__invalid" : ""}
             spellCheck={false}
           />
-          {!headerParse.ok && <small style={{ color: "#ef4444", fontSize: 11 }}>{t("channel.invalidJson")}: {headerParse.error}</small>}
+          {!headerParse.ok && <small className="formFieldError">{t("channel.invalidJson")}: {headerParse.error}</small>}
           {headerParse.ok && reservedConflicts.length > 0 && (
-            <small style={{ color: "#ef4444", fontSize: 11 }}>
+            <small className="formFieldError">
               {t("channel.reservedHeaderConflict").replace("{keys}", reservedConflicts.join(", "))}
             </small>
           )}
-          <small style={{ color: "var(--color-text-muted)", fontSize: 11 }}>{t("channel.headerOverride.hint")}</small>
+          <small className="formHint">{t("channel.headerOverride.hint")}</small>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12 }}>{t("channel.statusCodeMapping")}</label>
+        <div className="formField">
+          <span>{t("channel.statusCodeMapping")}</span>
           <textarea
             value={statusText}
             onChange={(e) => setStatusText(e.target.value)}
             rows={4}
-            style={{
-              fontFamily: "monospace",
-              fontSize: 12,
-              padding: 8,
-              border: statusParse.ok && statusValidation.invalidKeys.length === 0 && statusValidation.invalidValues.length === 0
-                ? "1px solid var(--color-border)"
-                : "1px solid #ef4444",
-              borderRadius: 6,
-              resize: "vertical",
-            }}
+            className={!statusParse.ok || statusValidation.invalidKeys.length > 0 || statusValidation.invalidValues.length > 0 ? "channelOverrides__invalid" : ""}
             spellCheck={false}
           />
-          {!statusParse.ok && <small style={{ color: "#ef4444", fontSize: 11 }}>{t("channel.invalidJson")}: {statusParse.error}</small>}
+          {!statusParse.ok && <small className="formFieldError">{t("channel.invalidJson")}: {statusParse.error}</small>}
           {statusParse.ok && statusValidation.invalidKeys.length > 0 && (
-            <small style={{ color: "#ef4444", fontSize: 11 }}>
+            <small className="formFieldError">
               {t("channel.invalidStatusCodeKey").replace("{key}", statusValidation.invalidKeys.join(", "))}
             </small>
           )}
           {statusParse.ok && statusValidation.invalidValues.length > 0 && (
-            <small style={{ color: "#ef4444", fontSize: 11 }}>
+            <small className="formFieldError">
               Invalid values (use retry/disable/passthrough): {statusValidation.invalidValues.join(", ")}
             </small>
           )}
-          <small style={{ color: "var(--color-text-muted)", fontSize: 11 }}>{t("channel.statusCodeMapping.hint")}</small>
+          <small className="formHint">{t("channel.statusCodeMapping.hint")}</small>
         </div>
 
-        {error && <div style={{ color: "#ef4444", fontSize: 12 }}>{error}</div>}
-        {saved && <div style={{ color: "#10b981", fontSize: 12 }}>✓ Saved</div>}
+        {error && <div className="formFieldError">{error}</div>}
+        {saved && <div className="formFieldSuccess">✓ Saved</div>}
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div className="channelOverrides__actions">
           <button type="button" className="ghostButton" onClick={reset} disabled={busy}>
             Reset
           </button>

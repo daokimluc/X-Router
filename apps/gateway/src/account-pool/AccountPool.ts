@@ -195,6 +195,10 @@ export class AccountPool {
       return false;
     }
 
+    if (context.quotaFilter && !context.quotaFilter(account.id)) {
+      return false;
+    }
+
     return true;
   }
 
