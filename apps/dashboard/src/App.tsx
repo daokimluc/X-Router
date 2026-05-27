@@ -6078,16 +6078,54 @@ function RequestLogs({ logs, api, refresh }: { logs: RequestLog[]; api: ReturnTy
 function AuditLogs({ logs }: { logs: AuditLog[] }) {
   const { t } = useLang();
   const [search, setSearch] = useState("");
+  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [targetFilter, setTargetFilter] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<"all" | "1h" | "24h" | "7d" | "30d">("all");
+
+  const allActions = useMemo(() => {
+    const types = new Set<string>();
+    for (const l of logs) {
+      // Group by family: api_key.create / api_key.update -> api_key
+      const family = l.action.split(".")[0];
+      types.add(family);
+    }
+    return Array.from(types).sort();
+  }, [logs]);
+
+  const allTargets = useMemo(() => {
+    const types = new Set<string>();
+    for (const l of logs) {
+      if (l.targetType) types.add(l.targetType);
+    }
+    return Array.from(types).sort();
+  }, [logs]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return logs;
-    const q = search.toLowerCase();
-    return logs.filter((l) =>
-      l.action.toLowerCase().includes(q) ||
-      (l.targetType ?? "").toLowerCase().includes(q) ||
-      (l.targetId ?? "").toLowerCase().includes(q)
-    );
-  }, [logs, search]);
+    const q = search.trim().toLowerCase();
+    const cutoff: number | null = (() => {
+      if (dateRange === "all") return null;
+      const ms = { "1h": 3600_000, "24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000 }[dateRange];
+      return Date.now() - ms;
+    })();
+    return logs.filter((l) => {
+      if (q) {
+        const hit =
+          l.action.toLowerCase().includes(q) ||
+          (l.targetType ?? "").toLowerCase().includes(q) ||
+          (l.targetId ?? "").toLowerCase().includes(q);
+        if (!hit) return false;
+      }
+      if (actionFilter !== "all") {
+        if (!l.action.startsWith(actionFilter + ".") && l.action !== actionFilter) return false;
+      }
+      if (targetFilter !== "all" && l.targetType !== targetFilter) return false;
+      if (cutoff !== null) {
+        const ts = new Date(l.createdAt).getTime();
+        if (Number.isFinite(ts) && ts < cutoff) return false;
+      }
+      return true;
+    });
+  }, [logs, search, actionFilter, targetFilter, dateRange]);
 
   const actionIcons: Record<string, typeof Activity> = {
     create: Plus,
@@ -6116,17 +6154,37 @@ function AuditLogs({ logs }: { logs: AuditLog[] }) {
           <h2>{t("al.title")}</h2>
           <p>{t("al.subtitle")}</p>
         </div>
-        <span className="alCount">{logs.length} {t("al.events")}</span>
+        <span className="alCount">{filtered.length} / {logs.length} {t("al.events")}</span>
       </div>
 
-      <div className="alFilters">
+      <div className="alFilters" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input
           className="rlSearchInput"
           type="text"
           placeholder={t("al.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: "1 1 200px" }}
         />
+        <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+          <option value="all">All actions</option>
+          {allActions.map((a) => (
+            <option key={a} value={a}>{a}</option>
+          ))}
+        </select>
+        <select value={targetFilter} onChange={(e) => setTargetFilter(e.target.value)}>
+          <option value="all">All targets</option>
+          {allTargets.map((tt) => (
+            <option key={tt} value={tt}>{tt}</option>
+          ))}
+        </select>
+        <select value={dateRange} onChange={(e) => setDateRange(e.target.value as typeof dateRange)}>
+          <option value="all">All time</option>
+          <option value="1h">Last 1h</option>
+          <option value="24h">Last 24h</option>
+          <option value="7d">Last 7d</option>
+          <option value="30d">Last 30d</option>
+        </select>
       </div>
 
       <div className="alTimeline">
