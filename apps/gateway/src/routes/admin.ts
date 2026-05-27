@@ -1121,6 +1121,42 @@ export async function registerAdminRoutes(
   );
 
   app.post(
+    "/admin/v1/accounts/:id/reset-suspension",
+    {
+      preHandler: adminAuth
+    },
+    async (request) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const accountPool = findAccountPoolForAccount(app, params.id);
+      const account = accountPool.getAccount(params.id);
+
+      if (!account) {
+        throw new Error(`Account ${params.id} not found`);
+      }
+
+      accountPool.enable(params.id);
+
+      const secret = app.secretService.getSecretForAccount(params.id);
+      if (secret) {
+        const payload = app.secretService.decryptSecretPayload(secret) as Record<string, unknown>;
+        delete payload.suspendedAt;
+        delete payload.suspensionReason;
+        app.secretService.updateSecretPayload(secret.id, payload);
+      }
+
+      app.adminAuditService.record({
+        action: "account.reset_suspension",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "account",
+        targetId: params.id
+      });
+      await saveAdminRuntimeState(app);
+
+      return { status: "ok", message: "Suspension cleared, account re-enabled" };
+    }
+  );
+
+  app.post(
     "/admin/v1/accounts/:id/refresh-session",
     {
       preHandler: adminAuth

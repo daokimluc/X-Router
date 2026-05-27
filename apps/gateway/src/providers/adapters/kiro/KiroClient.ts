@@ -1,6 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ProviderError } from "../../base/ProviderErrors.js";
 import type { ProviderStream } from "../../base/types.js";
+import type { ProviderInstance } from "../../base/ProviderInstance.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import type { ProxyFetchOptions } from "../../../proxy/types.js";
+import { proxyAwareFetch } from "../../../proxy/ProxyAwareFetch.js";
 import type { KiroChatRequest, KiroChatResponse, KiroCredentialPayload, KiroProviderConfig } from "./kiroTypes.js";
 
 export type KiroClientFetch = typeof fetch;
@@ -14,6 +18,8 @@ export class KiroClient {
     request: KiroChatRequest;
     requestId: string;
     timeoutMs: number;
+    instance?: ProviderInstance;
+    proxyOptions?: ProxyFetchOptions;
   }): Promise<KiroChatResponse> {
     const accessToken = options.credential.accessToken;
 
@@ -35,24 +41,51 @@ export class KiroClient {
     const timeout = setTimeout(() => abortController.abort(), options.timeoutMs);
 
     try {
+      const baseHeaders: Record<string, string> = {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        accept: "application/vnd.amazon.eventstream",
+        "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
+        "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
+        "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
+        "amz-sdk-request": "attempt=1; max=3",
+        "x-request-id": options.requestId
+      };
+      // Phase 24 — header-only overrides for Kiro (AWS event-stream body has fixed shape)
+      const headers = options.instance
+        ? applyChannelOverrides({}, baseHeaders, options.instance).headers
+        : baseHeaders;
+      const requestBody = JSON.stringify(buildKiroPayload(options.request, options.credential));
+
+      if (options.proxyOptions?.enabled) {
+        const proxyResult = await proxyAwareFetch({
+          url: url.toString(),
+          method: "POST",
+          headers,
+          body: Buffer.from(requestBody),
+          signal: abortController.signal,
+          proxyOptions: options.proxyOptions
+        });
+        if (proxyResult.statusCode >= 400) {
+          const body = proxyResult.body.toString("utf-8");
+          throw classifyKiroHttpErrorFromRaw(proxyResult.statusCode, body, options.instance);
+        }
+        const contentType = (proxyResult.headers["content-type"] ?? "") as string;
+        if (contentType.includes("application/json") && options.config.baseUrl?.includes("kiro.test")) {
+          return JSON.parse(proxyResult.body.toString("utf-8")) as KiroChatResponse;
+        }
+        return parseKiroResponseFromBuffer(proxyResult.body, options.request.model);
+      }
+
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "content-type": "application/json",
-          accept: "application/vnd.amazon.eventstream",
-          "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
-          "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-          "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
-          "amz-sdk-request": "attempt=1; max=3",
-          "x-request-id": options.requestId
-        },
-        body: JSON.stringify(buildKiroPayload(options.request, options.credential)),
+        headers,
+        body: requestBody,
         signal: abortController.signal
       });
 
       if (!response.ok) {
-        throw await classifyKiroHttpError(response);
+        throw await classifyKiroHttpError(response, options.instance);
       }
 
       if (shouldParseJsonResponse(response, options.config)) {
@@ -91,6 +124,8 @@ export class KiroClient {
     request: KiroChatRequest;
     requestId: string;
     timeoutMs: number;
+    instance?: ProviderInstance;
+    proxyOptions?: ProxyFetchOptions;
   }): Promise<ProviderStream> {
     const accessToken = options.credential.accessToken;
 
@@ -112,24 +147,28 @@ export class KiroClient {
     const timeout = setTimeout(() => abortController.abort(), options.timeoutMs);
 
     try {
+      const baseHeaders: Record<string, string> = {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        accept: "application/vnd.amazon.eventstream",
+        "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
+        "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
+        "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
+        "amz-sdk-request": "attempt=1; max=3",
+        "x-request-id": options.requestId
+      };
+      const headers = options.instance
+        ? applyChannelOverrides({}, baseHeaders, options.instance).headers
+        : baseHeaders;
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "content-type": "application/json",
-          accept: "application/vnd.amazon.eventstream",
-          "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
-          "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-          "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
-          "amz-sdk-request": "attempt=1; max=3",
-          "x-request-id": options.requestId
-        },
+        headers,
         body: JSON.stringify(buildKiroPayload(options.request, options.credential)),
         signal: abortController.signal
       });
 
       if (!response.ok) {
-        throw await classifyKiroHttpError(response);
+        throw await classifyKiroHttpError(response, options.instance);
       }
 
       if (!response.body) {
@@ -245,44 +284,48 @@ async function* plainTextStream(
   }
 }
 
-async function classifyKiroHttpError(response: Response): Promise<ProviderError> {
+async function classifyKiroHttpError(response: Response, instance?: ProviderInstance): Promise<ProviderError> {
   const statusCode = response.status;
   const body = await safeResponseText(response);
-  const details = body ? `: ${body.slice(0, 500)}` : "";
+  return classifyKiroHttpErrorFromRaw(statusCode, body, instance);
+}
 
-  if (statusCode === 401 || statusCode === 403) {
-    return new ProviderError({
-      code: "provider_auth_error",
-      message: `Kiro authentication failed${details}`,
-      retryable: false,
-      statusCode
-    });
+type SuspensionSignal = { reason: string };
+
+const SUSPENSION_PATTERNS = [
+  "temporarily_suspended",
+  "TEMPORARILY_SUSPENDED",
+  "AccountSuspendedException",
+  "User ID is suspended",
+  "account has been suspended",
+  "access has been revoked"
+];
+
+export function detectKiroSuspension(
+  statusCode: number,
+  body: string
+): SuspensionSignal | null {
+  if (statusCode === 423) {
+    return { reason: "Account locked (HTTP 423)" };
   }
 
-  if (statusCode === 429) {
-    return new ProviderError({
-      code: "provider_rate_limited",
-      message: `Kiro rate limit exceeded${details}`,
-      retryable: true,
-      statusCode
-    });
+  if (statusCode === 403) {
+    for (const pattern of SUSPENSION_PATTERNS) {
+      if (body.includes(pattern)) {
+        return { reason: pattern };
+      }
+    }
   }
 
-  if (statusCode >= 500) {
-    return new ProviderError({
-      code: "provider_unavailable",
-      message: `Kiro service is unavailable${details}`,
-      retryable: true,
-      statusCode
-    });
+  if (statusCode >= 400 && statusCode < 500) {
+    for (const pattern of SUSPENSION_PATTERNS) {
+      if (body.includes(pattern)) {
+        return { reason: pattern };
+      }
+    }
   }
 
-  return new ProviderError({
-    code: "provider_bad_response",
-    message: `Kiro returned HTTP ${statusCode}${details}`,
-    retryable: false,
-    statusCode
-  });
+  return null;
 }
 
 function buildKiroPayload(request: KiroChatRequest, credential: KiroCredentialPayload): Record<string, unknown> {
@@ -309,6 +352,14 @@ function buildKiroPayload(request: KiroChatRequest, credential: KiroCredentialPa
 
   if (credential.profileArn) {
     payload.profileArn = credential.profileArn;
+  }
+
+  if (credential.machineId) {
+    payload.machineId = credential.machineId;
+  } else if (credential.refreshToken) {
+    payload.machineId = createHash("sha256")
+      .update(credential.refreshToken)
+      .digest("hex");
   }
 
   return payload;
@@ -399,52 +450,7 @@ function stringifyMessageContent(content: unknown): string {
 
 async function parseKiroResponse(response: Response, model: string): Promise<KiroChatResponse> {
   const bytes = new Uint8Array(await response.arrayBuffer());
-  let offset = 0;
-  let content = "";
-
-  while (offset + 16 <= bytes.length) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, bytes.byteLength - offset);
-    const totalLength = view.getUint32(0, false);
-
-    if (totalLength < 16 || offset + totalLength > bytes.length) {
-      break;
-    }
-
-    const frame = parseEventFrame(bytes.slice(offset, offset + totalLength));
-    offset += totalLength;
-
-    if (!frame) {
-      continue;
-    }
-
-    const eventType = frame.headers[":event-type"] ?? "";
-    content += getKiroEventContent(eventType, frame.payload);
-  }
-
-  if (!content) {
-    throw new ProviderError({
-      code: "provider_bad_response",
-      message: "Kiro returned an empty assistant response",
-      retryable: true,
-      statusCode: 502
-    });
-  }
-
-  return {
-    id: `chatcmpl_kiro_${Date.now()}`,
-    model,
-    content,
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content
-        },
-        finish_reason: "stop"
-      }
-    ]
-  };
+  return parseKiroResponseFromBuffer(Buffer.from(bytes), model);
 }
 
 function parseEventFrame(data: Uint8Array<ArrayBufferLike>): {
@@ -513,6 +519,27 @@ function getKiroEventContent(eventType: string, payload: unknown): string {
   }
 
   return "";
+}
+
+function extractKiroUsage(
+  eventType: string,
+  payload: unknown
+): { inputTokens: number; outputTokens: number } | null {
+  if (eventType !== "contextUsageEvent" || !payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const p = payload as Record<string, unknown>;
+  const usage = (p.contextUsage ?? p) as Record<string, unknown>;
+  const inputTokens =
+    typeof usage.inputTokens === "number" ? usage.inputTokens :
+    typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const outputTokens =
+    typeof usage.outputTokens === "number" ? usage.outputTokens :
+    typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+
+  if (inputTokens === 0 && outputTokens === 0) return null;
+  return { inputTokens, outputTokens };
 }
 
 function readCompleteEvents(
@@ -585,4 +612,132 @@ function shouldUsePlainTextStream(response: Response, config: KiroProviderConfig
   }
 
   return config.baseUrl?.includes("kiro.test") ?? false;
+}
+
+function classifyKiroHttpErrorFromRaw(
+  statusCode: number,
+  body: string,
+  instance?: ProviderInstance
+): ProviderError {
+  const details = body ? `: ${body.slice(0, 500)}` : "";
+  if (instance) {
+    const action = interpretStatusCode(instance, statusCode);
+    if (action === "disable") {
+      return new ProviderError({
+        code: "provider_auth_error",
+        message: `Kiro status ${statusCode} mapped to disable${details}`,
+        retryable: false,
+        statusCode
+      });
+    }
+    if (action === "retry") {
+      return new ProviderError({
+        code: "provider_rate_limited",
+        message: `Kiro status ${statusCode} mapped to retry${details}`,
+        retryable: true,
+        statusCode
+      });
+    }
+  }
+  const suspension = detectKiroSuspension(statusCode, body);
+  if (suspension) {
+    return new ProviderError({
+      code: "provider_account_suspended",
+      message: `Kiro account suspended: ${suspension.reason}`,
+      retryable: false,
+      statusCode,
+      metadata: { suspended: true, suspensionReason: suspension.reason }
+    });
+  }
+  if (statusCode === 401 || statusCode === 403) {
+    return new ProviderError({
+      code: "provider_auth_error",
+      message: `Kiro authentication failed${details}`,
+      retryable: false,
+      statusCode
+    });
+  }
+  if (statusCode === 429) {
+    return new ProviderError({
+      code: "provider_rate_limited",
+      message: `Kiro rate limit exceeded${details}`,
+      retryable: true,
+      statusCode
+    });
+  }
+  if (statusCode >= 500) {
+    return new ProviderError({
+      code: "provider_unavailable",
+      message: `Kiro service is unavailable${details}`,
+      retryable: true,
+      statusCode
+    });
+  }
+  return new ProviderError({
+    code: "provider_bad_response",
+    message: `Kiro returned HTTP ${statusCode}${details}`,
+    retryable: false,
+    statusCode
+  });
+}
+
+function parseKiroResponseFromBuffer(buffer: Buffer, model: string): KiroChatResponse {
+  const bytes = new Uint8Array(buffer);
+  let offset = 0;
+  let content = "";
+  let usage: { inputTokens: number; outputTokens: number } | null = null;
+
+  while (offset + 16 <= bytes.length) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, bytes.byteLength - offset);
+    const totalLength = view.getUint32(0, false);
+
+    if (totalLength < 16 || offset + totalLength > bytes.length) {
+      break;
+    }
+
+    const frame = parseEventFrame(bytes.slice(offset, offset + totalLength));
+    offset += totalLength;
+
+    if (!frame) {
+      continue;
+    }
+
+    const eventType = frame.headers[":event-type"] ?? "";
+    content += getKiroEventContent(eventType, frame.payload);
+
+    const eventUsage = extractKiroUsage(eventType, frame.payload);
+    if (eventUsage) {
+      usage = eventUsage;
+    }
+  }
+
+  if (!content) {
+    throw new ProviderError({
+      code: "provider_bad_response",
+      message: "Kiro returned an empty assistant response",
+      retryable: true,
+      statusCode: 502
+    });
+  }
+
+  const promptTokens = usage?.inputTokens ?? Math.ceil(content.length * 0.42);
+  const completionTokens = usage?.outputTokens ?? Math.ceil(content.length * 0.4);
+
+  return {
+    id: `chatcmpl_kiro_${Date.now()}`,
+    model,
+    content,
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content },
+        finish_reason: "stop"
+      }
+    ],
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens
+    }
+  };
 }

@@ -1,7 +1,7 @@
 import type { AIProviderAdapter } from "../../base/AIProviderAdapter.js";
 import type { ProviderAccount } from "../../base/ProviderAccount.js";
 import type { ProviderCapabilities } from "../../base/ProviderCapabilities.js";
-import { ProviderConfigError, UnsupportedCapabilityError } from "../../base/ProviderErrors.js";
+import { ProviderConfigError } from "../../base/ProviderErrors.js";
 import type {
   AnthropicMessagesRequest,
   NormalizedAnthropicResponse,
@@ -24,13 +24,14 @@ export class KiroProviderAdapter implements AIProviderAdapter {
 
   constructor(
     private readonly client = new KiroClient(),
-    private readonly authClient = new KiroAuthClient()
+    private readonly authClient = new KiroAuthClient(),
+    private readonly onCredentialRefreshed?: (accountId: string, payload: Record<string, unknown>) => void
   ) {}
 
   getCapabilities(): ProviderCapabilities {
     return {
-      protocols: ["openai_chat_completions"],
-      flags: ["chat", "streaming"],
+      protocols: ["openai_chat_completions", "anthropic_messages"],
+      flags: ["chat", "messages", "streaming"],
       maxInputTokens: 200000,
       maxOutputTokens: 8192
     };
@@ -79,7 +80,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
   ): Promise<NormalizedOpenAIResponse | ProviderStream> {
     const config = context.providerInstance.config as KiroProviderConfig;
     const credential = await this.resolveCredential(
-      (context.credentialPayload ?? {}) as KiroCredentialPayload
+      (context.credentialPayload ?? {}) as KiroCredentialPayload,
+      context.account?.id
     );
 
     if (request.stream) {
@@ -99,7 +101,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
           max_tokens: request.max_tokens
         },
         requestId: context.requestId,
-        timeoutMs: context.providerInstance.defaultTimeoutMs
+        timeoutMs: context.providerInstance.defaultTimeoutMs,
+        instance: context.providerInstance
       });
     }
 
@@ -119,19 +122,58 @@ export class KiroProviderAdapter implements AIProviderAdapter {
         max_tokens: request.max_tokens
       },
       requestId: context.requestId,
-      timeoutMs: context.providerInstance.defaultTimeoutMs
+      timeoutMs: context.providerInstance.defaultTimeoutMs,
+      instance: context.providerInstance
     });
 
     return normalizeKiroOpenAIResponse(upstreamResponse, request.model);
   }
 
   async messages(
-    _request: AnthropicMessagesRequest,
-    _context: ProviderRequestContext
+    request: AnthropicMessagesRequest,
+    context: ProviderRequestContext
   ): Promise<NormalizedAnthropicResponse | ProviderStream> {
-    throw new UnsupportedCapabilityError(
-      "Kiro Anthropic messages API is implemented in a later phase"
+    const config = context.providerInstance.config as KiroProviderConfig;
+    const credential = await this.resolveCredential(
+      (context.credentialPayload ?? {}) as KiroCredentialPayload,
+      context.account?.id
     );
+
+    const upstreamModel = resolveKiroModel(config, request.model);
+    const kiroMessages = anthropicToKiroMessages(request);
+
+    if (request.stream) {
+      const stream = await this.client.streamChatCompletions({
+        config,
+        credential,
+        request: {
+          model: upstreamModel,
+          messages: kiroMessages,
+          stream: false,
+          max_tokens: request.max_tokens
+        },
+        requestId: context.requestId,
+        timeoutMs: context.providerInstance.defaultTimeoutMs,
+        instance: context.providerInstance
+      });
+      return stream;
+    }
+
+    const response = await this.client.chatCompletions({
+      config,
+      credential,
+      request: {
+        model: upstreamModel,
+        messages: kiroMessages,
+        stream: false,
+        max_tokens: request.max_tokens
+      },
+      requestId: context.requestId,
+      timeoutMs: context.providerInstance.defaultTimeoutMs,
+      instance: context.providerInstance
+    });
+
+    return normalizeKiroAnthropicResponse(response, request.model);
   }
 
   async healthCheck(_context: ProviderContext): Promise<ProviderHealth> {
@@ -148,7 +190,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
   }
 
   private async resolveCredential(
-    credential: KiroCredentialPayload
+    credential: KiroCredentialPayload,
+    accountId?: string
   ): Promise<KiroCredentialPayload> {
     if (credential.accessToken && !shouldRefreshKiroCredential(credential)) {
       return credential;
@@ -156,7 +199,11 @@ export class KiroProviderAdapter implements AIProviderAdapter {
 
     if (credential.refreshToken) {
       const token = await this.authClient.refreshToken(credential);
-      return applyKiroToken(credential, token);
+      const updated = applyKiroToken(credential, token);
+      if (accountId && this.onCredentialRefreshed) {
+        this.onCredentialRefreshed(accountId, updated as unknown as Record<string, unknown>);
+      }
+      return updated;
     }
 
     if (credential.code && credential.codeVerifier) {
@@ -166,7 +213,11 @@ export class KiroProviderAdapter implements AIProviderAdapter {
         redirectUri: credential.redirectUri,
         region: credential.region
       });
-      return applyKiroToken(credential, token);
+      const updated = applyKiroToken(credential, token);
+      if (accountId && this.onCredentialRefreshed) {
+        this.onCredentialRefreshed(accountId, updated as unknown as Record<string, unknown>);
+      }
+      return updated;
     }
 
     return credential;
@@ -243,5 +294,64 @@ function normalizeUsage(
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
     total_tokens: usage.total_tokens ?? promptTokens + completionTokens
+  };
+}
+
+function anthropicToKiroMessages(
+  request: AnthropicMessagesRequest
+): Array<{ role: string; content: unknown }> {
+  const messages: Array<{ role: string; content: unknown }> = [];
+
+  if (request.system) {
+    const systemText =
+      typeof request.system === "string"
+        ? request.system
+        : (request.system as Array<{ text?: string }>)
+            .map((b) => b.text ?? "")
+            .join("\n");
+    messages.push({ role: "system", content: systemText });
+  }
+
+  for (const msg of request.messages) {
+    const content =
+      typeof msg.content === "string"
+        ? msg.content
+        : (msg.content as Array<Record<string, unknown>>)
+            .map((block) => {
+              if (block.type === "text") return block.text as string;
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n");
+    messages.push({ role: msg.role, content });
+  }
+
+  return messages;
+}
+
+function normalizeKiroAnthropicResponse(
+  response: KiroChatResponse,
+  model: string
+): NormalizedAnthropicResponse {
+  const text =
+    response.choices?.[0]?.message?.content ?? response.content ?? response.text ?? "";
+  const usage = response.usage;
+
+  return {
+    id: response.id ?? `msg_kiro_${Date.now()}`,
+    type: "message",
+    role: "assistant",
+    model,
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    usage: usage
+      ? {
+          input_tokens: usage.prompt_tokens ?? 0,
+          output_tokens: usage.completion_tokens ?? 0
+        }
+      : {
+          input_tokens: 0,
+          output_tokens: Math.ceil(text.length * 0.4)
+        }
   };
 }

@@ -22,6 +22,8 @@ import type {
   ProviderStream,
   SessionRefreshResult
 } from "../../base/types.js";
+import type { ProviderInstance } from "../../base/ProviderInstance.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -159,7 +161,12 @@ export class AntigravityAdapter implements AIProviderAdapter {
       "Accept": stream ? "text/event-stream" : "application/json"
     };
 
-    const requestBody = JSON.stringify(geminiRequest);
+    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      geminiRequest as unknown as Record<string, unknown>,
+      headers,
+      context.providerInstance
+    );
+    const requestBody = JSON.stringify(finalBody);
 
     const abortController = new AbortController();
     const timeoutMs = context.providerInstance.defaultTimeoutMs || DEFAULT_TIMEOUT_MS;
@@ -168,13 +175,13 @@ export class AntigravityAdapter implements AIProviderAdapter {
     try {
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers,
+        headers: finalHeaders,
         body: requestBody,
         signal: abortController.signal
       });
 
       if (!response.ok) {
-        throw await this.classifyHttpError(response, url, timeoutMs);
+        throw await this.classifyHttpError(response, url, timeoutMs, context.providerInstance);
       }
 
       if (stream) {
@@ -528,9 +535,19 @@ export class AntigravityAdapter implements AIProviderAdapter {
   private async classifyHttpError(
     response: Response,
     url: string,
-    timeoutMs: number
+    timeoutMs: number,
+    instance?: ProviderInstance
   ) {
     const status = response.status;
+    if (instance) {
+      const action = interpretStatusCode(instance, status);
+      if (action === "disable") {
+        return new ProviderAuthError(this.type, `Status ${status} mapped to disable`);
+      }
+      if (action === "retry") {
+        return new ProviderRateLimitError(this.type, undefined);
+      }
+    }
     if (status === 401 || status === 403) {
       return new ProviderAuthError(this.type, "Access token expired or invalid");
     }

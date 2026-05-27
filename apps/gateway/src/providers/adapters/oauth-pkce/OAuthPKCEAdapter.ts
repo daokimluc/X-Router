@@ -22,6 +22,8 @@ import type {
   ProviderStream,
   SessionRefreshResult
 } from "../../base/types.js";
+import type { ProviderInstance } from "../../base/ProviderInstance.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
 import type { OAuthProviderConfig } from "../../registry/ProviderTypeDefinition.js";
 
 export type OAuthPKCECredential = {
@@ -350,18 +352,24 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
+      const baseHeaders: Record<string, string> = {
+        Authorization: `Bearer ${credential.accessToken}`,
+        "Content-Type": "application/json"
+      };
+      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+        request as unknown as Record<string, unknown>,
+        baseHeaders,
+        context.providerInstance
+      );
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${credential.accessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(request),
+        headers: finalHeaders,
+        body: JSON.stringify(finalBody),
         signal: abortController.signal
       });
 
       if (!response.ok) {
-        throw await this.classifyHttpError(response, baseUrl, timeoutMs);
+        throw await this.classifyHttpError(response, baseUrl, timeoutMs, context.providerInstance);
       }
 
       // Streaming response
@@ -459,7 +467,8 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
   private async classifyHttpError(
     response: Response,
     baseUrl: string,
-    timeoutMs: number
+    timeoutMs: number,
+    instance?: ProviderInstance
   ): Promise<
     | ProviderAuthError
     | ProviderRateLimitError
@@ -467,6 +476,16 @@ export class OAuthPKCEAdapter implements AIProviderAdapter {
     | ProviderUnavailableError
   > {
     const status = response.status;
+
+    if (instance) {
+      const action = interpretStatusCode(instance, status);
+      if (action === "disable") {
+        return new ProviderAuthError(this.type, `Status ${status} mapped to disable`);
+      }
+      if (action === "retry") {
+        return new ProviderRateLimitError(this.type, undefined);
+      }
+    }
 
     if (status === 401 || status === 403) {
       return new ProviderAuthError(

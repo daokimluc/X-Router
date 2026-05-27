@@ -21,6 +21,8 @@ import type {
   ProviderRequestContext,
   ProviderStream
 } from "../../base/types.js";
+import type { ProviderInstance } from "../../base/ProviderInstance.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
 
 // --- Types ---
 
@@ -193,6 +195,15 @@ export class VertexAIAdapter implements AIProviderAdapter {
     }
 
     const geminiRequest = this.transformToGemini(request);
+    const baseHeaders: Record<string, string> = {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    };
+    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      geminiRequest as unknown as Record<string, unknown>,
+      baseHeaders,
+      context.providerInstance
+    );
 
     const abortController = new AbortController();
     const timeoutMs = context.providerInstance.defaultTimeoutMs || DEFAULT_TIMEOUT_MS;
@@ -201,16 +212,13 @@ export class VertexAIAdapter implements AIProviderAdapter {
     try {
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(geminiRequest),
+        headers: finalHeaders,
+        body: JSON.stringify(finalBody),
         signal: abortController.signal
       });
 
       if (!response.ok) {
-        throw await this.classifyHttpError(response, url, timeoutMs);
+        throw await this.classifyHttpError(response, url, timeoutMs, context.providerInstance);
       }
 
       // Streaming response
@@ -545,9 +553,20 @@ export class VertexAIAdapter implements AIProviderAdapter {
   private async classifyHttpError(
     response: Response,
     url: string,
-    timeoutMs: number
+    timeoutMs: number,
+    instance?: ProviderInstance
   ): Promise<ProviderAuthError | ProviderRateLimitError | ProviderTimeoutError | ProviderUnavailableError> {
     const status = response.status;
+
+    if (instance) {
+      const action = interpretStatusCode(instance, status);
+      if (action === "disable") {
+        return new ProviderAuthError(this.type, `Status ${status} mapped to disable`);
+      }
+      if (action === "retry") {
+        return new ProviderRateLimitError(this.type, undefined);
+      }
+    }
 
     if (status === 401) {
       return new ProviderAuthError(

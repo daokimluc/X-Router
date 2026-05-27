@@ -1,10 +1,13 @@
 import type { AIProviderAdapter } from "../../base/AIProviderAdapter.js";
 import type { ProviderCapabilities } from "../../base/ProviderCapabilities.js";
 import {
+  ProviderAuthError,
+  ProviderRateLimitError,
   ProviderTimeoutError,
   ProviderUnavailableError,
   UnsupportedCapabilityError
 } from "../../base/ProviderErrors.js";
+import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
 import type {
   AnthropicMessagesRequest,
   NormalizedAnthropicResponse,
@@ -117,22 +120,32 @@ export class NoAuthAdapter implements AIProviderAdapter {
     const baseUrl = this.getBaseUrl(context);
     const url = `${baseUrl}/v1/chat/completions`;
 
+    const baseHeaders = this.buildHeaders({ "content-type": "application/json" });
+    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      request as unknown as Record<string, unknown>,
+      baseHeaders,
+      context.providerInstance
+    );
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.defaultTimeoutMs);
 
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: this.buildHeaders({ "content-type": "application/json" }),
-        body: JSON.stringify(request),
+        headers: finalHeaders,
+        body: JSON.stringify(finalBody),
         signal: controller.signal
       });
 
-      if (response.status >= 500) {
-        throw new ProviderUnavailableError("no_auth", response.status);
-      }
-
       if (!response.ok) {
+        const action = interpretStatusCode(context.providerInstance, response.status);
+        if (action === "disable") {
+          throw new ProviderAuthError("no_auth", `Status ${response.status} mapped to disable`);
+        }
+        if (action === "retry") {
+          throw new ProviderRateLimitError("no_auth", undefined);
+        }
         throw new ProviderUnavailableError("no_auth", response.status);
       }
 
