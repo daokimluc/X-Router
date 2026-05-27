@@ -45,7 +45,16 @@ const providerInstancePatchSchema = z.object({
   groupName: z.union([z.string().min(1).max(64), z.null()]).optional(),
   tag: z.union([z.string().min(1).max(64), z.null()]).optional(),
   maxInputTokens: z.union([z.number().int().positive(), z.null()]).optional(),
-  systemPromptOverride: z.union([z.string().max(8000), z.null()]).optional()
+  systemPromptOverride: z.union([z.string().max(8000), z.null()]).optional(),
+  remark: z.union([z.string().max(500), z.null()]).optional(),
+  circuitBreaker: z
+    .object({
+      enabled: z.boolean(),
+      failureThreshold: z.number().int().positive(),
+      cooldownMs: z.number().int().min(1000),
+      halfOpenMaxRequests: z.number().int().positive().optional()
+    })
+    .optional()
 });
 const capabilitySchema = z.enum([
   "chat",
@@ -1163,7 +1172,17 @@ export async function registerAdminRoutes(
           groupName: patch.groupName === null ? undefined : patch.groupName,
           tag: patch.tag === null ? undefined : patch.tag,
           maxInputTokens: patch.maxInputTokens === null ? undefined : patch.maxInputTokens,
-          systemPromptOverride: patch.systemPromptOverride === null ? undefined : patch.systemPromptOverride
+          systemPromptOverride: patch.systemPromptOverride === null ? undefined : patch.systemPromptOverride,
+          remark: patch.remark === null ? undefined : patch.remark,
+          // circuitBreaker requires halfOpenMaxRequests; default to existing value or 1
+          circuitBreaker: patch.circuitBreaker
+            ? {
+                enabled: patch.circuitBreaker.enabled,
+                failureThreshold: patch.circuitBreaker.failureThreshold,
+                cooldownMs: patch.circuitBreaker.cooldownMs,
+                halfOpenMaxRequests: patch.circuitBreaker.halfOpenMaxRequests ?? 1
+              }
+            : undefined
         }
       );
       app.adminAuditService.record({
@@ -1273,6 +1292,250 @@ export async function registerAdminRoutes(
       });
       await saveAdminRuntimeState(app);
       return { action: body.action, updated: updated.length, ids: updated, notFound };
+    }
+  );
+
+  // Phase 29 — bulk action by tag (enable/disable/delete all instances with given tag).
+  app.post(
+    "/admin/v1/provider-instances/by-tag",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const body = z.object({
+        tag: z.string().min(1).max(64),
+        action: z.enum(["enable", "disable", "delete"])
+      }).parse(request.body ?? {});
+
+      const matching = app.providerRuntimeRegistry
+        .listProviderInstances()
+        .filter((i) => i.tag === body.tag);
+
+      const updated: string[] = [];
+      for (const inst of matching) {
+        if (body.action === "delete") {
+          if (app.providerRuntimeRegistry.removeProviderInstance(inst.id)) {
+            updated.push(inst.id);
+          }
+        } else {
+          app.providerRuntimeRegistry.updateProviderInstance(inst.id, {
+            enabled: body.action === "enable"
+          });
+          updated.push(inst.id);
+        }
+      }
+      app.adminAuditService.record({
+        action: `provider_instance.tag_${body.action}`,
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: `tag:${body.tag}`
+      });
+      await saveAdminRuntimeState(app);
+      return { tag: body.tag, action: body.action, matched: matching.length, updated };
+    }
+  );
+
+  // Phase 29 — cleanup all disabled provider instances at once.
+  app.delete(
+    "/admin/v1/provider-instances/disabled",
+    { preHandler: adminAuth },
+    async (request) => {
+      const disabled = app.providerRuntimeRegistry
+        .listProviderInstances()
+        .filter((i) => !i.enabled);
+      const removed: string[] = [];
+      for (const inst of disabled) {
+        if (app.providerRuntimeRegistry.removeProviderInstance(inst.id)) {
+          removed.push(inst.id);
+        }
+      }
+      app.adminAuditService.record({
+        action: "provider_instance.cleanup_disabled",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: "*"
+      });
+      await saveAdminRuntimeState(app);
+      return { removed: removed.length, ids: removed };
+    }
+  );
+
+  // Phase 29 — query upstream balance for a single channel (best-effort).
+  app.post(
+    "/admin/v1/provider-instances/:id/update-balance",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const inst = app.providerRuntimeRegistry.getProviderInstance(params.id);
+      if (!inst) {
+        return reply.code(404).send({
+          error: { type: "not_found", message: `Provider instance "${params.id}" not found`, code: "not_found" }
+        });
+      }
+
+      // Strategy: stub for providers without a known balance API. Mark
+      // updated time so admin sees attempt; balance stays undefined unless
+      // adapter implements queryBalance() in a future phase.
+      const now = new Date();
+      const updated = app.providerRuntimeRegistry.updateProviderInstance(params.id, {
+        upstreamBalanceUpdatedAt: now
+      });
+      app.adminAuditService.record({
+        action: "provider_instance.update_balance",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: params.id
+      });
+      return {
+        instanceId: params.id,
+        balance: updated.upstreamBalance ?? null,
+        updatedAt: now.toISOString(),
+        note: "Balance query API not yet implemented for this adapter — timestamp recorded."
+      };
+    }
+  );
+
+  // Phase 29 — bulk balance update across all enabled instances.
+  app.post(
+    "/admin/v1/provider-instances/update-balance-all",
+    { preHandler: adminAuth },
+    async (request) => {
+      const enabled = app.providerRuntimeRegistry
+        .listProviderInstances()
+        .filter((i) => i.enabled);
+      const now = new Date();
+      const ids: string[] = [];
+      for (const inst of enabled) {
+        app.providerRuntimeRegistry.updateProviderInstance(inst.id, {
+          upstreamBalanceUpdatedAt: now
+        });
+        ids.push(inst.id);
+      }
+      app.adminAuditService.record({
+        action: "provider_instance.update_balance_all",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: "*"
+      });
+      return { count: ids.length, ids, timestamp: now.toISOString() };
+    }
+  );
+
+  // Phase 29 — bulk upstream model drift detection across all enabled instances.
+  app.post(
+    "/admin/v1/sync-models/bulk",
+    { preHandler: adminAuth },
+    async (request) => {
+      const body = z.object({
+        autoCreate: z.boolean().optional().default(false)
+      }).parse(request.body ?? {});
+
+      const enabled = app.providerRuntimeRegistry
+        .listProviderInstances()
+        .filter((i) => i.enabled);
+
+      const results: Array<{
+        instanceId: string;
+        instanceName: string;
+        discovered: number;
+        new: Array<{ id: string; upstreamModel: string }>;
+        removed: Array<{ id: string; publicModel: string }>;
+        autoCreated?: string[];
+        error?: string;
+      }> = [];
+
+      for (const inst of enabled) {
+        const adapter = app.providerRegistry.getAdapter(inst.type);
+        if (!adapter) {
+          results.push({
+            instanceId: inst.id,
+            instanceName: inst.name,
+            discovered: 0,
+            new: [],
+            removed: [],
+            error: `No adapter for type "${inst.type}"`
+          });
+          continue;
+        }
+
+        const pool = app.providerRuntimeRegistry.getAccountPool(inst.id);
+        const accounts = pool ? pool.listAccounts().filter((a) => a.status !== "disabled") : [];
+        const account = accounts[0];
+        const secret = account ? app.secretService.getSecretForAccount(account.id) : undefined;
+        const credentialPayload = secret ? app.secretService.decryptSecretPayload(secret) : {};
+
+        try {
+          const upstreamModels = await adapter.listModels({
+            providerInstance: inst,
+            credentialPayload
+          });
+          const existingMappings = app.modelRegistry
+            .listModelMappings()
+            .filter((m) => m.providerInstanceId === inst.id);
+          const existingUpstream = new Set(existingMappings.map((m) => m.upstreamModel));
+          const newModels = upstreamModels.filter((m) => !existingUpstream.has(m.upstreamModel));
+          const removedModels = existingMappings.filter(
+            (m) => !upstreamModels.some((u) => u.upstreamModel === m.upstreamModel)
+          );
+
+          const created: string[] = [];
+          if (body.autoCreate) {
+            for (const model of newModels) {
+              const mappingId = `${inst.type}_${model.id}`.replace(/[^a-z0-9_]+/gi, "_");
+              try {
+                app.modelRegistry.register({
+                  id: mappingId,
+                  publicModel: model.id,
+                  providerInstanceId: inst.id,
+                  providerType: inst.type,
+                  upstreamModel: model.upstreamModel,
+                  capabilities: ["chat"],
+                  enabled: true
+                });
+                created.push(model.id);
+              } catch {
+                // mapping already exists — skip
+              }
+            }
+          }
+
+          results.push({
+            instanceId: inst.id,
+            instanceName: inst.name,
+            discovered: upstreamModels.length,
+            new: newModels.map((m) => ({ id: m.id, upstreamModel: m.upstreamModel })),
+            removed: removedModels.map((m) => ({ id: m.id, publicModel: m.publicModel })),
+            autoCreated: body.autoCreate ? created : undefined
+          });
+        } catch (err) {
+          results.push({
+            instanceId: inst.id,
+            instanceName: inst.name,
+            discovered: 0,
+            new: [],
+            removed: [],
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
+      }
+
+      app.adminAuditService.record({
+        action: body.autoCreate ? "models.bulk_sync_apply" : "models.bulk_sync_detect",
+        actorKeyHash: request.adminAuth?.apiKeyHash,
+        targetType: "provider_instance",
+        targetId: "*"
+      });
+
+      const totalNew = results.reduce((s, r) => s + r.new.length, 0);
+      const totalRemoved = results.reduce((s, r) => s + r.removed.length, 0);
+      const totalErrors = results.filter((r) => r.error).length;
+
+      return {
+        autoCreate: body.autoCreate,
+        instancesScanned: results.length,
+        totalNewModels: totalNew,
+        totalRemovedModels: totalRemoved,
+        totalErrors,
+        results
+      };
     }
   );
 
@@ -1911,22 +2174,35 @@ export async function registerAdminRoutes(
             providerInstance: inst,
             credentialPayload,
           });
+          const durationMs = Date.now() - start;
+          // Phase 29 — persist test result on the instance
+          app.providerRuntimeRegistry.updateProviderInstance(inst.id, {
+            lastTestAt: new Date(),
+            lastTestDurationMs: durationMs,
+            lastTestStatus: health.status
+          });
           results.push({
             providerInstanceId: inst.id,
             type: inst.type,
             name: inst.name,
             status: health.status,
             message: health.message,
-            durationMs: Date.now() - start,
+            durationMs,
           });
         } catch (err) {
+          const durationMs = Date.now() - start;
+          app.providerRuntimeRegistry.updateProviderInstance(inst.id, {
+            lastTestAt: new Date(),
+            lastTestDurationMs: durationMs,
+            lastTestStatus: "error"
+          });
           results.push({
             providerInstanceId: inst.id,
             type: inst.type,
             name: inst.name,
             status: "error",
             message: err instanceof Error ? err.message : "Unknown error",
-            durationMs: Date.now() - start,
+            durationMs,
           });
         }
       }

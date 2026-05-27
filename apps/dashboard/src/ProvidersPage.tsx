@@ -200,6 +200,20 @@ function getRelativeTime(dateStr: string): string {
 
 const APIKEY_INITIAL_VISIBLE = 20;
 
+// Phase 29 — admin tool menu button style
+const adminToolBtn: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  padding: "8px 10px",
+  fontSize: 12,
+  textAlign: "left",
+  background: "transparent",
+  border: "none",
+  borderRadius: 4,
+  cursor: "pointer",
+  color: "inherit",
+};
+
 // ─── Main Component ────────────────────────────────────────
 
 export function ProvidersPage(props: {
@@ -229,6 +243,9 @@ export function ProvidersPage(props: {
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchResult, setBatchResult] = useState<string | null>(null);
+  // Phase 29 — admin tools
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
 
   // Merge API provider types with static catalog
   const registeredTypes = new Set((props.providerTypes ?? []).map((p) => p.type));
@@ -368,6 +385,66 @@ export function ProvidersPage(props: {
     });
   };
 
+  // Phase 29 — admin tools
+  const handleCleanupDisabled = async () => {
+    if (bulkBusy || !props.api) return;
+    if (!window.confirm("Delete ALL disabled provider instances? This cannot be undone.")) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const result = await props.api.delete("/admin/v1/provider-instances/disabled") as { removed: number; ids: string[] };
+      setBulkResult(`Cleanup: removed ${result.removed} disabled instance(s)`);
+      window.setTimeout(() => setBulkResult(null), 4000);
+      await props.refresh?.();
+    } catch (err) {
+      setBulkResult(`Error: ${err instanceof Error ? err.message : "cleanup failed"}`);
+      window.setTimeout(() => setBulkResult(null), 5000);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleSyncAllModels = async (autoCreate: boolean) => {
+    if (bulkBusy || !props.api) return;
+    if (autoCreate && !window.confirm("Apply upstream model changes to ALL enabled instances? Models discovered upstream will be added.")) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const result = await props.api.post("/admin/v1/sync-models/bulk", { autoCreate }) as {
+        instancesScanned: number;
+        totalNewModels: number;
+        totalRemovedModels: number;
+        totalErrors: number;
+      };
+      const verb = autoCreate ? "Applied" : "Detected";
+      setBulkResult(`${verb}: scanned ${result.instancesScanned}, +${result.totalNewModels} new, -${result.totalRemovedModels} removed${result.totalErrors ? `, ${result.totalErrors} errors` : ""}`);
+      window.setTimeout(() => setBulkResult(null), 6000);
+      if (autoCreate) await props.refresh?.();
+    } catch (err) {
+      setBulkResult(`Error: ${err instanceof Error ? err.message : "sync failed"}`);
+      window.setTimeout(() => setBulkResult(null), 5000);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleUpdateBalanceAll = async () => {
+    if (bulkBusy || !props.api) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const result = await props.api.post("/admin/v1/provider-instances/update-balance-all", {}) as { count: number };
+      setBulkResult(`Balance check requested for ${result.count} enabled instance(s) (best-effort)`);
+      window.setTimeout(() => setBulkResult(null), 4000);
+      await props.refresh?.();
+    } catch (err) {
+      setBulkResult(`Error: ${err instanceof Error ? err.message : "update balance failed"}`);
+      window.setTimeout(() => setBulkResult(null), 5000);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   if (allProviders.length === 0 && (props.providerTypes ?? []).length === 0) {
     return (
       <div className="providersPage">
@@ -413,6 +490,74 @@ export function ProvidersPage(props: {
             <Play size={14} />
             {testing ? t("prov.testing") : t("prov.testAllConnections")}
           </button>
+          <details
+            style={{ position: "relative" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <summary
+              style={{
+                cursor: "pointer",
+                listStyle: "none",
+                padding: "6px 12px",
+                background: "var(--color-surface-2, #1f2937)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 6,
+                fontSize: 13,
+                userSelect: "none",
+              }}
+              title="Admin tools"
+            >
+              ⚙ Admin tools
+            </summary>
+            <div
+              style={{
+                position: "absolute",
+                right: 0,
+                top: "calc(100% + 4px)",
+                background: "var(--color-bg, #0f172a)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 6,
+                minWidth: 240,
+                padding: 6,
+                zIndex: 100,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              }}
+            >
+              <button
+                type="button"
+                style={adminToolBtn}
+                disabled={bulkBusy}
+                onClick={() => void handleSyncAllModels(false)}
+              >
+                🔍 Detect upstream model changes (all)
+              </button>
+              <button
+                type="button"
+                style={adminToolBtn}
+                disabled={bulkBusy}
+                onClick={() => void handleSyncAllModels(true)}
+              >
+                ✓ Apply upstream model changes (all)
+              </button>
+              <button
+                type="button"
+                style={adminToolBtn}
+                disabled={bulkBusy}
+                onClick={() => void handleUpdateBalanceAll()}
+              >
+                💰 Refresh balance (all enabled)
+              </button>
+              <hr style={{ border: 0, borderTop: "1px solid var(--color-border)", margin: "4px 0" }} />
+              <button
+                type="button"
+                style={{ ...adminToolBtn, color: "#ef4444" }}
+                disabled={bulkBusy}
+                onClick={() => void handleCleanupDisabled()}
+              >
+                🗑 Cleanup all disabled instances
+              </button>
+            </div>
+          </details>
           <div className="providersSearchWrap">
             <Search size={16} />
             <input
@@ -491,6 +636,21 @@ export function ProvidersPage(props: {
           }}
         >
           {batchResult}
+        </div>
+      )}
+      {bulkResult && (
+        <div
+          style={{
+            padding: "8px 14px",
+            margin: "8px 0",
+            background: bulkResult.startsWith("Error") ? "rgba(239,68,68,0.1)" : "rgba(59,130,246,0.1)",
+            color: bulkResult.startsWith("Error") ? "#ef4444" : "#3b82f6",
+            border: "1px solid",
+            borderRadius: 6,
+            fontSize: 12,
+          }}
+        >
+          {bulkResult}
         </div>
       )}
 

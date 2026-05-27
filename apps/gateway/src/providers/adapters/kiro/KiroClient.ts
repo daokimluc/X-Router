@@ -34,25 +34,14 @@ export class KiroClient {
 
     const baseUrl =
       options.config.baseUrl ??
-      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region);
+      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region, false);
     const path = options.config.chatCompletionsPath ?? "";
     const url = new URL(path, baseUrl);
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), options.timeoutMs);
 
     try {
-      const baseHeaders: Record<string, string> = {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-        accept: "application/vnd.amazon.eventstream",
-        "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
-        "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-        "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
-        "amz-sdk-request": "attempt=1; max=3",
-        "x-request-id": options.requestId,
-        ...((options.credential.authMethod as string) === "api_key" || (options.credential as Record<string, unknown>).kiroApiKey
-          ? { tokentype: "API_KEY" } : {})
-      };
+      const baseHeaders = buildKiroHeaders(accessToken, options.credential, options.requestId);
       // Phase 24 — header-only overrides for Kiro (AWS event-stream body has fixed shape)
       const headers = options.instance
         ? applyChannelOverrides({}, baseHeaders, options.instance).headers
@@ -142,25 +131,14 @@ export class KiroClient {
 
     const baseUrl =
       options.config.baseUrl ??
-      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region);
+      resolveKiroApiUrl(options.credential.apiRegion ?? options.credential.region, false);
     const path = options.config.chatCompletionsPath ?? "";
     const url = new URL(path, baseUrl);
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), options.timeoutMs);
 
     try {
-      const baseHeaders: Record<string, string> = {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-        accept: "application/vnd.amazon.eventstream",
-        "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
-        "user-agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-        "x-amz-user-agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
-        "amz-sdk-request": "attempt=1; max=3",
-        "x-request-id": options.requestId,
-        ...((options.credential.authMethod as string) === "api_key" || (options.credential as Record<string, unknown>).kiroApiKey
-          ? { tokentype: "API_KEY" } : {})
-      };
+      const baseHeaders = buildKiroHeaders(accessToken, options.credential, options.requestId);
       const headers = options.instance
         ? applyChannelOverrides({}, baseHeaders, options.instance).headers
         : baseHeaders;
@@ -354,17 +332,9 @@ function buildKiroPayload(request: KiroChatRequest, credential: KiroCredentialPa
     }
   };
 
-  if (credential.profileArn) {
-    payload.profileArn = credential.profileArn;
-  }
+  payload.profileArn = resolveKiroProfileArn(credential);
 
-  if (credential.machineId) {
-    payload.machineId = credential.machineId;
-  } else if (credential.refreshToken) {
-    payload.machineId = createHash("sha256")
-      .update(credential.refreshToken)
-      .digest("hex");
-  }
+  payload.machineId = resolveKiroMachineId(credential);
 
   return payload;
 }
@@ -592,9 +562,62 @@ async function safeResponseText(response: Response): Promise<string> {
   }
 }
 
-function resolveKiroApiUrl(region?: string): string {
+function resolveKiroApiUrl(region?: string, hasProfileArn?: boolean): string {
   const r = region ?? "us-east-1";
+  if (hasProfileArn) {
+    return `https://q.${r}.amazonaws.com/generateAssistantResponse`;
+  }
   return `https://codewhisperer.${r}.amazonaws.com/generateAssistantResponse`;
+}
+
+const KIRO_BUILDER_ID_PROFILE_ARN = "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX";
+const KIRO_SOCIAL_PROFILE_ARN = "arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK";
+
+function resolveKiroProfileArn(credential: KiroCredentialPayload): string {
+  if (credential.profileArn) return credential.profileArn;
+  const authMethod = credential.authMethod as string | undefined;
+  if (authMethod === "social") return KIRO_SOCIAL_PROFILE_ARN;
+  return KIRO_BUILDER_ID_PROFILE_ARN;
+}
+
+const KIRO_VERSION = "0.12.155";
+const AWS_SDK_VERSION = "1.0.34";
+
+function buildKiroHeaders(
+  accessToken: string,
+  credential: KiroCredentialPayload,
+  requestId: string
+): Record<string, string> {
+  const isApiKey = (credential.authMethod as string) === "api_key" || !!(credential as Record<string, unknown>).kiroApiKey;
+  const machineId = resolveKiroMachineId(credential);
+  const agentMode = (credential.authMethod as string) === "idc" ? "vibe" : "spec";
+
+  return {
+    authorization: `Bearer ${accessToken}`,
+    "content-type": "application/json",
+    accept: "application/vnd.amazon.eventstream",
+    "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
+    "user-agent": `aws-sdk-js/${AWS_SDK_VERSION} ua/2.1 os/${process.platform} lang/js md/nodejs#${process.versions.node} api/codewhispererstreaming#${AWS_SDK_VERSION} m/E KiroIDE-${KIRO_VERSION}-${machineId}`,
+    "x-amz-user-agent": `aws-sdk-js/${AWS_SDK_VERSION} KiroIDE ${KIRO_VERSION} ${machineId}`,
+    "amz-sdk-request": "attempt=1; max=3",
+    "amz-sdk-invocation-id": randomUUID(),
+    "x-amzn-kiro-agent-mode": agentMode,
+    "x-request-id": requestId,
+    ...(isApiKey ? { tokentype: "API_KEY" } : {})
+  };
+}
+
+function resolveKiroMachineId(credential: KiroCredentialPayload): string {
+  if (credential.machineId) return credential.machineId;
+
+  const raw = credential as Record<string, unknown>;
+  if (raw.kiroApiKey && typeof raw.kiroApiKey === "string") {
+    return createHash("sha256").update(`KiroAPIKey/${raw.kiroApiKey}`).digest("hex");
+  }
+  if (credential.refreshToken) {
+    return createHash("sha256").update(`KotlinNativeAPI/${credential.refreshToken}`).digest("hex");
+  }
+  return createHash("sha256").update(randomUUID()).digest("hex");
 }
 
 function isJsonResponse(response: Response): boolean {

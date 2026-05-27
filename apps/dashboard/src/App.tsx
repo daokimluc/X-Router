@@ -386,7 +386,7 @@ type AuthPreset = {
   fields: Array<{
     key: string;
     label: string;
-    type?: "text" | "password" | "datetime-local" | "textarea";
+    type?: "text" | "password" | "datetime-local" | "textarea" | "hidden";
     placeholder?: string;
     required?: boolean;
   }>;
@@ -3884,8 +3884,9 @@ function Accounts(props: {
                   <button
                     className="textButton"
                     type="button"
-                    disabled={!authorizationUrl}
+                    disabled={!authorizationUrl || selectedInstance?.type === "kiro"}
                     onClick={() => window.open(authorizationUrl, "_blank", "noopener,noreferrer")}
+                    title={selectedInstance?.type === "kiro" ? "Kiro uses Import Local or API Key instead of browser OAuth" : undefined}
                   >
                     <ExternalLink size={16} />Open Browser
                   </button>
@@ -3921,7 +3922,7 @@ function Accounts(props: {
               </div>
             ) : null}
             <div className="credentialGrid">
-              {selectedPreset.fields.map((field) => (
+              {selectedPreset.fields.filter((f) => f.type !== "hidden").map((field) => (
                 <label className={field.type === "textarea" ? "spanTwo" : undefined} key={field.key}>
                   {field.label}
                   {field.type === "textarea" ? (
@@ -8932,6 +8933,16 @@ function getAuthPresets(providerType: string, authMethods: string[] = []): AuthP
     kiro: [
       oauthPreset("kiro"),
       {
+        id: "kiro_api_key",
+        label: "Kiro API Key (ksk_)",
+        credentialType: "custom_json",
+        description: "Use a Kiro API key generated from app.kiro.dev portal. Works directly without token refresh.",
+        fields: [
+          { key: "kiroApiKey", label: "Kiro API Key", type: "password", required: true, placeholder: "ksk_..." },
+          { key: "authMethod", label: "Auth Method", type: "hidden", placeholder: "api_key" }
+        ]
+      },
+      {
         id: "kiro_refresh",
         label: "Refresh Token",
         credentialType: "refresh_token",
@@ -8941,6 +8952,19 @@ function getAuthPresets(providerType: string, authMethods: string[] = []): AuthP
           { key: "accessToken", label: "Access Token", type: "password", placeholder: "Optional current access token" },
           { key: "region", label: "Region", placeholder: "us-east-1" },
           { key: "expiresAt", label: "Access Token Expires", type: "datetime-local" }
+        ]
+      },
+      {
+        id: "kiro_idc",
+        label: "IDC (Enterprise)",
+        credentialType: "custom_json",
+        description: "IAM Identity Center — requires refreshToken + clientId + clientSecret from AWS SSO.",
+        fields: [
+          { key: "refreshToken", label: "Refresh Token", type: "password", required: true },
+          { key: "clientId", label: "Client ID", type: "text", required: true },
+          { key: "clientSecret", label: "Client Secret", type: "password", required: true },
+          { key: "region", label: "Region", placeholder: "us-east-1" },
+          { key: "authMethod", label: "Auth Method", type: "hidden", placeholder: "idc" }
         ]
       },
       {
@@ -9222,7 +9246,7 @@ function isLikelyCallbackUrl(value: string): boolean {
 }
 
 function buildCredentialPayload(preset: AuthPreset, values: Record<string, string>): Record<string, unknown> {
-  if (preset.credentialType === "custom_json") {
+  if (preset.credentialType === "custom_json" && preset.fields.length === 1 && preset.fields[0].key === "json") {
     return JSON.parse(values.json || "{}") as Record<string, unknown>;
   }
 
@@ -9230,6 +9254,13 @@ function buildCredentialPayload(preset: AuthPreset, values: Record<string, strin
 
   for (const field of preset.fields) {
     const value = values[field.key]?.trim();
+    if (!value && field.type === "hidden") {
+      // Use placeholder as default for hidden fields
+      if (field.placeholder) {
+        payload[field.key] = field.placeholder;
+      }
+      continue;
+    }
     if (!value) {
       continue;
     }

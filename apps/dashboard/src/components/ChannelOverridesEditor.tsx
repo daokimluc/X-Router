@@ -22,6 +22,7 @@ export type ProviderInstanceShape = {
   tag?: string;
   maxInputTokens?: number;
   systemPromptOverride?: string;
+  remark?: string;
   paramOverride?: Record<string, unknown>;
   headerOverride?: Record<string, string>;
   statusCodeMapping?: Record<string, "retry" | "disable" | "passthrough">;
@@ -92,6 +93,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
     instance.maxInputTokens === undefined ? "" : String(instance.maxInputTokens)
   );
   const [systemPromptOverride, setSystemPromptOverride] = useState(instance.systemPromptOverride ?? "");
+  const [remark, setRemark] = useState(instance.remark ?? "");
   const [autoBanEnabled, setAutoBanEnabled] = useState<boolean>(instance.circuitBreaker?.enabled ?? true);
   const [failureThreshold, setFailureThreshold] = useState(String(instance.circuitBreaker?.failureThreshold ?? 5));
   const [cooldownMs, setCooldownMs] = useState(String(instance.circuitBreaker?.cooldownMs ?? 60000));
@@ -108,6 +110,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
     setTag(instance.tag ?? "");
     setMaxInputTokens(instance.maxInputTokens === undefined ? "" : String(instance.maxInputTokens));
     setSystemPromptOverride(instance.systemPromptOverride ?? "");
+    setRemark(instance.remark ?? "");
     setAutoBanEnabled(instance.circuitBreaker?.enabled ?? true);
     setFailureThreshold(String(instance.circuitBreaker?.failureThreshold ?? 5));
     setCooldownMs(String(instance.circuitBreaker?.cooldownMs ?? 60000));
@@ -153,6 +156,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
           ? null
           : (Number.isFinite(maxInputTokensNum) && maxInputTokensNum > 0 ? maxInputTokensNum : null),
         systemPromptOverride: systemPromptOverride.trim() || null,
+        remark: remark.trim() || null,
         paramOverride: paramParse.ok ? paramParse.value : {},
         headerOverride: headerParse.ok ? headerParse.value as Record<string, string> : {},
         statusCodeMapping: statusParse.ok ? statusParse.value : {},
@@ -179,6 +183,7 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
     setTag(instance.tag ?? "");
     setMaxInputTokens(instance.maxInputTokens === undefined ? "" : String(instance.maxInputTokens));
     setSystemPromptOverride(instance.systemPromptOverride ?? "");
+    setRemark(instance.remark ?? "");
     setAutoBanEnabled(instance.circuitBreaker?.enabled ?? true);
     setFailureThreshold(String(instance.circuitBreaker?.failureThreshold ?? 5));
     setCooldownMs(String(instance.circuitBreaker?.cooldownMs ?? 60000));
@@ -251,6 +256,18 @@ export function ChannelOverridesEditor({ instance, api, onSaved }: Props) {
             placeholder="(optional)"
           />
           <small className="formHint">{t("channel.systemPromptOverride.hint")}</small>
+        </label>
+
+        <label className="formField">
+          <span>{t("channel.remark")}</span>
+          <textarea
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            rows={2}
+            maxLength={500}
+            placeholder="(optional admin notes)"
+          />
+          <small className="formHint">{t("channel.remark.hint")}</small>
         </label>
 
         <fieldset style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "10px 12px", margin: 0 }}>

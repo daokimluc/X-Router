@@ -29,7 +29,8 @@ export function createAuthMiddleware(
     reply: FastifyReply
   ): Promise<void> {
     const authorization = request.headers.authorization;
-    const token = parseBearerToken(authorization);
+    const xApiKey = request.headers["x-api-key"];
+    const token = parseBearerToken(authorization) ?? (typeof xApiKey === "string" ? xApiKey.trim() : null);
 
     if (!token || (!validKeys.has(token) && !apiKeyService?.isValid(token))) {
       await reply.code(401).send({

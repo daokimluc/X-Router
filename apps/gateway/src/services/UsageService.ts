@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+export type UsageLogType = "consume" | "manage" | "system" | "error" | "refund" | "topup";
+
 export type UsageRecord = {
   id: string;
   requestId: string;
@@ -15,6 +17,14 @@ export type UsageRecord = {
   /** Tokens served from provider cache (subset of promptTokens) */
   cachedTokens?: number;
   estimatedCost?: number;
+  /** Phase 29 — was this a streaming request? */
+  isStream?: boolean;
+  /** Phase 29 — client IP captured from auth context. */
+  clientIp?: string;
+  /** Phase 29 — log type for filtering. Defaults to 'consume' when omitted. */
+  logType?: UsageLogType;
+  /** Phase 29 — upstream request id when provider returned one. */
+  upstreamRequestId?: string;
   createdAt: Date;
 };
 
@@ -23,6 +33,7 @@ export type UsageFilter = {
   model?: string;
   providerType?: string;
   protocol?: "openai" | "anthropic";
+  logType?: UsageLogType;
   from?: Date;
   to?: Date;
 };
@@ -107,6 +118,7 @@ export class UsageService {
       if (filter.model && r.model !== filter.model) return false;
       if (filter.providerType && r.providerType !== filter.providerType) return false;
       if (filter.protocol && r.protocol !== filter.protocol) return false;
+      if (filter.logType && (r.logType ?? "consume") !== filter.logType) return false;
       if (filter.from && r.createdAt < filter.from) return false;
       if (filter.to && r.createdAt > filter.to) return false;
       return true;

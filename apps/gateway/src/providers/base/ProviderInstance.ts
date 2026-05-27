@@ -49,6 +49,18 @@ export type ProviderInstance = {
   maxInputTokens?: number;
   /** Phase 25 — system prompt prepended to every request (or replaces existing system message). */
   systemPromptOverride?: string;
+  /** Phase 29 — admin notes/remark for this channel. */
+  remark?: string;
+  /** Phase 29 — timestamp of the last test (single or batch). */
+  lastTestAt?: Date;
+  /** Phase 29 — duration of the last test in ms. */
+  lastTestDurationMs?: number;
+  /** Phase 29 — status of the last test ("ok" | "degraded" | "down" | "error"). */
+  lastTestStatus?: "ok" | "degraded" | "down" | "error";
+  /** Phase 29 — upstream account balance in USD (provider-reported, may be stale). */
+  upstreamBalance?: number;
+  /** Phase 29 — when upstreamBalance was last refreshed. */
+  upstreamBalanceUpdatedAt?: Date;
 
   /** Array of media kinds this provider supports (e.g., embedding, tts, image) */
   serviceKinds?: MediaKind[];
