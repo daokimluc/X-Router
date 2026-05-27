@@ -14,6 +14,8 @@ export type ProviderCircuitBreakerConfig = {
   halfOpenMaxRequests: number;
 };
 
+export type StatusCodeAction = "retry" | "disable" | "passthrough";
+
 export type ProviderInstance = {
   id: string;
   type: string;
@@ -31,6 +33,13 @@ export type ProviderInstance = {
   circuitBreaker: ProviderCircuitBreakerConfig;
   createdAt: Date;
   updatedAt: Date;
+
+  /** Phase 20b — shallow-merged into request body before forwarding upstream. */
+  paramOverride?: Record<string, unknown>;
+  /** Phase 20b — injected into request headers (reserved keys ignored). */
+  headerOverride?: Record<string, string>;
+  /** Phase 20b — persisted but not yet consumed by routing logic. */
+  statusCodeMapping?: Record<string, StatusCodeAction>;
 
   /** Array of media kinds this provider supports (e.g., embedding, tts, image) */
   serviceKinds?: MediaKind[];

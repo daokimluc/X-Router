@@ -20,6 +20,7 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import { ModelCache } from "../../services/ModelCache.js";
+import { applyChannelOverrides } from "../../../utils/channelOverride.js";
 
 export type GenericOpenAIConfig = {
   baseUrl: string;
@@ -178,14 +179,20 @@ export class GenericOpenAIAdapter implements AIProviderAdapter {
       const requestBody = context.reasoningEffort
         ? { ...request, reasoning_effort: context.reasoningEffort }
         : request;
+      const baseHeaders = {
+        "Authorization": `Bearer ${credential.apiKey}`,
+        "Content-Type": "application/json"
+      };
+      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+        requestBody as Record<string, unknown>,
+        baseHeaders,
+        context.providerInstance
+      );
 
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${credential.apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(requestBody),
+        headers: finalHeaders,
+        body: JSON.stringify(finalBody),
         signal: abortController.signal
       });
 

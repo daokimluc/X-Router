@@ -41,7 +41,9 @@ export class ModelResolver {
   constructor(
     private readonly modelRegistry: ModelRegistry,
     private readonly routingProfileRegistry: RoutingProfileRegistry,
-    private readonly capabilityMatcher = new CapabilityMatcher()
+    private readonly capabilityMatcher = new CapabilityMatcher(),
+    /** Optional priority lookup. Returns undefined for unknown instances; treated as 0. */
+    private readonly getInstancePriority?: (providerInstanceId: string) => number | undefined
   ) {}
 
   resolve(
@@ -81,6 +83,27 @@ export class ModelResolver {
 
       return this.toCandidate(this.assertCapabilities(mapping, required));
     });
+
+    // Sort candidates by descending priority (Phase 20b). Stable: equal
+    // priorities preserve registration order from the routing profile.
+    if (this.getInstancePriority) {
+      const lookup = this.getInstancePriority;
+      const withPriority = candidates.map((c, i) => ({
+        c,
+        i,
+        p: lookup(c.providerInstanceId) ?? 0,
+      }));
+      withPriority.sort((a, b) => (b.p - a.p) || (a.i - b.i));
+      const sorted = withPriority.map((entry) => entry.c);
+
+      return {
+        requestedModel: baseModel,
+        routeType: "routing_profile",
+        fallback: profile.fallback,
+        candidates: sorted,
+        reasoningEffort
+      };
+    }
 
     return {
       requestedModel: baseModel,

@@ -22,11 +22,12 @@ import type { ProviderAccount } from "../providers/base/ProviderAccount.js";
 import type { ProviderCapabilityFlag } from "../providers/base/ProviderCapabilities.js";
 import type { ProviderInstance } from "../providers/base/ProviderInstance.js";
 import { isValidIpOrCidr } from "../utils/ipMatch.js";
+import { isValidStatusCodeMappingKey, validateHeaderOverride } from "../utils/channelOverride.js";
 
 const providerInstancePatchSchema = z.object({
   enabled: z.boolean().optional(),
   name: z.string().min(1).optional(),
-  priority: z.number().optional(),
+  priority: z.number().int().min(-1000).max(1000).optional(),
   accountSelectionStrategy: z
     .enum([
       "round_robin",
@@ -35,7 +36,10 @@ const providerInstancePatchSchema = z.object({
       "lowest_error_rate",
       "lowest_latency"
     ])
-    .optional()
+    .optional(),
+  paramOverride: z.record(z.unknown()).optional(),
+  headerOverride: z.record(z.string()).optional(),
+  statusCodeMapping: z.record(z.enum(["retry", "disable", "passthrough"])).optional()
 });
 const capabilitySchema = z.enum([
   "chat",
@@ -822,9 +826,39 @@ export async function registerAdminRoutes(
     {
       preHandler: adminAuth
     },
-    async (request) => {
+    async (request, reply) => {
       const params = z.object({ id: z.string().min(1) }).parse(request.params);
       const patch = providerInstancePatchSchema.parse(request.body);
+
+      // Validate Phase 20b override fields
+      if (patch.headerOverride) {
+        const conflicts = validateHeaderOverride(patch.headerOverride);
+        if (!conflicts.valid) {
+          await reply.code(400).send({
+            error: {
+              type: "validation_error",
+              message: `Reserved headers cannot be overridden: ${conflicts.reservedConflicts.join(", ")}`,
+              code: "reserved_header_override"
+            }
+          });
+          return;
+        }
+      }
+      if (patch.statusCodeMapping) {
+        for (const key of Object.keys(patch.statusCodeMapping)) {
+          if (!isValidStatusCodeMappingKey(key)) {
+            await reply.code(400).send({
+              error: {
+                type: "validation_error",
+                message: `Invalid status code key: "${key}". Use "401", "5xx", etc.`,
+                code: "invalid_status_code_key"
+              }
+            });
+            return;
+          }
+        }
+      }
+
       const updated = app.providerRuntimeRegistry.updateProviderInstance(
         params.id,
         patch

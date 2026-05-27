@@ -168,12 +168,17 @@ export async function buildApp(
     (persistedState
       ? new RoutingProfileRegistry(persistedState.routingProfiles)
       : createDefaultRoutingProfileRegistry());
-  const modelResolver = new ModelResolver(modelRegistry, routingProfileRegistry);
   const providerRuntimeRegistry =
     dependencies.providerRuntimeRegistry ??
     (persistedState
       ? createProviderRuntimeRegistryFromState(persistedState)
       : createDefaultProviderRuntimeRegistry());
+  const modelResolver = new ModelResolver(
+    modelRegistry,
+    routingProfileRegistry,
+    undefined,
+    (id) => providerRuntimeRegistry.getProviderInstance(id)?.priority
+  );
   const secretService =
     dependencies.secretService ??
     new SecretService(new LocalEncryptionService("development-local-secret-key"));

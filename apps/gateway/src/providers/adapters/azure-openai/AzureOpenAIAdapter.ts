@@ -19,6 +19,7 @@ import type {
   ProviderRequestContext,
   ProviderStream
 } from "../../base/types.js";
+import { applyChannelOverrides } from "../../../utils/channelOverride.js";
 
 export type AzureOpenAIConfig = {
   resourceName: string;
@@ -93,13 +94,20 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
+      const baseHeaders: Record<string, string> = {
+        "api-key": credential.apiKey,
+        "Content-Type": "application/json"
+      };
+      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+        request as unknown as Record<string, unknown>,
+        baseHeaders,
+        context.providerInstance
+      );
+
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          "api-key": credential.apiKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(request),
+        headers: finalHeaders,
+        body: JSON.stringify(finalBody),
         signal: abortController.signal
       });
 

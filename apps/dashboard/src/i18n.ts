@@ -466,6 +466,20 @@ const translations: Record<Lang, Record<string, string>> = {
     "apikey.batchSelectAll": "Select all",
     "apikey.confirmBatchDelete": "Delete {n} API keys? This cannot be undone.",
 
+    // Phase 20b — Channel override + priority
+    "channel.advanced": "Advanced — overrides",
+    "channel.overridesActive": "Active",
+    "channel.priority": "Priority (higher first)",
+    "channel.paramOverride": "Param override (JSON)",
+    "channel.paramOverride.hint": "Shallow-merged into request body before sending upstream.",
+    "channel.headerOverride": "Header override (JSON)",
+    "channel.headerOverride.hint": "Reserved (Authorization, Content-Type, Host…) cannot be overridden.",
+    "channel.statusCodeMapping": "Status code mapping (JSON)",
+    "channel.statusCodeMapping.hint": "Persisted only this phase. Routing/auto-disable consume in next phase.",
+    "channel.invalidJson": "Invalid JSON",
+    "channel.reservedHeaderConflict": "Reserved headers cannot be overridden: {keys}",
+    "channel.invalidStatusCodeKey": "Invalid status code key: {key}",
+
     // Phase 19 — Model pricing
     "pricing.title": "Model Pricing",
     "pricing.subtitle": "Per-model token rates used to calculate request costs.",
@@ -929,6 +943,20 @@ const translations: Record<Lang, Record<string, string>> = {
     "apikey.batchExport": "Xuất CSV",
     "apikey.batchSelectAll": "Chọn tất cả",
     "apikey.confirmBatchDelete": "Xóa {n} API key? Không thể hoàn tác.",
+
+    // Phase 20b — Channel override + priority
+    "channel.advanced": "Nâng cao — overrides",
+    "channel.overridesActive": "Đang áp dụng",
+    "channel.priority": "Mức ưu tiên (cao trước)",
+    "channel.paramOverride": "Đè request param (JSON)",
+    "channel.paramOverride.hint": "Hợp nhất nông vào request body trước khi gửi upstream.",
+    "channel.headerOverride": "Đè request header (JSON)",
+    "channel.headerOverride.hint": "Các header dành riêng (Authorization, Content-Type, Host…) không thể ghi đè.",
+    "channel.statusCodeMapping": "Map status code (JSON)",
+    "channel.statusCodeMapping.hint": "Phase này chỉ lưu. Routing/auto-disable sẽ dùng ở phase sau.",
+    "channel.invalidJson": "JSON không hợp lệ",
+    "channel.reservedHeaderConflict": "Không được đè header dành riêng: {keys}",
+    "channel.invalidStatusCodeKey": "Key status code không hợp lệ: {key}",
 
     // Phase 19 — Model pricing
     "pricing.title": "Giá Model",

@@ -71,6 +71,7 @@ import { TestAllResultsModal, type TestAllPayload } from "./components/TestAllRe
 import { SyncModelsModal } from "./components/SyncModelsModal";
 import { ApiKeyEditModal, type ApiKeyForEdit } from "./components/ApiKeyEditModal";
 import { ApiKeyExportModal } from "./components/ApiKeyExportModal";
+import { ChannelOverridesEditor } from "./components/ChannelOverridesEditor";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -194,6 +195,10 @@ type ProviderInstance = {
   maxRetries: number;
   maxConcurrentRequests: number;
   accountSelectionStrategy?: string;
+  priority?: number;
+  paramOverride?: Record<string, unknown>;
+  headerOverride?: Record<string, string>;
+  statusCodeMapping?: Record<string, "retry" | "disable" | "passthrough">;
   circuitBreaker: {
     enabled: boolean;
     failureThreshold: number;
@@ -2948,6 +2953,14 @@ function ProviderDetail(props: {
           );
         })()}
       </section>
+
+      {props.instances[0] && (
+        <ChannelOverridesEditor
+          instance={props.instances[0]}
+          api={props.api}
+          onSaved={() => void props.refresh()}
+        />
+      )}
 
       {testResult ? (
         <div className={testResult.ok ? "resultBox testResult ok" : "resultBox testResult error"}>

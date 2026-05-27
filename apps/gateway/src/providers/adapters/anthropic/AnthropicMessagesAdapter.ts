@@ -19,6 +19,7 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import { ModelCache } from "../../services/ModelCache.js";
+import { applyChannelOverrides } from "../../../utils/channelOverride.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -143,14 +144,21 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
         };
       }
 
+      const baseHeaders: Record<string, string> = {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION
+      };
+      const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+        requestBody,
+        baseHeaders,
+        context.providerInstance
+      );
+
       const response = await this.fetchImpl(url, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": ANTHROPIC_VERSION
-        },
-        body: JSON.stringify(requestBody),
+        headers: finalHeaders,
+        body: JSON.stringify(finalBody),
         signal: abortController.signal
       });
 
