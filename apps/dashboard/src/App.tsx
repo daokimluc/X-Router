@@ -427,7 +427,7 @@ const pages: Array<{
   { id: "accounts", label: "Accounts", icon: Users, description: "Provider account pools and encrypted credentials" },
   { id: "models", label: "Models", icon: Database, description: "Public model names mapped to upstream channels — test, edit, and disable models served by the gateway" },
   { id: "profiles", label: "Routes", icon: Route, description: "Model routes with fallback support" },
-  { id: "endpoint", label: "Endpoint", icon: Globe, description: "API endpoint configuration, tunnels, and access keys" },
+  { id: "endpoint", label: "Endpoint & Keys", icon: Globe, description: "Base URLs to plug into client SDKs, full endpoint list, API key management" },
   { id: "cli", label: "CLI Tools", icon: Terminal, description: "Client setup snippets for coding tools" },
   { id: "playground", label: "Playground", icon: FlaskConical, description: "Test a routed model from the dashboard" },
   { id: "usage", label: "Usage", icon: Boxes, description: "Token usage captured from provider responses" },
@@ -1205,28 +1205,6 @@ function Overview({ data, api }: { data: DashboardData; api?: { get: <T>(path: s
             </header>
             <div className="ovInfoGrid">
               <div className="ovInfoItem">
-                <span className="ovInfoLabel">OpenAI SDK base URL</span>
-                <code className="ovInfoValue" title="Use this with OpenAI SDK / OpenAI-compatible clients">{(() => {
-                  const proto = window.location.protocol;
-                  const host = window.location.hostname;
-                  const currentPort = window.location.port;
-                  const devPorts = new Set(["5173", "5174", "5175", "3000"]);
-                  const port = !currentPort || devPorts.has(currentPort) ? "3100" : currentPort;
-                  return `${proto}//${host}:${port}/v1`;
-                })()}</code>
-              </div>
-              <div className="ovInfoItem">
-                <span className="ovInfoLabel">Anthropic SDK base URL</span>
-                <code className="ovInfoValue" title="Use this with Anthropic SDK / Claude Code / Cursor / Cline">{(() => {
-                  const proto = window.location.protocol;
-                  const host = window.location.hostname;
-                  const currentPort = window.location.port;
-                  const devPorts = new Set(["5173", "5174", "5175", "3000"]);
-                  const port = !currentPort || devPorts.has(currentPort) ? "3100" : currentPort;
-                  return `${proto}//${host}:${port}`;
-                })()}</code>
-              </div>
-              <div className="ovInfoItem">
                 <span className="ovInfoLabel">{t("ov.apiKeys")}</span>
                 <span className="ovInfoValue">{data.apiKeys.length} {t("ov.issued")}</span>
               </div>
@@ -1240,9 +1218,6 @@ function Overview({ data, api }: { data: DashboardData; api?: { get: <T>(path: s
               </div>
             </div>
           </article>
-
-          {/* Phase 27 — API Info panel: clickable endpoints + speed test */}
-          <ApiInfoPanel />
 
           {/* Phase 32 — Latency panel: top-10 slowest channels by p95 */}
           {api && <LatencyPanel api={api} />}
@@ -5063,6 +5038,7 @@ function EndpointPage(props: {
         settings={settings}
         onChange={setSettings}
       />
+      <ApiInfoPanel />
       <TokenSaverSection settings={settings} onUpdate={updateTokenSaver} />
       <ApiKeysSection
         keys={props.keys}
