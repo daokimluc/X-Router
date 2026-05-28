@@ -253,11 +253,6 @@ export class KiroProviderAdapter implements AIProviderAdapter {
 function resolveKiroModel(config: KiroProviderConfig, requestedModel: string): string {
   const configuredModel = config.defaultModel?.trim();
   const model = configuredModel && configuredModel !== "sonnet" ? configuredModel : requestedModel;
-
-  if (model === "sonnet" || model === "kiro-sonnet") {
-    return "claude-sonnet-4.5";
-  }
-
   return model;
 }
 

@@ -55,6 +55,7 @@ import { TokenSaverService } from "./services/TokenSaverService.js";
 import { RequestQueueService } from "./services/RequestQueueService.js";
 import { TeamService } from "./services/TeamService.js";
 import { AccountQuotaService } from "./services/AccountQuotaService.js";
+import { AutoRefreshService } from "./services/AutoRefreshService.js";
 import { RateLimitService } from "./services/RateLimitService.js";
 import { WebhookService } from "./services/WebhookService.js";
 import {
@@ -370,6 +371,13 @@ export async function buildApp(
   await registerDashboardPlugin(app);
 
   await registerErrorHandler(app);
+
+  // Start background auto-refresh service (proactively refreshes tokens before expiry)
+  if (config.nodeEnv !== "test") {
+    const autoRefresh = new AutoRefreshService();
+    autoRefresh.start(app);
+    app.addHook("onClose", () => autoRefresh.stop());
+  }
 
   return app;
 }

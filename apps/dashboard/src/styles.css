@@ -111,10 +111,10 @@ button {
 
 .sidebar {
   height: 100vh;
-  padding: 20px 14px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
   border-right: 1px solid var(--color-border);
   background: var(--color-surface);
   overflow-y: auto;
@@ -145,16 +145,16 @@ button {
 
 .brandBlock {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 4px 10px 16px;
+  padding: 2px 8px 12px;
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .appMark {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   color: #ffffff;
@@ -164,7 +164,7 @@ button {
 
 .brandBlock h1 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.15;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -178,20 +178,20 @@ button {
 
 .navList {
   display: grid;
-  gap: 14px;
+  gap: 6px;
   overflow: auto;
   padding: 0 2px 12px;
 }
 
 .navGroup {
   display: grid;
-  gap: 3px;
+  gap: 1px;
 }
 
 .navGroup p {
-  margin: 10px 10px 5px;
+  margin: 8px 10px 4px;
   color: var(--color-text-subtle);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -201,13 +201,13 @@ button {
   border: 0;
   color: var(--color-text-muted);
   background: transparent;
-  min-height: 38px;
+  min-height: 34px;
   display: grid;
-  grid-template-columns: 22px 1fr;
-  gap: 10px;
+  grid-template-columns: 20px 1fr;
+  gap: 8px;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: var(--radius);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
   text-align: left;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
@@ -218,7 +218,7 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
 }
 
@@ -252,23 +252,23 @@ button {
 .navSubList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 2px;
-  padding-left: 14px;
+  gap: 1px;
+  margin-top: 1px;
+  padding-left: 12px;
   border-left: 1px solid var(--color-border-subtle);
-  margin-left: 16px;
+  margin-left: 14px;
 }
 
 .navItem--child {
-  grid-template-columns: 20px 1fr;
-  min-height: 34px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 12.5px;
+  grid-template-columns: 18px 1fr;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .navItem--child span {
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .mainPanel {
@@ -1976,9 +1976,7 @@ td code {
   background: color-mix(in srgb, var(--color-border) 34%, transparent);
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
 }
 
 .providerModelCard span {
@@ -1987,9 +1985,6 @@ td code {
   color: var(--color-text-muted);
   font-size: 11px;
   font-style: italic;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .providerModelCard .iconButton.danger {

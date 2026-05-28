@@ -1762,6 +1762,7 @@ export async function registerAdminRoutes(
               lastRefreshedAt: secret.updatedAt?.toISOString() ?? null,
               credentialType: secret.credentialType,
             } : null,
+            quota: app.accountQuotaService ? app.accountQuotaService.getSnapshot(account.id) : null,
           };
         })
       };
@@ -2260,10 +2261,14 @@ export async function registerAdminRoutes(
         ? app.secretService.decryptSecretPayload(secret)
         : {};
 
+      // Resolve model mapping: publicModel → upstreamModel
+      const mapping = app.modelRegistry.get(body.model);
+      const upstreamModel = mapping?.upstreamModel ?? body.model;
+
       try {
         const response = await adapter.chatCompletions(
           {
-            model: body.model,
+            model: upstreamModel,
             messages: [
               {
                 role: "user",

@@ -366,7 +366,15 @@ function buildKiroPayload(request: KiroChatRequest, credential: KiroCredentialPa
     }
   };
 
-  payload.profileArn = resolveKiroProfileArn(credential);
+  // API Key credentials don't use profileArn — sending it causes auth rejection
+  const raw = credential as Record<string, unknown>;
+  const isApiKey =
+    (credential.authMethod as string) === "api_key" ||
+    !!raw.kiroApiKey ||
+    (typeof raw.apiKey === "string" && (raw.apiKey as string).startsWith("ksk_"));
+  if (!isApiKey) {
+    payload.profileArn = resolveKiroProfileArn(credential);
+  }
 
   payload.machineId = resolveKiroMachineId(credential);
 
@@ -626,7 +634,11 @@ function buildKiroHeaders(
   credential: KiroCredentialPayload,
   requestId: string
 ): Record<string, string> {
-  const isApiKey = (credential.authMethod as string) === "api_key" || !!(credential as Record<string, unknown>).kiroApiKey;
+  const raw = credential as Record<string, unknown>;
+  const isApiKey =
+    (credential.authMethod as string) === "api_key" ||
+    !!raw.kiroApiKey ||
+    (typeof raw.apiKey === "string" && (raw.apiKey as string).startsWith("ksk_"));
   const machineId = resolveKiroMachineId(credential);
   const agentMode = (credential.authMethod as string) === "idc" ? "vibe" : "spec";
 

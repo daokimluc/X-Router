@@ -1080,6 +1080,45 @@ const qoder: ProviderTypeDefinition = {
   defaultBaseUrl: "https://api.qoder.com",
 };
 
+const geminiCli: ProviderTypeDefinition = {
+  type: "gemini_cli",
+  displayName: "Gemini CLI",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["oauth"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://cloudcode-pa.googleapis.com" }, chatCompletionsPath: { type: "string", default: "/v1internal/chat/completions" }, modelsPath: { type: "string", default: "/v1internal/models" } } },
+  credentialSchema: { type: "object", properties: { accessToken: { type: "string" }, refreshToken: { type: "string" }, clientId: { type: "string" }, clientSecret: { type: "string" } } },
+  category: "oauth",
+  defaultBaseUrl: "https://cloudcode-pa.googleapis.com",
+};
+
+const grokWeb: ProviderTypeDefinition = {
+  type: "grok_web",
+  displayName: "Grok Web",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["custom_json"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://grok.com" }, chatCompletionsPath: { type: "string", default: "/rest/app-chat/conversations/new" } } },
+  credentialSchema: { type: "object", properties: { cookie: { type: "string" } }, required: ["cookie"] },
+  category: "custom",
+  defaultBaseUrl: "https://grok.com",
+};
+
+const perplexityWeb: ProviderTypeDefinition = {
+  type: "perplexity_web",
+  displayName: "Perplexity Web",
+  adapterName: "GenericOpenAIAdapter",
+  authMethods: ["custom_json"],
+  supportedProtocols: ["openai_chat_completions"],
+  capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
+  configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://www.perplexity.ai" }, chatCompletionsPath: { type: "string", default: "/rest/sse/perplexity_ask" } } },
+  credentialSchema: { type: "object", properties: { cookie: { type: "string" } }, required: ["cookie"] },
+  category: "custom",
+  defaultBaseUrl: "https://www.perplexity.ai",
+};
+
 // ============================================================================
 // Custom Provider
 // ============================================================================
@@ -1180,6 +1219,11 @@ export const providerCatalog: ProviderTypeDefinition[] = [
   qwen,
   iflow,
   qoder,
+  geminiCli,
+
+  // Cookie-based providers (user provides session cookie)
+  grokWeb,
+  perplexityWeb,
 
   // Custom
   customProvider,

@@ -5,6 +5,7 @@ import { CircuitBreakerOpenError } from "../services/CircuitBreaker.js";
 import { createAuthMiddleware } from "../middleware/auth.js";
 import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 import { ProviderError } from "../providers/base/ProviderErrors.js";
+import { compressToolOutput } from "../services/TokenSaverService.js";
 import type {
   NormalizedAnthropicResponse,
   NormalizedOpenAIResponse,
@@ -136,7 +137,9 @@ export async function registerAnthropicRoutes(
                 stream: body.stream,
                 temperature: body.temperature,
                 system: body.system,
-                messages: body.messages
+                messages: app.tokenSaverService.getSettings().compressToolOutput
+                  ? compressMessagesToolOutput(body.messages)
+                  : body.messages
               });
               const response = await adapter.chatCompletions(openAIRequest, {
                 providerInstance,
@@ -148,7 +151,7 @@ export async function registerAnthropicRoutes(
 
               if (isProviderStream(response)) {
                 try {
-                  await writeAnthropicStream({
+                  const streamResult = await writeAnthropicStream({
                     reply,
                     stream: response,
                     model: body.model,
@@ -156,6 +159,28 @@ export async function registerAnthropicRoutes(
                   });
                   lease.releaseSuccess();
                   app.circuitBreaker.recordSuccess(providerInstance.id);
+                  // Record usage for streaming (estimate tokens from chars)
+                  const inputChars = JSON.stringify(body.messages).length;
+                  const estimatedInputTokens = Math.ceil(inputChars * 0.42);
+                  const estimatedOutputTokens = Math.ceil(streamResult.outputChars * 0.4);
+                  app.usageService.record({
+                    requestId: request.id,
+                    protocol: "anthropic",
+                    model: body.model,
+                    providerType: candidate.providerType,
+                    providerInstanceId: candidate.providerInstanceId,
+                    accountId: lease.account.id,
+                    apiKeyHash: request.auth?.apiKeyHash,
+                    promptTokens: estimatedInputTokens,
+                    completionTokens: estimatedOutputTokens,
+                    totalTokens: estimatedInputTokens + estimatedOutputTokens,
+                    estimatedCost: app.modelPricingService.calculateCost(
+                      body.model,
+                      estimatedInputTokens,
+                      estimatedOutputTokens,
+                      0
+                    ).totalCost || undefined
+                  });
                 } catch (streamError) {
                   lease.releaseFailure(
                     streamError instanceof Error
@@ -438,7 +463,7 @@ async function writeAnthropicStream(options: {
   stream: ProviderStream;
   model: string;
   requestId: string;
-}): Promise<void> {
+}): Promise<{ outputChars: number }> {
   options.reply.raw.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
@@ -475,7 +500,9 @@ async function writeAnthropicStream(options: {
     })}\n\n`
   );
 
+  let outputChars = 0;
   for await (const text of options.stream) {
+    outputChars += text.length;
     options.reply.raw.write(
       `event: content_block_delta\ndata: ${JSON.stringify({
         type: "content_block_delta",
@@ -511,6 +538,7 @@ async function writeAnthropicStream(options: {
     })}\n\n`
   );
   options.reply.raw.end();
+  return { outputChars };
 }
 
 function isRetryableProviderError(error: unknown): boolean {
@@ -554,4 +582,22 @@ function handleProviderAccountState(
   if (error.code === "provider_account_suspended") {
     accountPool.disable(accountId, error.message);
   }
+}
+
+function compressMessagesToolOutput(
+  messages: Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }>
+): Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }> {
+  return messages.map((msg) => {
+    if (typeof msg.content === "string") return msg;
+    if (!Array.isArray(msg.content)) return msg;
+
+    const compressed = msg.content.map((block) => {
+      if (block.type === "tool_result" && typeof block.content === "string") {
+        return { ...block, content: compressToolOutput(block.content) };
+      }
+      return block;
+    });
+
+    return { ...msg, content: compressed };
+  });
 }

@@ -242,6 +242,13 @@ type Account = {
     lastRefreshedAt: string | null;
     credentialType: string;
   } | null;
+  quota?: {
+    requests: number;
+    tokens: number;
+    exhausted: boolean;
+    dailyRequestLimit: number;
+    dailyTokenLimit: number;
+  } | null;
 };
 
 type ModelMapping = {
@@ -1194,8 +1201,26 @@ function Overview({ data }: { data: DashboardData }) {
             </header>
             <div className="ovInfoGrid">
               <div className="ovInfoItem">
-                <span className="ovInfoLabel">{t("ov.endpoint")}</span>
-                <code className="ovInfoValue">{`${window.location.protocol}//${window.location.hostname}:${window.location.port || "3100"}/v1`}</code>
+                <span className="ovInfoLabel">OpenAI SDK base URL</span>
+                <code className="ovInfoValue" title="Use this with OpenAI SDK / OpenAI-compatible clients">{(() => {
+                  const proto = window.location.protocol;
+                  const host = window.location.hostname;
+                  const currentPort = window.location.port;
+                  const devPorts = new Set(["5173", "5174", "5175", "3000"]);
+                  const port = !currentPort || devPorts.has(currentPort) ? "3100" : currentPort;
+                  return `${proto}//${host}:${port}/v1`;
+                })()}</code>
+              </div>
+              <div className="ovInfoItem">
+                <span className="ovInfoLabel">Anthropic SDK base URL</span>
+                <code className="ovInfoValue" title="Use this with Anthropic SDK / Claude Code / Cursor / Cline">{(() => {
+                  const proto = window.location.protocol;
+                  const host = window.location.hostname;
+                  const currentPort = window.location.port;
+                  const devPorts = new Set(["5173", "5174", "5175", "3000"]);
+                  const port = !currentPort || devPorts.has(currentPort) ? "3100" : currentPort;
+                  return `${proto}//${host}:${port}`;
+                })()}</code>
               </div>
               <div className="ovInfoItem">
                 <span className="ovInfoLabel">{t("ov.apiKeys")}</span>
@@ -1303,6 +1328,8 @@ function ProvidersPageWithDetail(props: {
       accounts={props.accounts}
       providerInstances={props.instances}
       providerTypes={props.providerTypes}
+      api={props.api}
+      refresh={props.refresh}
       onSelectProvider={(type) => setSelectedType(type)}
     />
   );
@@ -2854,6 +2881,11 @@ function ProviderDetail(props: {
                       </span>
                     )}
                     {account.runtime.totalRequests > 0 && <span className="connectionReqCount">{account.runtime.totalRequests.toLocaleString()} reqs</span>}
+                    {account.quota && account.quota.dailyRequestLimit > 0 && (
+                      <span className="connectionReqCount" title={`${account.quota.requests}/${account.quota.dailyRequestLimit} daily requests`} style={account.quota.exhausted ? { color: "var(--color-danger)" } : undefined}>
+                        {account.quota.requests}/{account.quota.dailyRequestLimit}
+                      </span>
+                    )}
                   </span>
                   {/* MachineId + Proxy info */}
                   {(machineId || proxyPoolName) && (
