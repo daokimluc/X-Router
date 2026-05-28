@@ -2,7 +2,7 @@
  * Usage Page — modern analytics dashboard with topology, charts, and cost tracking.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Controls,
@@ -311,16 +311,16 @@ function GatewayNode({ data }: { data: { label: string } }) {
     <div
       style={{
         background: "linear-gradient(135deg, #eff6ff, #ffffff)",
-        border: "2.5px solid #0ea5e9",
-        borderRadius: "14px",
-        padding: "14px 26px",
-        fontSize: "15px",
+        border: "2px solid #0ea5e9",
+        borderRadius: "10px",
+        padding: "8px 18px",
+        fontSize: "13px",
         fontWeight: 700,
         color: "#0ea5e9",
-        boxShadow: "0 6px 20px rgba(14, 165, 233, 0.22)",
+        boxShadow: "0 4px 14px rgba(14, 165, 233, 0.18)",
         display: "flex",
         alignItems: "center",
-        gap: "10px",
+        gap: "8px",
         cursor: "grab",
         letterSpacing: "-0.01em",
       }}
@@ -341,17 +341,17 @@ function ProviderNodeComponent({ data }: { data: { label: string; color: string;
     <div
       style={{
         background: "var(--color-surface, #ffffff)",
-        border: `2px solid ${active ? color : "var(--color-border, #e5e7eb)"}`,
-        borderRadius: "10px",
-        padding: "10px 16px",
-        fontSize: "13px",
+        border: `1.5px solid ${active ? color : "var(--color-border, #e5e7eb)"}`,
+        borderRadius: "8px",
+        padding: "7px 12px",
+        fontSize: "12px",
         fontWeight: 600,
         color: active ? color : "var(--color-text-main, #1e293b)",
-        boxShadow: active ? `0 0 16px ${color}30` : "0 1px 4px rgba(0,0,0,0.04)",
+        boxShadow: active ? `0 0 12px ${color}25` : "0 1px 3px rgba(0,0,0,0.04)",
         display: "flex",
         alignItems: "center",
-        gap: "10px",
-        minWidth: "150px",
+        gap: "8px",
+        minWidth: "120px",
         cursor: "grab",
       }}
     >
@@ -361,10 +361,10 @@ function ProviderNodeComponent({ data }: { data: { label: string; color: string;
       <Handle type="target" position={Position.Right} id="right" style={{ background: "transparent", border: 0, width: 0, height: 0 }} />
       <div
         style={{
-          width: 28,
-          height: 28,
-          borderRadius: 7,
-          background: `${color}15`,
+          width: 22,
+          height: 22,
+          borderRadius: 5,
+          background: `${color}12`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -374,7 +374,7 @@ function ProviderNodeComponent({ data }: { data: { label: string; color: string;
         <img
           src={`/provider-logos/${providerId}.png`}
           alt={label}
-          style={{ width: 22, height: 22, borderRadius: 4, objectFit: "contain" }}
+          style={{ width: 16, height: 16, borderRadius: 3, objectFit: "contain" }}
           onError={(e) => {
             const img = e.currentTarget;
             img.style.display = "none";
@@ -382,7 +382,7 @@ function ProviderNodeComponent({ data }: { data: { label: string; color: string;
             if (parent && !parent.querySelector("span")) {
               const span = document.createElement("span");
               span.textContent = textIcon;
-              span.style.cssText = `font-size:11px;font-weight:800;color:${color}`;
+              span.style.cssText = `font-size:9px;font-weight:800;color:${color}`;
               parent.appendChild(span);
             }
           }}
@@ -494,11 +494,53 @@ function TopologyGraph(props: {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Sync when provider data changes
+  // Restore saved positions from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("topology-node-positions");
+      if (saved) {
+        const positions = JSON.parse(saved) as Record<string, { x: number; y: number }>;
+        setNodes((nds) =>
+          nds.map((n) => {
+            const pos = positions[n.id];
+            return pos ? { ...n, position: pos } : n;
+          })
+        );
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Sync when provider data changes (but preserve user positions)
   useMemo(() => {
-    setNodes(initialNodes);
+    setNodes((prev) => {
+      const prevPositions = new Map(prev.map((n) => [n.id, n.position]));
+      return initialNodes.map((n) => ({
+        ...n,
+        position: prevPositions.get(n.id) ?? n.position,
+      }));
+    });
     setEdges(initialEdges);
   }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  // Save positions on drag end
+  const handleNodesChange = useCallback(
+    (changes: Parameters<typeof onNodesChange>[0]) => {
+      onNodesChange(changes);
+      // Persist after position changes
+      const hasPosChange = changes.some((c) => c.type === "position" && (c as { dragging?: boolean }).dragging === false);
+      if (hasPosChange) {
+        setTimeout(() => {
+          setNodes((current) => {
+            const positions: Record<string, { x: number; y: number }> = {};
+            current.forEach((n) => { positions[n.id] = n.position; });
+            try { localStorage.setItem("topology-node-positions", JSON.stringify(positions)); } catch { /* ignore */ }
+            return current;
+          });
+        }, 0);
+      }
+    },
+    [onNodesChange, setNodes]
+  );
 
   if (initialNodes.length === 0) {
     return (
@@ -514,7 +556,7 @@ function TopologyGraph(props: {
         nodes={nodes}
         edges={edges}
         nodeTypes={topologyNodeTypes}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
         fitViewOptions={{ padding: 0.2, duration: 200 }}

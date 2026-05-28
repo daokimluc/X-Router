@@ -23,7 +23,8 @@ import type {
   SessionRefreshResult
 } from "../../base/types.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { fetchWithProxy } from "../../../proxy/fetchWithProxy.js";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -84,8 +85,15 @@ export class CodexAdapter implements AIProviderAdapter {
   ): Promise<NormalizedOpenAIResponse | ProviderStream> {
     const credential = (context.credentialPayload ?? {}) as CodexCredential;
 
+    // Phase 25 — apply maxInputTokens + systemPromptOverride on the OpenAI-shape
+    // request before converting to Codex format.
+    const policied = applyChannelInputPolicies(
+      request as unknown as Record<string, unknown>,
+      context.providerInstance
+    );
+
     // Transform OpenAI chat completions → Codex Responses API format
-    const codexBody = this.transformToCodexFormat(request);
+    const codexBody = this.transformToCodexFormat(policied as OpenAIChatCompletionRequest);
     const url = CODEX_BASE_URL;
 
     const headers: Record<string, string> = {
@@ -107,12 +115,17 @@ export class CodexAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
-      const response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: finalHeaders,
-        body: JSON.stringify(finalBody),
-        signal: abortController.signal
-      });
+      const response = await fetchWithProxy(
+        url,
+        {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(finalBody),
+          signal: abortController.signal
+        },
+        context.proxyOptions,
+        this.fetchImpl
+      );
 
       if (!response.ok) {
         throw await this.classifyHttpError(response, url, timeoutMs, context.providerInstance);

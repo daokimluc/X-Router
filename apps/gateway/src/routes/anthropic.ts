@@ -6,6 +6,7 @@ import { createAuthMiddleware } from "../middleware/auth.js";
 import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 import { ProviderError } from "../providers/base/ProviderErrors.js";
 import { compressToolOutput } from "../services/TokenSaverService.js";
+import { resolveAccountProxyOptions } from "../proxy/resolveAccountProxy.js";
 import type {
   NormalizedAnthropicResponse,
   NormalizedOpenAIResponse,
@@ -146,7 +147,8 @@ export async function registerAnthropicRoutes(
                 account: lease.account,
                 requestId: request.id,
                 credentialPayload,
-                reasoningEffort: route.reasoningEffort
+                reasoningEffort: route.reasoningEffort,
+                proxyOptions: resolveAccountProxyOptions(lease.account, app.proxyPoolService)
               });
 
               if (isProviderStream(response)) {
@@ -159,10 +161,19 @@ export async function registerAnthropicRoutes(
                   });
                   lease.releaseSuccess();
                   app.circuitBreaker.recordSuccess(providerInstance.id);
-                  // Record usage for streaming (estimate tokens from chars)
-                  const inputChars = JSON.stringify(body.messages).length;
-                  const estimatedInputTokens = Math.ceil(inputChars * 0.42);
-                  const estimatedOutputTokens = Math.ceil(streamResult.outputChars * 0.4);
+                  // Phase 31 — prefer real usage from stream when adapter emits it,
+                  // fall back to char-based estimation otherwise.
+                  const reported = response.usage?.();
+                  let promptTokens: number;
+                  let completionTokens: number;
+                  if (reported) {
+                    promptTokens = reported.prompt_tokens;
+                    completionTokens = reported.completion_tokens;
+                  } else {
+                    const inputChars = JSON.stringify(body.messages).length;
+                    promptTokens = Math.ceil(inputChars * 0.42);
+                    completionTokens = Math.ceil(streamResult.outputChars * 0.4);
+                  }
                   app.usageService.record({
                     requestId: request.id,
                     protocol: "anthropic",
@@ -171,16 +182,21 @@ export async function registerAnthropicRoutes(
                     providerInstanceId: candidate.providerInstanceId,
                     accountId: lease.account.id,
                     apiKeyHash: request.auth?.apiKeyHash,
-                    promptTokens: estimatedInputTokens,
-                    completionTokens: estimatedOutputTokens,
-                    totalTokens: estimatedInputTokens + estimatedOutputTokens,
+                    promptTokens,
+                    completionTokens,
+                    totalTokens: promptTokens + completionTokens,
+                    cachedTokens: reported?.cached_tokens || undefined,
                     estimatedCost: app.modelPricingService.calculateCost(
                       body.model,
-                      estimatedInputTokens,
-                      estimatedOutputTokens,
-                      0
+                      promptTokens,
+                      completionTokens,
+                      reported?.cached_tokens ?? 0
                     ).totalCost || undefined
                   });
+                  app.accountQuotaService.recordUsage(
+                    lease.account.id,
+                    promptTokens + completionTokens
+                  );
                 } catch (streamError) {
                   lease.releaseFailure(
                     streamError instanceof Error
@@ -235,6 +251,10 @@ export async function registerAnthropicRoutes(
                     response.usage.total_tokens
                   );
                 }
+                app.accountQuotaService.recordUsage(
+                  lease.account.id,
+                  response.usage.total_tokens
+                );
               }
               return toAnthropicResponse(response, body.model);
             } catch (error) {
@@ -242,6 +262,32 @@ export async function registerAnthropicRoutes(
                 lastError = error;
               }
               releaseProvider?.();
+
+              // Auto-refresh on auth error: try refreshSession before disabling
+              if (
+                lease &&
+                error instanceof ProviderError &&
+                error.code === "provider_auth_error" &&
+                adapter.refreshSession &&
+                attempt === 0 // only try refresh on first attempt
+              ) {
+                try {
+                  const secret = app.secretService.getSecretForAccount(lease.account.id);
+                  const cred = secret ? app.secretService.decryptSecretPayload(secret) : {};
+                  const refreshResult = await adapter.refreshSession(lease.account, {
+                    providerInstance,
+                    credentialPayload: cred
+                  });
+                  if (refreshResult.refreshed && refreshResult.credentialPayload && secret) {
+                    app.secretService.updateSecretPayload(secret.id, refreshResult.credentialPayload);
+                    request.log.info({ accountId: lease.account.id }, "session refreshed, will retry");
+                    lease.releaseFailure("auth_error_refreshed");
+                    continue; // retry with refreshed credential
+                  }
+                } catch (refreshErr) {
+                  request.log.warn({ accountId: lease.account.id, err: refreshErr }, "session refresh failed");
+                }
+              }
 
               if (lease) {
                 lease.releaseFailure(
@@ -353,7 +399,8 @@ async function handleDirectAnthropicRouting(
       providerInstance,
       account,
       requestId: request.id,
-      credentialPayload
+      credentialPayload,
+      proxyOptions: resolveAccountProxyOptions(account, app.proxyPoolService)
     });
 
     if (isProviderStream(response)) {
@@ -383,7 +430,8 @@ async function handleDirectAnthropicRouting(
     providerInstance,
     account,
     requestId: request.id,
-    credentialPayload
+    credentialPayload,
+    proxyOptions: resolveAccountProxyOptions(account, app.proxyPoolService)
   });
 
   if (isProviderStream(response)) {

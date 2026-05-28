@@ -23,7 +23,8 @@ import type {
   SessionRefreshResult
 } from "../../base/types.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { fetchWithProxy } from "../../../proxy/fetchWithProxy.js";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -101,8 +102,12 @@ export class GitHubCopilotAdapter implements AIProviderAdapter {
     const headers = this.buildHeaders(copilotToken, request.stream ?? false);
     const body = this.sanitizeRequest(request);
 
-    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+    const policied = applyChannelInputPolicies(
       body as unknown as Record<string, unknown>,
+      context.providerInstance
+    );
+    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      policied,
       headers,
       context.providerInstance
     );
@@ -112,12 +117,17 @@ export class GitHubCopilotAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
-      const response = await this.fetchImpl(COPILOT_CHAT_URL, {
-        method: "POST",
-        headers: finalHeaders,
-        body: JSON.stringify(finalBody),
-        signal: abortController.signal
-      });
+      const response = await fetchWithProxy(
+        COPILOT_CHAT_URL,
+        {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(finalBody),
+          signal: abortController.signal
+        },
+        context.proxyOptions,
+        this.fetchImpl
+      );
 
       if (!response.ok) {
         throw await this.classifyHttpError(response, COPILOT_CHAT_URL, timeoutMs, context.providerInstance);

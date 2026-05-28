@@ -56,6 +56,7 @@ import { RequestQueueService } from "./services/RequestQueueService.js";
 import { TeamService } from "./services/TeamService.js";
 import { AccountQuotaService } from "./services/AccountQuotaService.js";
 import { AutoRefreshService } from "./services/AutoRefreshService.js";
+import { CredentialWritebackService } from "./services/CredentialWritebackService.js";
 import { RateLimitService } from "./services/RateLimitService.js";
 import { WebhookService } from "./services/WebhookService.js";
 import {
@@ -114,6 +115,7 @@ declare module "fastify" {
     modelPricingService: ModelPricingService;
     mediaRouter: MediaRouter;
     accountQuotaService: AccountQuotaService;
+    credentialWritebackService: CredentialWritebackService;
   }
 }
 
@@ -161,7 +163,11 @@ export async function buildApp(
   const persistedState = persistenceEnabled ? await persistenceService.load() : null;
 
   const providerRegistry =
-    dependencies.providerRegistry ?? createDefaultProviderRegistry();
+    dependencies.providerRegistry ??
+    createDefaultProviderRegistry({
+      onCredentialRefreshed: (accountId, payload) =>
+        app.credentialWritebackService.persist(accountId, payload),
+    });
   const modelRegistry =
     dependencies.modelRegistry ??
     (persistedState
@@ -316,6 +322,7 @@ export async function buildApp(
   app.decorate("modelPricingService", modelPricingService);
   app.decorate("mediaRouter", mediaRouter);
   app.decorate("accountQuotaService", new AccountQuotaService());
+  app.decorate("credentialWritebackService", new CredentialWritebackService(secretService));
 
   app.addHook("onSend", async (request, reply, payload) => {
     if (

@@ -290,7 +290,10 @@ export function ChannelWizardModal({ api, providerTypes, onClose, onSuccess }: P
                   style={{ fontFamily: "monospace", fontSize: 12, borderColor: mappingParse.ok ? undefined : "#ef4444" }}
                 />
                 {!mappingParse.ok && <small style={{ color: "#ef4444", fontSize: 11 }}>Invalid JSON: {mappingParse.error}</small>}
-                <small className="formHint">Optional. When set, the channel rewrites public model names to upstream names before forwarding.</small>
+                <small className="formHint">
+                  Optional. Gateway auto-converts model names to each provider's expected format (Kiro uses dots, Anthropic accepts dash, etc.).
+                  Use this only when you need explicit override (e.g. Azure deployment name, custom upstream variant).
+                </small>
               </label>
             </>
           )}

@@ -227,42 +227,63 @@ export class KiroClient {
   }
 }
 
-async function* kiroEventStream(
+function kiroEventStream(
   stream: ReadableStream<Uint8Array>,
   onDone: () => void
 ): ProviderStream {
-  const reader = stream.getReader();
-  let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
+  let captured: { inputTokens: number; outputTokens: number } | null = null;
 
-  try {
-    while (true) {
-      const result = await reader.read();
+  async function* iter(): AsyncGenerator<string> {
+    const reader = stream.getReader();
+    let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
-      if (result.done) {
-        break;
-      }
+    try {
+      while (true) {
+        const result = await reader.read();
 
-      buffer = appendBytes(buffer, result.value);
-
-      for (const event of readCompleteEvents(buffer)) {
-        buffer = event.remaining;
-        const frame = parseEventFrame(event.frame);
-        if (!frame) {
-          continue;
+        if (result.done) {
+          break;
         }
 
-        const eventType = frame.headers[":event-type"] ?? "";
-        const content = getKiroEventContent(eventType, frame.payload);
+        buffer = appendBytes(buffer, result.value);
 
-        if (content) {
-          yield content;
+        for (const event of readCompleteEvents(buffer)) {
+          buffer = event.remaining;
+          const frame = parseEventFrame(event.frame);
+          if (!frame) {
+            continue;
+          }
+
+          const eventType = frame.headers[":event-type"] ?? "";
+          const content = getKiroEventContent(eventType, frame.payload);
+
+          const eventUsage = extractKiroUsage(eventType, frame.payload);
+          if (eventUsage) {
+            captured = eventUsage;
+          }
+
+          if (content) {
+            yield content;
+          }
         }
       }
+    } finally {
+      onDone();
+      reader.releaseLock();
     }
-  } finally {
-    onDone();
-    reader.releaseLock();
   }
+
+  return {
+    [Symbol.asyncIterator]: () => iter(),
+    usage: () => {
+      if (!captured) return undefined;
+      return {
+        prompt_tokens: captured.inputTokens,
+        completion_tokens: captured.outputTokens,
+        total_tokens: captured.inputTokens + captured.outputTokens
+      };
+    }
+  };
 }
 
 async function* plainTextStream(

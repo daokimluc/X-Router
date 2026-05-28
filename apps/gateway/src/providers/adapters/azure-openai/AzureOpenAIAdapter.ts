@@ -20,6 +20,7 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { fetchWithProxy } from "../../../proxy/fetchWithProxy.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 export type AzureOpenAIConfig = {
@@ -109,12 +110,17 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         context.providerInstance
       );
 
-      const response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: finalHeaders,
-        body: JSON.stringify(finalBody),
-        signal: abortController.signal
-      });
+      const response = await fetchWithProxy(
+        url,
+        {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(finalBody),
+          signal: abortController.signal
+        },
+        context.proxyOptions,
+        this.fetchImpl
+      );
 
       if (!response.ok) {
         throw await this.classifyHttpError(response, config, context.providerInstance);

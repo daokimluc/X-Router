@@ -22,7 +22,8 @@ import type {
   ProviderStream
 } from "../../base/types.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { fetchWithProxy } from "../../../proxy/fetchWithProxy.js";
 
 // --- Types ---
 
@@ -194,7 +195,14 @@ export class VertexAIAdapter implements AIProviderAdapter {
       url += "?alt=sse";
     }
 
-    const geminiRequest = this.transformToGemini(request);
+    // Phase 25 — apply input policies on the OpenAI request before transforming
+    // to Gemini shape (system prompt + token limit).
+    const policiedRequest = applyChannelInputPolicies(
+      request as unknown as Record<string, unknown>,
+      context.providerInstance
+    ) as unknown as OpenAIChatCompletionRequest;
+
+    const geminiRequest = this.transformToGemini(policiedRequest);
     const baseHeaders: Record<string, string> = {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json"
@@ -210,12 +218,17 @@ export class VertexAIAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
-      const response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: finalHeaders,
-        body: JSON.stringify(finalBody),
-        signal: abortController.signal
-      });
+      const response = await fetchWithProxy(
+        url,
+        {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(finalBody),
+          signal: abortController.signal
+        },
+        context.proxyOptions,
+        this.fetchImpl
+      );
 
       if (!response.ok) {
         throw await this.classifyHttpError(response, url, timeoutMs, context.providerInstance);

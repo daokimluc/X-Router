@@ -16,13 +16,18 @@ export async function registerPublicRoutes(app: FastifyInstance): Promise<void> 
   });
 
   app.get("/v1/public/models", async () => {
-    return {
-      object: "list",
-      data: app.modelRegistry.listPublicModels().map((mapping) => ({
+    // Phase 31 — multiple channels can serve the same publicModel; dedupe.
+    const seen = new Set<string>();
+    const data: Array<{ id: string; object: string; owned_by: string }> = [];
+    for (const mapping of app.modelRegistry.listPublicModels()) {
+      if (seen.has(mapping.publicModel)) continue;
+      seen.add(mapping.publicModel);
+      data.push({
         id: mapping.publicModel,
         object: "model",
         owned_by: "internal-ai-gateway",
-      })),
-    };
+      });
+    }
+    return { object: "list", data };
   });
 }

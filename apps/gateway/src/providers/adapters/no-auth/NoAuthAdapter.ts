@@ -7,7 +7,8 @@ import {
   ProviderUnavailableError,
   UnsupportedCapabilityError
 } from "../../base/ProviderErrors.js";
-import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { fetchWithProxy } from "../../../proxy/fetchWithProxy.js";
 import type {
   AnthropicMessagesRequest,
   NormalizedAnthropicResponse,
@@ -121,8 +122,12 @@ export class NoAuthAdapter implements AIProviderAdapter {
     const url = `${baseUrl}/v1/chat/completions`;
 
     const baseHeaders = this.buildHeaders({ "content-type": "application/json" });
-    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+    const policied = applyChannelInputPolicies(
       request as unknown as Record<string, unknown>,
+      context.providerInstance
+    );
+    const { body: finalBody, headers: finalHeaders } = applyChannelOverrides(
+      policied,
       baseHeaders,
       context.providerInstance
     );
@@ -131,12 +136,16 @@ export class NoAuthAdapter implements AIProviderAdapter {
     const timeout = setTimeout(() => controller.abort(), this.defaultTimeoutMs);
 
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: finalHeaders,
-        body: JSON.stringify(finalBody),
-        signal: controller.signal
-      });
+      const response = await fetchWithProxy(
+        url,
+        {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(finalBody),
+          signal: controller.signal
+        },
+        context.proxyOptions
+      );
 
       if (!response.ok) {
         const action = interpretStatusCode(context.providerInstance, response.status);

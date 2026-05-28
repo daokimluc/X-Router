@@ -1,5 +1,6 @@
 import type { ProviderAccount } from "./ProviderAccount.js";
 import type { ProviderInstance } from "./ProviderInstance.js";
+import type { ProxyFetchOptions } from "../../proxy/types.js";
 
 import type { ReasoningEffort } from "../../router/ModelResolver.js";
 
@@ -21,6 +22,8 @@ export type ProviderRequestContext = ProviderContext & {
   credentialPayload?: Record<string, unknown>;
   /** Reasoning effort level extracted from model name suffix */
   reasoningEffort?: ReasoningEffort;
+  /** Per-account proxy resolved by route (Phase 24+ feature). */
+  proxyOptions?: ProxyFetchOptions;
 };
 
 export type OpenAIChatMessage = {
@@ -89,7 +92,22 @@ export type NormalizedAnthropicResponse = {
   };
 };
 
-export type ProviderStream = AsyncIterable<string>;
+export type StreamUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cached_tokens?: number;
+};
+
+/**
+ * AsyncIterable<string> for streaming text deltas. Optionally exposes a
+ * `usage` getter that returns provider-reported token counts AFTER the stream
+ * has been fully consumed. Adapters that emit a usage event populate this;
+ * routes prefer it over char-based estimation.
+ */
+export type ProviderStream = AsyncIterable<string> & {
+  usage?: () => StreamUsage | undefined;
+};
 
 export type ProviderHealth = {
   status: "ok" | "degraded" | "down";

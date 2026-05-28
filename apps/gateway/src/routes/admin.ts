@@ -1711,7 +1711,8 @@ export async function registerAdminRoutes(
           });
           createdMappingIds.push(mappingId);
         } catch {
-          // skip duplicates silently
+          // Phase 31 — multiple channels can serve the same publicModel.
+          // Only skip if the mapping ID already exists (same channel + model).
         }
       }
 
@@ -2262,7 +2263,14 @@ export async function registerAdminRoutes(
         : {};
 
       // Resolve model mapping: publicModel → upstreamModel
-      const mapping = app.modelRegistry.get(body.model);
+      // Phase 31 — multiple channels may serve the same publicModel; pick the one
+      // belonging to THIS instance so upstreamModel formatting matches.
+      const mapping =
+        app.modelRegistry
+          .listModelMappings()
+          .find(
+            (m) => m.providerInstanceId === providerInstance.id && m.publicModel === body.model
+          ) ?? app.modelRegistry.get(body.model);
       const upstreamModel = mapping?.upstreamModel ?? body.model;
 
       try {

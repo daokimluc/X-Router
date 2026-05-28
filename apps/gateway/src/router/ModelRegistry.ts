@@ -11,8 +11,16 @@ export type ModelMapping = {
   capabilities: ProviderCapabilityFlag[];
 };
 
+/**
+ * Phase 31 — multi-channel routing.
+ *
+ * A single `publicModel` may be served by multiple ModelMappings (one per
+ * channel/provider). The registry stores them as an array per public name and
+ * returns all matches; the resolver decides ordering (priority + group).
+ */
 export class ModelRegistry {
-  private readonly mappings = new Map<string, ModelMapping>();
+  /** publicModel → list of mappings (Phase 31: multiple channels can serve the same model). */
+  private readonly mappings = new Map<string, ModelMapping[]>();
   private readonly aliases = new Map<string, string>(); // alias → publicModel
   private readonly patternMappings: Array<{ pattern: RegExp; mapping: ModelMapping }> = [];
 
@@ -31,13 +39,15 @@ export class ModelRegistry {
       return;
     }
 
-    if (this.mappings.has(mapping.publicModel)) {
+    const existing = this.mappings.get(mapping.publicModel) ?? [];
+    // Prevent duplicate by id only (allow same publicModel from different channels)
+    if (existing.some((m) => m.id === mapping.id)) {
       throw new ProviderConfigError(
-        `Model mapping already registered for ${mapping.publicModel}`
+        `Model mapping with id "${mapping.id}" already registered`
       );
     }
-
-    this.mappings.set(mapping.publicModel, structuredClone(mapping));
+    existing.push(structuredClone(mapping));
+    this.mappings.set(mapping.publicModel, existing);
   }
 
   /** Add an alias that resolves to an existing publicModel */
@@ -53,41 +63,60 @@ export class ModelRegistry {
     return Array.from(this.aliases.entries()).map(([alias, target]) => ({ alias, target }));
   }
 
+  /**
+   * Backward-compat: returns the FIRST mapping for a publicModel.
+   * For multi-channel routing, use {@link getAll}.
+   */
   get(publicModel: string): ModelMapping | undefined {
-    // 1. Exact match
+    const all = this.getAll(publicModel);
+    return all[0];
+  }
+
+  /**
+   * Phase 31 — return ALL mappings (across channels) that serve a given publicModel.
+   * Resolves aliases and patterns. Returned array is empty if nothing matches.
+   */
+  getAll(publicModel: string): ModelMapping[] {
+    // 1. Exact match — possibly multiple
     const exact = this.mappings.get(publicModel);
-    if (exact) return structuredClone(exact);
+    if (exact && exact.length > 0) {
+      return exact.map((m) => structuredClone(m));
+    }
 
     // 2. Alias resolution
     const aliasTarget = this.aliases.get(publicModel);
     if (aliasTarget) {
       const aliased = this.mappings.get(aliasTarget);
-      if (aliased) return structuredClone(aliased);
-    }
-
-    // 3. Pattern (wildcard) match — first match wins
-    for (const { pattern, mapping } of this.patternMappings) {
-      if (pattern.test(publicModel)) {
-        return {
-          ...structuredClone(mapping),
-          publicModel
-        };
+      if (aliased && aliased.length > 0) {
+        return aliased.map((m) => structuredClone(m));
       }
     }
 
-    return undefined;
+    // 3. Pattern (wildcard) match — first matching pattern wins
+    for (const { pattern, mapping } of this.patternMappings) {
+      if (pattern.test(publicModel)) {
+        return [{ ...structuredClone(mapping), publicModel }];
+      }
+    }
+
+    return [];
   }
 
   listPublicModels(): ModelMapping[] {
-    return Array.from(this.mappings.values())
-      .filter((mapping) => mapping.enabled)
-      .map((mapping) => structuredClone(mapping));
+    const out: ModelMapping[] = [];
+    for (const list of this.mappings.values()) {
+      for (const mapping of list) {
+        if (mapping.enabled) out.push(structuredClone(mapping));
+      }
+    }
+    return out;
   }
 
   listModelMappings(): ModelMapping[] {
-    const exact = Array.from(this.mappings.values()).map((mapping) =>
-      structuredClone(mapping)
-    );
+    const exact: ModelMapping[] = [];
+    for (const list of this.mappings.values()) {
+      for (const mapping of list) exact.push(structuredClone(mapping));
+    }
     const patterns = this.patternMappings.map(({ mapping }) =>
       structuredClone(mapping)
     );
@@ -98,19 +127,19 @@ export class ModelRegistry {
     id: string,
     patch: Partial<Omit<ModelMapping, "id" | "publicModel">>
   ): ModelMapping {
-    const current = Array.from(this.mappings.values()).find(
-      (mapping) => mapping.id === id
-    );
-
-    if (current) {
-      const updated: ModelMapping = {
-        ...current,
-        ...patch,
-        id: current.id,
-        publicModel: current.publicModel
-      };
-      this.mappings.set(current.publicModel, structuredClone(updated));
-      return structuredClone(updated);
+    for (const list of this.mappings.values()) {
+      const idx = list.findIndex((m) => m.id === id);
+      if (idx >= 0) {
+        const current = list[idx];
+        const updated: ModelMapping = {
+          ...current,
+          ...patch,
+          id: current.id,
+          publicModel: current.publicModel
+        };
+        list[idx] = structuredClone(updated);
+        return structuredClone(updated);
+      }
     }
 
     const patternEntry = this.patternMappings.find(
@@ -131,13 +160,13 @@ export class ModelRegistry {
   }
 
   deleteById(id: string): ModelMapping {
-    const current = Array.from(this.mappings.values()).find(
-      (mapping) => mapping.id === id
-    );
-
-    if (current) {
-      this.mappings.delete(current.publicModel);
-      return structuredClone(current);
+    for (const [publicModel, list] of this.mappings.entries()) {
+      const idx = list.findIndex((m) => m.id === id);
+      if (idx >= 0) {
+        const removed = list.splice(idx, 1)[0];
+        if (list.length === 0) this.mappings.delete(publicModel);
+        return structuredClone(removed);
+      }
     }
 
     const patternIdx = this.patternMappings.findIndex(

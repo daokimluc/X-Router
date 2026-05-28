@@ -23,7 +23,11 @@ const ENDPOINTS: EndpointSpec[] = [
 function getBaseUrl(): string {
   const proto = window.location.protocol;
   const host = window.location.hostname;
-  const port = window.location.port || "3100";
+  // If we're on a typical dev server port (5173, 5174, 3000), the gateway is
+  // proxied to localhost:3100. Show the real gateway port instead of the dev port.
+  const currentPort = window.location.port;
+  const devPorts = new Set(["5173", "5174", "5175", "3000"]);
+  const port = !currentPort || devPorts.has(currentPort) ? "3100" : currentPort;
   return `${proto}//${host}:${port}`;
 }
 

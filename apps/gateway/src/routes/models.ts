@@ -25,11 +25,18 @@ export async function registerModelsRoute(
       ]
     },
     async () => {
-      const fixedModels = app.modelRegistry.listPublicModels().map((mapping) => ({
-        id: mapping.publicModel,
-        object: "model",
-        owned_by: "internal-ai-gateway"
-      }));
+      // Phase 31 — multiple channels can serve the same publicModel; dedupe.
+      const seen = new Set<string>();
+      const fixedModels: Array<{ id: string; object: string; owned_by: string }> = [];
+      for (const mapping of app.modelRegistry.listPublicModels()) {
+        if (seen.has(mapping.publicModel)) continue;
+        seen.add(mapping.publicModel);
+        fixedModels.push({
+          id: mapping.publicModel,
+          object: "model",
+          owned_by: "internal-ai-gateway"
+        });
+      }
       const routingProfiles = app.routingProfileRegistry
         .listPublicProfiles()
         .map((profile) => ({

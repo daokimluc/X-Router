@@ -20,6 +20,7 @@ import type {
 } from "../../base/types.js";
 import { ModelCache } from "../../services/ModelCache.js";
 import { applyChannelOverrides, applyChannelInputPolicies, interpretStatusCode } from "../../../utils/channelOverride.js";
+import { fetchWithProxy } from "../../../proxy/fetchWithProxy.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -157,12 +158,17 @@ export class AnthropicMessagesAdapter implements AIProviderAdapter {
         context.providerInstance
       );
 
-      const response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: finalHeaders,
-        body: JSON.stringify(finalBody),
-        signal: abortController.signal
-      });
+      const response = await fetchWithProxy(
+        url,
+        {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(finalBody),
+          signal: abortController.signal
+        },
+        context.proxyOptions,
+        this.fetchImpl
+      );
 
       if (!response.ok) {
         throw await this.classifyHttpError(response, baseUrl, timeoutMs, context.providerInstance);

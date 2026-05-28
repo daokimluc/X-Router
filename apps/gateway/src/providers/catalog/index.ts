@@ -1089,7 +1089,7 @@ const geminiCli: ProviderTypeDefinition = {
   capabilities: { protocols: ["openai_chat_completions"], flags: ["chat", "streaming"] },
   configSchema: { type: "object", properties: { baseUrl: { type: "string", default: "https://cloudcode-pa.googleapis.com" }, chatCompletionsPath: { type: "string", default: "/v1internal/chat/completions" }, modelsPath: { type: "string", default: "/v1internal/models" } } },
   credentialSchema: { type: "object", properties: { accessToken: { type: "string" }, refreshToken: { type: "string" }, clientId: { type: "string" }, clientSecret: { type: "string" } } },
-  category: "oauth",
+  category: "oauth_subscription",
   defaultBaseUrl: "https://cloudcode-pa.googleapis.com",
 };
 

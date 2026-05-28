@@ -8,6 +8,7 @@ import { ProviderError } from "../providers/base/ProviderErrors.js";
 import { isProviderStream, writeOpenAIStream } from "../utils/sse.js";
 import { openAIChatCompletionRequestSchema } from "../validation/openaiSchemas.js";
 import type { ProviderProtocol } from "../providers/base/ProviderCapabilities.js";
+import { resolveAccountProxyOptions } from "../proxy/resolveAccountProxy.js";
 
 export async function registerOpenAIRoutes(
   app: FastifyInstance,
@@ -153,7 +154,8 @@ export async function registerOpenAIRoutes(
                 account: lease.account,
                 requestId: request.id,
                 credentialPayload,
-                reasoningEffort: route.reasoningEffort
+                reasoningEffort: route.reasoningEffort,
+                proxyOptions: resolveAccountProxyOptions(lease.account, app.proxyPoolService)
               }
             );
 
@@ -167,13 +169,22 @@ export async function registerOpenAIRoutes(
                 });
                 lease.releaseSuccess();
                 app.circuitBreaker.recordSuccess(providerInstance.id);
-                // Estimate tokens for streaming: input from messages, output from streamed chars
-                const inputChars = processedBody.messages.reduce((sum, m) => {
-                  const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
-                  return sum + content.length;
-                }, 0);
-                const promptTokens = Math.ceil(inputChars / 4);
-                const completionTokens = Math.ceil(outputChars / 4);
+                // Phase 31 — prefer real usage from stream when adapter emits it,
+                // fall back to char-based estimation otherwise.
+                const reported = response.usage?.();
+                let promptTokens: number;
+                let completionTokens: number;
+                if (reported) {
+                  promptTokens = reported.prompt_tokens;
+                  completionTokens = reported.completion_tokens;
+                } else {
+                  const inputChars = processedBody.messages.reduce((sum, m) => {
+                    const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+                    return sum + content.length;
+                  }, 0);
+                  promptTokens = Math.ceil(inputChars / 4);
+                  completionTokens = Math.ceil(outputChars / 4);
+                }
                 const cost = app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens);
                 app.usageService.record({
                   requestId: request.id,
@@ -198,6 +209,10 @@ export async function registerOpenAIRoutes(
                     promptTokens + completionTokens
                   );
                 }
+                app.accountQuotaService.recordUsage(
+                  lease.account.id,
+                  promptTokens + completionTokens
+                );
               } catch (streamError) {
                 lease.releaseFailure(
                   streamError instanceof Error ? streamError.message : "stream failed"
@@ -269,6 +284,10 @@ export async function registerOpenAIRoutes(
                 promptTokens + completionTokens
               );
             }
+            app.accountQuotaService.recordUsage(
+              lease.account.id,
+              promptTokens + completionTokens
+            );
             return {
               ...response,
               model: body.model

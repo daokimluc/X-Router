@@ -4170,12 +4170,31 @@ function ModelRegistry(props: {
         <div className="modelTileGrid">
           {visibleModels.map((model) => {
             const provider = props.instances.find((instance) => instance.id === model.providerInstanceId);
+            // Phase 31 — count siblings serving the same publicModel.
+            const siblingCount = props.models.filter(
+              (m) => m.publicModel === model.publicModel && m.id !== model.id
+            ).length;
             return (
               <article className={model.enabled ? "modelTile" : "modelTile disabled"} key={model.id}>
                 <div className="modelTileIcon"><Bot size={18} /></div>
                 <div className="modelTileBody">
                   <div className="modelNameRow">
                     <code>{model.publicModel}</code>
+                    {siblingCount > 0 && (
+                      <span
+                        title={`Also served by ${siblingCount} other channel(s) — gateway will failover automatically`}
+                        style={{
+                          fontSize: 10,
+                          padding: "1px 6px",
+                          borderRadius: 10,
+                          background: "rgba(59,130,246,0.15)",
+                          color: "#60a5fa",
+                          marginLeft: 6
+                        }}
+                      >
+                        +{siblingCount} more
+                      </span>
+                    )}
                     <button className="iconButton compact" title="Copy public model" type="button" onClick={() => void navigator.clipboard.writeText(model.publicModel)}>
                       <Clipboard size={15} />
                     </button>

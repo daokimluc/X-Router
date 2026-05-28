@@ -102,7 +102,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
         },
         requestId: context.requestId,
         timeoutMs: context.providerInstance.defaultTimeoutMs,
-        instance: context.providerInstance
+        instance: context.providerInstance,
+        proxyOptions: context.proxyOptions
       });
     }
 
@@ -123,7 +124,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
       },
       requestId: context.requestId,
       timeoutMs: context.providerInstance.defaultTimeoutMs,
-      instance: context.providerInstance
+      instance: context.providerInstance,
+      proxyOptions: context.proxyOptions
     });
 
     return normalizeKiroOpenAIResponse(upstreamResponse, request.model);
@@ -154,7 +156,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
         },
         requestId: context.requestId,
         timeoutMs: context.providerInstance.defaultTimeoutMs,
-        instance: context.providerInstance
+        instance: context.providerInstance,
+        proxyOptions: context.proxyOptions
       });
       return stream;
     }
@@ -170,7 +173,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
       },
       requestId: context.requestId,
       timeoutMs: context.providerInstance.defaultTimeoutMs,
-      instance: context.providerInstance
+      instance: context.providerInstance,
+      proxyOptions: context.proxyOptions
     });
 
     return normalizeKiroAnthropicResponse(response, request.model);

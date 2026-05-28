@@ -41,12 +41,26 @@ function createAdapterMap(): Map<string, AIProviderAdapter> {
   ]);
 }
 
-export function createDefaultProviderRegistry(): ProviderAdapterRegistry {
+export type DefaultRegistryOptions = {
+  /**
+   * Called when an adapter refreshes a credential inline (outside of refreshSession).
+   * Routes can use this to persist the updated payload back to SecretService so
+   * subsequent requests reuse the new token.
+   */
+  onCredentialRefreshed?: (accountId: string, payload: Record<string, unknown>) => void;
+};
+
+export function createDefaultProviderRegistry(
+  options: DefaultRegistryOptions = {}
+): ProviderAdapterRegistry {
   const registry = new ProviderAdapterRegistry();
 
   // Register legacy adapters (backward compatible — these remain unchanged)
   registry.register(mockProviderDefinition, new MockProviderAdapter());
-  registry.register(kiroProviderDefinition, new KiroProviderAdapter());
+  registry.register(
+    kiroProviderDefinition,
+    new KiroProviderAdapter(undefined, undefined, options.onCredentialRefreshed)
+  );
   registry.register(windsurfProviderDefinition, new WindsurfProviderAdapter());
 
   // Auto-register all catalog definitions with their corresponding adapters
