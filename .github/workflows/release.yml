@@ -1,0 +1,229 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            label: linux-x64
+            artifact: ai-gateway-linux-x64
+          - os: macos-latest
+            target: bun-darwin-x64
+            label: macos-x64
+            artifact: ai-gateway-macos-x64
+          - os: macos-latest
+            target: bun-darwin-arm64
+            label: macos-arm64
+            artifact: ai-gateway-macos-arm64
+          - os: windows-latest
+            target: bun-windows-x64
+            label: windows-x64
+            artifact: ai-gateway-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install root dependencies
+        run: bun install --no-frozen-lockfile
+
+      - name: Install dashboard dependencies
+        working-directory: apps/dashboard
+        run: bun install --no-frozen-lockfile
+
+      - name: Install gateway dependencies
+        working-directory: apps/gateway
+        run: bun install --no-frozen-lockfile
+
+      - name: Build dashboard (production assets)
+        run: bun run build:dashboard
+
+      - name: Compile binary with Bun
+        shell: bash
+        run: |
+          mkdir -p release
+          BIN_NAME="ai-gateway"
+          if [ "${{ matrix.label }}" = "windows-x64" ]; then
+            BIN_NAME="ai-gateway.exe"
+          fi
+          bun build scripts/bun-entry.ts \
+            --compile \
+            --target=${{ matrix.target }} \
+            --outfile=release/$BIN_NAME
+
+      - name: Stage release bundle
+        shell: bash
+        run: |
+          STAGE="release/${{ matrix.artifact }}-${{ steps.ver.outputs.version }}"
+          mkdir -p "$STAGE"
+          if [ "${{ matrix.label }}" = "windows-x64" ]; then
+            mv release/ai-gateway.exe "$STAGE/"
+          else
+            mv release/ai-gateway "$STAGE/"
+            chmod +x "$STAGE/ai-gateway"
+          fi
+          cp -r dashboard-dist "$STAGE/"
+          cp README.md "$STAGE/" 2>/dev/null || true
+          cat > "$STAGE/RUN.md" <<'EOF'
+          # AI Gateway — Quick start
+
+          ## 1. Set required environment variables
+
+          Linux / macOS:
+          ```bash
+          export INTERNAL_API_KEYS="my-key-1,my-key-2"
+          export ADMIN_API_KEYS="my-admin-key"
+          ```
+
+          Windows (PowerShell):
+          ```powershell
+          $env:INTERNAL_API_KEYS = "my-key-1,my-key-2"
+          $env:ADMIN_API_KEYS    = "my-admin-key"
+          ```
+
+          ## 2. Run
+
+          Linux / macOS:
+          ```bash
+          ./ai-gateway --port 3100
+          ```
+
+          Windows:
+          ```powershell
+          .\ai-gateway.exe --port 3100
+          ```
+
+          ## 3. Open dashboard
+
+          http://localhost:3100/
+
+          Use any of your `ADMIN_API_KEYS` to log in.
+          EOF
+          ls -la "$STAGE/"
+
+      - name: Create archive
+        shell: bash
+        run: |
+          STAGE="${{ matrix.artifact }}-${{ steps.ver.outputs.version }}"
+          cd release
+          if [ "${{ matrix.label }}" = "windows-x64" ]; then
+            7z a -tzip "${STAGE}.zip" "$STAGE/"
+          else
+            tar -czf "${STAGE}.tar.gz" "$STAGE/"
+          fi
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ steps.ver.outputs.version }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release/
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd release
+          ls -la
+          sha256sum *.zip *.tar.gz > checksums.txt 2>/dev/null || true
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          files: |
+            release/*.zip
+            release/*.tar.gz
+            release/checksums.txt
+          body: |
+            ## AI Gateway ${{ steps.ver.outputs.version }}
+
+            Single-file binary built with Bun. Each archive contains:
+            - The `ai-gateway` (or `.exe`) binary
+            - `dashboard-dist/` static assets the binary serves
+            - `RUN.md` quick-start guide
+
+            ### Downloads
+
+            | Platform | File |
+            |---|---|
+            | Windows x64 | `ai-gateway-windows-x64-${{ steps.ver.outputs.version }}.zip` |
+            | macOS Apple Silicon | `ai-gateway-macos-arm64-${{ steps.ver.outputs.version }}.tar.gz` |
+            | macOS Intel | `ai-gateway-macos-x64-${{ steps.ver.outputs.version }}.tar.gz` |
+            | Linux x64 | `ai-gateway-linux-x64-${{ steps.ver.outputs.version }}.tar.gz` |
+
+            ### Quick start
+
+            ```bash
+            export INTERNAL_API_KEYS="your-key-1,your-key-2"
+            export ADMIN_API_KEYS="your-admin-key"
+            ./ai-gateway --port 3100
+            ```
+
+            Open `http://localhost:3100/` for the admin dashboard.
+
+            ### Verify integrity
+
+            ```bash
+            sha256sum -c checksums.txt
+            ```
