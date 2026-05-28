@@ -1229,9 +1229,6 @@ function Overview({ data, api }: { data: DashboardData; api?: ReturnType<typeof 
 
           {/* Phase 27 — Uptime panel: 24h hourly sparkline */}
           <UptimePanel sparkData={sparkData} errorRate={errorRate} totalRequests={totalRequests} />
-
-          {/* Phase 27 — FAQ panel */}
-          <FaqPanel />
         </div>
       </div>
     </div>
@@ -5038,11 +5035,6 @@ function EndpointPage(props: {
 
   return (
     <div className="stack endpointStack">
-      <EndpointUrlsSection
-        localUrl={localUrl}
-        settings={settings}
-        onChange={setSettings}
-      />
       <ApiInfoPanel />
       <TokenSaverSection settings={settings} onUpdate={updateTokenSaver} />
       <ApiKeysSection
@@ -7155,6 +7147,7 @@ function DocsPage() {
   const [activeSection, setActiveSection] = useState("getting-started");
 
   const sections = lang === "vi" ? [
+    { id: "faq", label: "FAQ" },
     { id: "getting-started", label: "Bắt đầu nhanh" },
     { id: "architecture", label: "Kiến trúc hệ thống" },
     { id: "providers", label: "Providers & Accounts" },
@@ -7171,6 +7164,7 @@ function DocsPage() {
     { id: "shortcuts", label: "Phím tắt" },
     { id: "api", label: "Tham chiếu API" }
   ] : [
+    { id: "faq", label: "FAQ" },
     { id: "getting-started", label: "Quick Start" },
     { id: "architecture", label: "System Architecture" },
     { id: "providers", label: "Providers & Accounts" },
@@ -7204,6 +7198,12 @@ function DocsPage() {
           ))}
         </nav>
         <article className="docsContent">
+
+          {activeSection === "faq" && (
+            <div className="docsSection">
+              <FaqPanel />
+            </div>
+          )}
 
           {lang === "vi" && activeSection === "getting-started" && (
             <div className="docsSection">

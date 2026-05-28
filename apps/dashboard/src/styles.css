@@ -1332,6 +1332,294 @@ td code {
   word-break: break-word;
 }
 
+/* Phase 32 — ApiInfoPanel ─────────────────────────────────── */
+.apiInfoPanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.apiInfoHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-primary) 6%, transparent) 0%,
+    transparent 100%);
+}
+
+.apiInfoTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.apiInfoTitle h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.apiInfoSubtitle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.apiInfoSpeedBtn {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.apiInfoSpeedBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.apiInfoSpeedBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+  color: var(--color-primary);
+}
+
+.apiInfoClientGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.apiInfoClientCard {
+  background: color-mix(in srgb, var(--color-border) 12%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-primary);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apiInfoClientHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 2px;
+}
+
+.apiInfoClientName {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.apiInfoClientExamples {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.apiInfoClientField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.apiInfoClientFieldLabel {
+  display: inline-block;
+  width: 64px;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.apiInfoClientFieldValue {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-text-main);
+  overflow-x: auto;
+  white-space: nowrap;
+  user-select: all;
+}
+
+.apiInfoClientFieldHint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.apiInfoCopyBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.apiInfoCopyBtn:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+}
+
+.apiInfoRawEndpoints {
+  border-top: 1px solid var(--color-border);
+}
+
+.apiInfoRawEndpoints summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.12s ease;
+}
+
+.apiInfoRawEndpoints summary::-webkit-details-marker {
+  display: none;
+}
+
+.apiInfoRawEndpoints summary::before {
+  content: "▸";
+  font-size: 11px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+  width: 12px;
+}
+
+.apiInfoRawEndpoints[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.apiInfoRawEndpoints summary:hover {
+  background: color-mix(in srgb, var(--color-border) 25%, transparent);
+}
+
+.apiInfoRawTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.apiInfoRawHint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+.apiInfoRawList {
+  padding: 0 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: color-mix(in srgb, var(--color-border) 8%, transparent);
+}
+
+.apiInfoRawRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--color-surface);
+  font-size: 12px;
+  border-radius: 6px;
+  margin-bottom: 2px;
+}
+
+.apiInfoMethod {
+  display: inline-block;
+  min-width: 46px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  border-radius: 4px;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.apiInfoMethod--get {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.apiInfoMethod--post {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.apiInfoPath {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-main);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apiInfoAuth {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.apiInfoAuth--public {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.apiInfoAuth--admin {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.apiInfoAuth--api-key {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
 .switchControl {
   width: 36px;
   height: 22px;
