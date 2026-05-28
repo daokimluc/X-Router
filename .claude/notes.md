@@ -83,17 +83,15 @@ Test count: 371 → 382 pass (added Phase 31 multi-channel + post-audit tests).
 - Dashboard build: ~5-7s, recharts code-split confirmed
 - Manual UI smoke: chưa exercise (user sẽ test khi đủ thời gian)
 
-## Phase 32 — All 4 proposals IMPLEMENTED
+## Phase 32 — All 4 proposals IMPLEMENTED + UI polish
 
 **P1 usage-time-series-charts** — DONE. Backend aggregate + lazy charts panel.
 **P2 latency-observability** — DONE. Tracker + admin/Prometheus endpoints + Overview LatencyPanel + i18n.
-**P3 spending-caps** — DONE (backend + basic UI). Hold-and-settle ledger + 429 enforcement + persistence + admin endpoints + ApiKeyEditModal Limits inputs.
-**P4 semantic-response-cache** — DONE (backend + ApiKey field, no dashboard UI). LRU+TTL cache + buildCacheKey + resolveCacheMode + openai.ts wiring + admin stats/flush + cacheMode field.
+**P3 spending-caps** — DONE. Hold-and-settle ledger + 429 enforcement + persistence + admin endpoints + ApiKeyEditModal Limits inputs + key-list SpendBadge + team modal spend inputs + team-list SpendBadge.
+**P4 semantic-response-cache** — DONE. LRU+TTL cache + buildCacheKey + resolveCacheMode + openai.ts + anthropic.ts wiring + admin stats/flush + cacheMode field + Overview CachePanel + ApiKeyEditModal cacheMode dropdown + EN/VI i18n + FaqPanel entry.
 
 ## Next session
 
-1. Manual UI smoke browser (all 4 proposals).
-2. Commit all uncommitted work.
-3. Optional polish: spending caps key-list badge + team modal; cache UI card on Overview + cached tag on RequestLogs + cacheMode dropdown.
-4. Anthropic route cache wiring (P4 task 3.3).
-5. Update FaqPanel for cache_control documentation.
+1. Manual UI smoke browser (verify all 4 panels render correctly).
+2. P4 task 7.2 (cached tag on RequestLogs row) — skipped because RequestLog doesn't carry cacheHit (it's on UsageRecord).
+3. Manual end-to-end smoke for caps + cache (curl/Postman with cache_control header, set $0.01 cap to trigger 429).

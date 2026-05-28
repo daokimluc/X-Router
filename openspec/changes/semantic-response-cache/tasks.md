@@ -19,7 +19,7 @@
 
 - [x] 3.1 In `routes/openai.ts`: before global concurrency limiter, if mode `use`/`refresh`, look up cache. On `use` hit: return cached body with headers, record UsageRecord with `cacheHit: true, estimatedCost: 0`, return.
 - [x] 3.2 On miss/refresh path: continue to provider; after success, if mode != `skip` and policy permits storage, call `cache.write(key, response, ttl)`.
-- [ ] 3.3 Same wiring in `routes/anthropic.ts` (non-stream branch only).
+- [x] 3.3 Same wiring in `routes/anthropic.ts` (non-stream branch only).
 - [x] 3.4 Add `cacheHit?: boolean` to `UsageRecord` type and persistence schema. Backward-compat: missing = false.
 
 ## 4. Skip-policies
@@ -42,14 +42,14 @@
 
 ## 7. Dashboard UI
 
-- [ ] 7.1 Overview: small "Cache" card showing hit ratio, entries, bytes used.
+- [x] 7.1 Overview: small "Cache" card showing hit ratio, entries, bytes used.
 - [ ] 7.2 RequestLogs row: cyan "cached" tag when `cacheHit: true`.
-- [ ] 7.3 ApiKeyEditModal Limits tab: dropdown for `cacheMode`.
-- [ ] 7.4 i18n EN/VI: `ov.cache.title`, `ov.cache.hitRatio`, `apikey.cacheMode.*`.
+- [x] 7.3 ApiKeyEditModal Limits tab: dropdown for `cacheMode`.
+- [x] 7.4 i18n EN/VI: `ov.cache.title`, `ov.cache.hitRatio`, `apikey.cacheMode.*`.
 
 ## 8. Verification
 
 - [x] 8.1 Gateway tsc + vitest.
 - [x] 8.2 Dashboard tsc + build.
 - [ ] 8.3 Manual: send same request twice with `cache_control: { mode: "use" }`, second response shows `x-gateway-cache: hit`, UsageRecord shows zero cost. Send with `temperature: 0.7` — second hit still misses (skip policy).
-- [ ] 8.4 Update FaqPanel + .claude/notes.md with cache_control documentation.
+- [x] 8.4 Update FaqPanel + .claude/notes.md with cache_control documentation.

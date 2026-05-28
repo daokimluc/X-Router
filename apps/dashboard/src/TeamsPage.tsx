@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Plus, Users, Trash2, X } from "lucide-react";
 import { useLang } from "./i18n";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { SpendBadge } from "./components/SpendBadge";
 
 export type Team = {
   id: string;
@@ -101,6 +102,7 @@ export function TeamsPage(props: { api: ApiClient; refresh: () => Promise<void> 
                     {team.dailyLimit && <span className="routeModelTag">{team.dailyLimit}/day</span>}
                     {team.monthlyLimit && <span className="routeModelTag">{team.monthlyLimit}/mo</span>}
                     {team.allowedModels?.length ? <span className="routeModelTag">{team.allowedModels.join(", ")}</span> : <span className="routeModelTag">{t("teams.allModels")}</span>}
+                    <SpendBadge scope="team" id={team.id} api={props.api} />
                   </div>
                 </div>
               </div>
@@ -150,6 +152,8 @@ function CreateTeamModal(props: { api: ApiClient; onClose: () => void; onCreated
   const [rpmLimit, setRpmLimit] = useState("");
   const [dailyLimit, setDailyLimit] = useState("");
   const [allowedModels, setAllowedModels] = useState("");
+  const [dailySpendLimitUsd, setDailySpendLimitUsd] = useState("");
+  const [monthlySpendLimitUsd, setMonthlySpendLimitUsd] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -165,6 +169,8 @@ function CreateTeamModal(props: { api: ApiClient; onClose: () => void; onCreated
         rpmLimit: rpmLimit ? parseInt(rpmLimit, 10) : undefined,
         dailyLimit: dailyLimit ? parseInt(dailyLimit, 10) : undefined,
         allowedModels: models,
+        dailySpendLimitUsd: dailySpendLimitUsd ? parseFloat(dailySpendLimitUsd) : undefined,
+        monthlySpendLimitUsd: monthlySpendLimitUsd ? parseFloat(monthlySpendLimitUsd) : undefined,
       });
       props.onCreated();
     } catch { /* ignore */ } finally {
@@ -199,6 +205,15 @@ function CreateTeamModal(props: { api: ApiClient; onClose: () => void; onCreated
             {t("teams.dailyLimit")}
             <input className="routeNameInput" type="number" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} placeholder="5000" />
             <small style={{fontSize:"11px",color:"#9ca3af"}}>{t("teams.dailyLimitHint")}</small>
+          </label>
+          <label className="routeFormLabel">
+            {t("apikey.spend.daily")}
+            <input className="routeNameInput" type="number" min="0" step="0.01" value={dailySpendLimitUsd} onChange={(e) => setDailySpendLimitUsd(e.target.value)} placeholder="(unlimited)" />
+            <small style={{fontSize:"11px",color:"#9ca3af"}}>{t("apikey.spend.unlimited")}</small>
+          </label>
+          <label className="routeFormLabel">
+            {t("apikey.spend.monthly")}
+            <input className="routeNameInput" type="number" min="0" step="0.01" value={monthlySpendLimitUsd} onChange={(e) => setMonthlySpendLimitUsd(e.target.value)} placeholder="(unlimited)" />
           </label>
           <div className="routeModalFooter">
             <button type="button" className="ghostButton" onClick={props.onClose}>{t("common.cancel")}</button>

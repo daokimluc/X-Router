@@ -78,6 +78,8 @@ import { ApiInfoPanel } from "./components/ApiInfoPanel";
 import { UptimePanel } from "./components/UptimePanel";
 import { FaqPanel } from "./components/FaqPanel";
 import { LatencyPanel } from "./components/LatencyPanel";
+import { CachePanel } from "./components/CachePanel";
+import { SpendBadge } from "./components/SpendBadge";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -1020,7 +1022,7 @@ function PageContent(props: {
   }
 }
 
-function Overview({ data, api }: { data: DashboardData; api?: { get: <T>(path: string) => Promise<T> } }) {
+function Overview({ data, api }: { data: DashboardData; api?: ReturnType<typeof createApiClient> }) {
   const { t } = useLang();
   const activeAccounts = data.accounts.filter((account) => account.status === "active").length;
   const disabledAccounts = data.accounts.filter((account) => account.status === "disabled").length;
@@ -1221,6 +1223,9 @@ function Overview({ data, api }: { data: DashboardData; api?: { get: <T>(path: s
 
           {/* Phase 32 — Latency panel: top-10 slowest channels by p95 */}
           {api && <LatencyPanel api={api} />}
+
+          {/* Phase 32 — Cache panel: hit ratio, entries, bytes used */}
+          {api && <CachePanel api={api} />}
 
           {/* Phase 27 — Uptime panel: 24h hourly sparkline */}
           <UptimePanel sparkData={sparkData} errorRate={errorRate} totalRequests={totalRequests} />
@@ -5726,6 +5731,8 @@ function ApiKeysSection(props: {
                           {t("apikey.ipsCount").replace("{n}", String(key.allowedIps.length))}
                         </span>
                       )}
+                      {/* Phase 32 — spending caps badge */}
+                      <SpendBadge scope="key" id={key.id} api={props.api} />
                     </small>
                     {/* Phase 26 — Quota progress bars */}
                     {(() => {

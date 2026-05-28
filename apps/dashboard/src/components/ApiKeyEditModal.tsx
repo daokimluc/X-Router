@@ -32,6 +32,8 @@ export type ApiKeyForEdit = {
   /** Phase 32 — spending caps */
   dailySpendLimitUsd?: number;
   monthlySpendLimitUsd?: number;
+  /** Phase 32 — semantic-response-cache mode */
+  cacheMode?: "client_choice" | "force_use" | "force_skip";
 };
 
 type Team = { id: string; name: string };
@@ -87,6 +89,7 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
   const [crossGroupRetry, setCrossGroupRetry] = useState(apiKey.crossGroupRetry ?? false);
   const [dailySpendLimitUsd, setDailySpendLimitUsd] = useState(apiKey.dailySpendLimitUsd ? String(apiKey.dailySpendLimitUsd) : "");
   const [monthlySpendLimitUsd, setMonthlySpendLimitUsd] = useState(apiKey.monthlySpendLimitUsd ? String(apiKey.monthlySpendLimitUsd) : "");
+  const [cacheMode, setCacheMode] = useState<"client_choice" | "force_use" | "force_skip">(apiKey.cacheMode ?? "client_choice");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,6 +121,7 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
         crossGroupRetry,
         dailySpendLimitUsd: dailySpendLimitUsd ? Number.parseFloat(dailySpendLimitUsd) : null,
         monthlySpendLimitUsd: monthlySpendLimitUsd ? Number.parseFloat(monthlySpendLimitUsd) : null,
+        cacheMode,
       };
       await api.patch(`/admin/v1/api-keys/${apiKey.id}`, body);
       onSaved();
@@ -260,6 +264,15 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
                   value={monthlySpendLimitUsd}
                   onChange={(e) => setMonthlySpendLimitUsd(e.target.value)}
                 />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                {t("apikey.cacheMode.label")}
+                <select value={cacheMode} onChange={(e) => setCacheMode(e.target.value as typeof cacheMode)}>
+                  <option value="client_choice">{t("apikey.cacheMode.client_choice")}</option>
+                  <option value="force_use">{t("apikey.cacheMode.force_use")}</option>
+                  <option value="force_skip">{t("apikey.cacheMode.force_skip")}</option>
+                </select>
+                <small style={{ color: "var(--color-text-muted)", fontSize: 10 }}>{t("apikey.cacheMode.hint")}</small>
               </label>
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                 Balance: {apiKey.balance === undefined ? "∞ unlimited" : `$${apiKey.balance.toFixed(2)}`}

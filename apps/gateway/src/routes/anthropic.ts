@@ -7,6 +7,7 @@ import { createKeyPolicyEnforcer } from "../middleware/enforceKeyPolicy.js";
 import { ProviderError } from "../providers/base/ProviderErrors.js";
 import { compressToolOutput } from "../services/TokenSaverService.js";
 import { resolveAccountProxyOptions } from "../proxy/resolveAccountProxy.js";
+import { buildCacheKey, resolveCacheMode } from "../services/ResponseCacheService.js";
 import type {
   NormalizedAnthropicResponse,
   NormalizedOpenAIResponse,
@@ -53,6 +54,62 @@ export async function registerAnthropicRoutes(
         if (typeof directAccountId === "string" && directAccountId.length > 0) {
           const directResult = await handleDirectAnthropicRouting(app, request, reply, body, directAccountId);
           return directResult;
+        }
+
+        // Phase 32 — semantic-response-cache lookup (non-streaming only)
+        const apiKeyHash = request.auth?.apiKeyHash;
+        const apiKeyRecord = apiKeyHash ? app.apiKeyService.findByHash(apiKeyHash) : undefined;
+        const bodyAny = body as Record<string, unknown>;
+        const cacheControl = bodyAny.cache_control as { mode?: string; ttl?: number } | undefined;
+        const cacheHeader = request.headers["x-gateway-cache-control"];
+        const cacheMode = resolveCacheMode({
+          bodyMode: cacheControl?.mode,
+          headerMode: typeof cacheHeader === "string" ? cacheHeader : undefined,
+          apiKeyMode: apiKeyRecord?.cacheMode,
+          temperature: (bodyAny.temperature as number | undefined) ?? null,
+          top_p: (bodyAny.top_p as number | undefined) ?? null,
+          top_k: (bodyAny.top_k as number | undefined) ?? null,
+          isStream: body.stream === true
+        });
+        const cacheKey = cacheMode !== "skip" ? buildCacheKey({
+          model: body.model,
+          protocol: "anthropic",
+          messages: body.messages,
+          temperature: (bodyAny.temperature as number | undefined) ?? null,
+          top_p: (bodyAny.top_p as number | undefined) ?? null,
+          top_k: (bodyAny.top_k as number | undefined) ?? null,
+          max_tokens: body.max_tokens ?? null,
+          stop: bodyAny.stop_sequences,
+          reasoning_effort: null,
+          apiKeyHash
+        }) : null;
+
+        if (cacheMode === "use" && cacheKey) {
+          const cached = app.responseCacheService.read(cacheKey) as {
+            usage?: { input_tokens?: number; output_tokens?: number };
+          } | null;
+          if (cached) {
+            reply.header("x-gateway-cache", "hit");
+            const inputTokens = cached.usage?.input_tokens ?? 0;
+            const outputTokens = cached.usage?.output_tokens ?? 0;
+            app.usageService.record({
+              requestId: request.id,
+              protocol: "anthropic",
+              model: body.model,
+              providerType: "cache",
+              providerInstanceId: "cache",
+              apiKeyHash,
+              promptTokens: inputTokens,
+              completionTokens: outputTokens,
+              totalTokens: inputTokens + outputTokens,
+              estimatedCost: 0,
+              cacheHit: true
+            });
+            return cached;
+          }
+        }
+        if (cacheMode !== "skip") {
+          reply.header("x-gateway-cache", cacheMode === "refresh" ? "refresh" : "miss");
         }
 
         const route = app.modelResolver.resolve(body.model, ["chat"], (() => {
@@ -293,6 +350,11 @@ export async function registerAnthropicRoutes(
                     app.spendLedgerService.settle(id, cost);
                   }
                 }
+              }
+              // Phase 32 — semantic-response-cache write (non-stream, normalized response)
+              if (cacheKey && cacheMode !== "skip") {
+                const ttl = (cacheControl?.ttl as number | undefined);
+                app.responseCacheService.write(cacheKey, response, body.model, ttl);
               }
               return toAnthropicResponse(response, body.model);
             } catch (error) {

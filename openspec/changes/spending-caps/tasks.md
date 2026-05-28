@@ -37,8 +37,8 @@
 ## 6. Dashboard UI
 
 - [x] 6.1 ApiKeyEditModal "Limits" tab: 2 numeric inputs `dailySpendLimitUsd`, `monthlySpendLimitUsd`. Empty = unlimited.
-- [ ] 6.2 Keys list: small badge `$X / $Y today` for keys with cap set; red bg when ≥90%.
-- [ ] 6.3 Team modal: same 2 fields.
+- [x] 6.2 Keys list: small badge `$X / $Y today` for keys with cap set; red bg when ≥90%.
+- [x] 6.3 Team modal: same 2 fields.
 - [x] 6.4 i18n EN/VI: `apikey.spend.daily`, `apikey.spend.monthly`, `apikey.spend.unlimited`, `apikey.spend.percent`.
 
 ## 7. Verification
@@ -46,4 +46,4 @@
 - [x] 7.1 Gateway tsc + vitest.
 - [x] 7.2 Dashboard tsc + build.
 - [ ] 7.3 Manual end-to-end: create key with `dailySpendLimitUsd = 0.01`, send 1 request to expensive model, confirm 429 on the second call. Restart gateway, confirm spend persists.
-- [ ] 7.4 Document new fields in `apps/dashboard/src/components/FaqPanel.tsx` and update `.claude/notes.md`.
+- [x] 7.4 Document new fields in `apps/dashboard/src/components/FaqPanel.tsx` and update `.claude/notes.md`.

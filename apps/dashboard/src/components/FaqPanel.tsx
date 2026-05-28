@@ -45,6 +45,10 @@ const FAQ = [
     q: "Where do I see usage trends over time?",
     a: "Usage page → scroll past the model leaderboard. The 'Usage trends' panel shows time-bucketed charts (Trend / Proportion / Top) with a metric switcher (cost / tokens / requests). Backed by GET /admin/v1/usage/aggregate.",
   },
+  {
+    q: "How do I cache repeated requests to save tokens?",
+    a: "Pass `cache_control: { mode: \"use\" }` in the request body or set header `x-gateway-cache-control: use`. The gateway returns cached completions for identical (model, messages, params, apiKey) tuples. Modes: 'skip' (default, bypass cache), 'use' (read+write), 'refresh' (write-only, ignores existing). Per-key override via cacheMode in API Keys → Edit. Cache hits are recorded as zero-cost UsageRecord with cacheHit:true. Stats: GET /admin/v1/cache/stats.",
+  },
 ];
 
 export function FaqPanel() {
