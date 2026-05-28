@@ -7,6 +7,7 @@ import type { ModelMapping } from "./ModelRegistry.js";
 import { ModelRegistry } from "./ModelRegistry.js";
 import { RoutingProfileRegistry } from "./RoutingProfileRegistry.js";
 import { CapabilityMatcher } from "./CapabilityMatcher.js";
+import { expandVariants, formatUpstreamModel } from "./modelVariants.js";
 
 export type ResolvedModelCandidate = {
   publicModel: string;
@@ -52,6 +53,21 @@ export class ModelResolver {
     ) => Record<string, string> | undefined
   ) {}
 
+  /**
+   * Phase 31 — try exact match first, then expanded variants (dash↔dot, date
+   * suffix strip, AWS Bedrock prefix, Vertex `@`).
+   */
+  private lookupMappings(name: string): ModelMapping[] {
+    const exact = this.modelRegistry.getAll(name);
+    if (exact.length > 0) return exact;
+    for (const variant of expandVariants(name)) {
+      if (variant === name) continue;
+      const match = this.modelRegistry.getAll(variant);
+      if (match.length > 0) return match;
+    }
+    return [];
+  }
+
   resolve(
     requestedModel: string,
     requiredCapabilities: ProviderCapabilityFlag[] = ["chat"],
@@ -60,14 +76,20 @@ export class ModelResolver {
     // Extract reasoning effort suffix: model-high, model-medium, model-low
     const { baseModel, reasoningEffort } = extractReasoningEffort(requestedModel);
 
-    const fixedModel = this.modelRegistry.get(baseModel);
+    // Phase 31 — multi-channel routing: collect ALL mappings serving this name.
+    const fixedMappings = this.lookupMappings(baseModel);
 
-    if (fixedModel) {
+    if (fixedMappings.length > 0) {
+      const allCandidates = fixedMappings.map((m) =>
+        this.toCandidate(this.assertCapabilities(m, requiredCapabilities))
+      );
+      // Fixed model routes bypass group filtering (user explicitly requested this model)
+      const sorted = this.applyPrioritySort(allCandidates);
       return {
         requestedModel: baseModel,
         routeType: "fixed_model",
-        fallback: false,
-        candidates: [this.toCandidate(this.assertCapabilities(fixedModel, requiredCapabilities))],
+        fallback: sorted.length > 1,
+        candidates: sorted,
         reasoningEffort
       };
     }
@@ -79,56 +101,61 @@ export class ModelResolver {
     }
 
     const required = mergeCapabilities(profile.requiredCapabilities, requiredCapabilities);
-    const allCandidates = profile.candidates.map((candidateModel) => {
-      const mapping = this.modelRegistry.get(candidateModel);
-
-      if (!mapping || !mapping.enabled) {
+    // Phase 31 — each profile candidate may resolve to multiple mappings (one per channel).
+    const allCandidates: ResolvedModelCandidate[] = [];
+    for (const candidateModel of profile.candidates) {
+      const mappings = this.lookupMappings(candidateModel);
+      if (mappings.length === 0) {
         throw new ProviderConfigError(
           `Routing profile ${profile.id} references unknown model ${candidateModel}`
         );
       }
-
-      return this.toCandidate(this.assertCapabilities(mapping, required));
-    });
-
-    // Phase 20c — filter by group when key has groupName.
-    let candidates = allCandidates;
-    if (context.keyGroupName && this.getInstanceGroup) {
-      const lookup = this.getInstanceGroup;
-      const inGroup = allCandidates.filter(
-        (c) => lookup(c.providerInstanceId) === context.keyGroupName
-      );
-      if (inGroup.length > 0) {
-        candidates = inGroup;
-      } else if (context.crossGroupRetry) {
-        // No in-group match: fall back to all candidates
-        candidates = allCandidates;
-      } else {
-        // No in-group match and no cross-group fallback allowed
-        candidates = [];
+      for (const m of mappings) {
+        if (!m.enabled) continue;
+        allCandidates.push(this.toCandidate(this.assertCapabilities(m, required)));
       }
     }
 
-    // Sort candidates by descending priority (Phase 20b). Stable: equal
-    // priorities preserve registration order from the routing profile.
-    if (this.getInstancePriority) {
-      const lookup = this.getInstancePriority;
-      const withPriority = candidates.map((c, i) => ({
-        c,
-        i,
-        p: lookup(c.providerInstanceId) ?? 0,
-      }));
-      withPriority.sort((a, b) => (b.p - a.p) || (a.i - b.i));
-      candidates = withPriority.map((entry) => entry.c);
-    }
+    const filtered = this.applyGroupFilter(allCandidates, context);
+    const sorted = this.applyPrioritySort(filtered);
 
     return {
       requestedModel: baseModel,
       routeType: "routing_profile",
       fallback: profile.fallback,
-      candidates,
+      candidates: sorted,
       reasoningEffort
     };
+  }
+
+  /** Phase 20c — filter candidates by key's groupName, optional cross-group fallback. */
+  private applyGroupFilter(
+    allCandidates: ResolvedModelCandidate[],
+    context: { keyGroupName?: string; crossGroupRetry?: boolean }
+  ): ResolvedModelCandidate[] {
+    if (!context.keyGroupName || !this.getInstanceGroup) return allCandidates;
+    const lookup = this.getInstanceGroup;
+    const inGroup = allCandidates.filter(
+      (c) => lookup(c.providerInstanceId) === context.keyGroupName
+    );
+    if (inGroup.length > 0) return inGroup;
+    if (context.crossGroupRetry) return allCandidates;
+    return [];
+  }
+
+  /** Phase 20b — sort candidates by descending priority. Stable on ties. */
+  private applyPrioritySort(
+    candidates: ResolvedModelCandidate[]
+  ): ResolvedModelCandidate[] {
+    if (!this.getInstancePriority) return candidates;
+    const lookup = this.getInstancePriority;
+    const withPriority = candidates.map((c, i) => ({
+      c,
+      i,
+      p: lookup(c.providerInstanceId) ?? 0
+    }));
+    withPriority.sort((a, b) => b.p - a.p || a.i - b.i);
+    return withPriority.map((entry) => entry.c);
   }
 
   private assertCapabilities(
@@ -150,9 +177,16 @@ export class ModelResolver {
   }
 
   private toCandidate(mapping: ModelMapping): ResolvedModelCandidate {
-    // Phase 30 — per-channel modelMapping override
+    // Phase 30 — explicit per-channel modelMapping wins.
     const channelMapping = this.getInstanceModelMapping?.(mapping.providerInstanceId);
-    const upstreamModel = channelMapping?.[mapping.publicModel] ?? mapping.upstreamModel;
+    const explicitOverride = channelMapping?.[mapping.publicModel];
+    let upstreamModel: string;
+    if (explicitOverride !== undefined) {
+      upstreamModel = explicitOverride;
+    } else {
+      // Phase 31 — auto-format the canonical name for this provider's expected shape.
+      upstreamModel = formatUpstreamModel(mapping.upstreamModel, mapping.providerType);
+    }
     return {
       publicModel: mapping.publicModel,
       providerInstanceId: mapping.providerInstanceId,
