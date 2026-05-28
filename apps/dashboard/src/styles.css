@@ -1172,6 +1172,166 @@ td code {
   flex: 0 0 auto;
 }
 
+/* Phase 32 — Model tile action row (Test / Edit / Delete) */
+.modelActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.modelActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-border) 18%, transparent);
+  color: var(--color-text-main);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.modelActionBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface-2));
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+}
+
+.modelActionBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.modelActionBtn.danger {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.modelActionBtn.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.modelActionBtn.primary {
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.modelActionBtn.primary:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.55);
+}
+
+/* Inline edit form inside the tile */
+.modelEditForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modelEditForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modelEditForm input {
+  height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.modelEditForm input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.modelEditFormActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.modelEditFormActions button {
+  flex: 1;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.modelEditFormActions button[type="button"].save {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.modelEditFormActions button[type="button"].save:hover {
+  filter: brightness(1.08);
+}
+
+.modelEditFormActions button[type="button"].cancel {
+  background: transparent;
+  color: var(--color-text-main);
+}
+
+.modelEditFormActions button[type="button"].cancel:hover {
+  background: color-mix(in srgb, var(--color-border) 30%, transparent);
+}
+
+/* Test result panel */
+.modelTestResult {
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid;
+}
+
+.modelTestResult.ok {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #10b981;
+}
+
+.modelTestResult.fail {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+
+.modelTestResult .preview {
+  margin-top: 3px;
+  color: var(--color-text-main);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modelTestResult .errMsg {
+  margin-top: 3px;
+  font-size: 10px;
+  word-break: break-word;
+}
+
 .switchControl {
   width: 36px;
   height: 22px;

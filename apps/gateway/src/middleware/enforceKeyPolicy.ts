@@ -5,21 +5,59 @@
  *   3. Key-level model whitelist (403 model_not_allowed_for_key)
  *   4. Team-level model whitelist (403 team_model_not_allowed)
  *   5. Balance exhaustion (402 balance_exhausted)
+ *   6. Spend cap (Phase 32) — daily/monthly USD cap, per-key with team fallback (429 spend_limit_exceeded)
  *
  * Routes that pass `getModel` get model checks; routes without a body model
- * skip step 3 and 4 entirely.
+ * skip step 3 and 4 entirely. Routes that pass `getBody` and `modelPricingService`
+ * get step 6.
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyService } from "../services/ApiKeyService.js";
 import type { TeamService } from "../services/TeamService.js";
+import type { ModelPricingService } from "../services/ModelPricingService.js";
+import type { SpendLedgerService } from "../services/SpendLedgerService.js";
 import { ipMatches } from "../utils/ipMatch.js";
 
 export type KeyPolicyDeps = {
   apiKeyService: ApiKeyService;
   teamService: TeamService;
   getModel?: (req: FastifyRequest) => string | undefined;
+  /** Phase 32 — provide these to enable spend-cap pre-flight check. */
+  modelPricingService?: ModelPricingService;
+  spendLedgerService?: SpendLedgerService;
+  getBody?: (req: FastifyRequest) => { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined;
 };
+
+declare module "fastify" {
+  interface FastifyRequest {
+    spendReservation?: { id: string; scopes: string[] };
+  }
+}
+
+function estimateUpperBoundCost(
+  model: string,
+  body: { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined,
+  pricing: ModelPricingService
+): number {
+  const messages = body?.messages ?? [];
+  const inputChars = JSON.stringify(messages).length;
+  const inputTokens = Math.ceil(inputChars / 4);
+  const outputTokens = body?.max_tokens && body.max_tokens > 0 ? body.max_tokens : 1024;
+  return pricing.calculateCost(model, inputTokens, outputTokens).totalCost;
+}
+
+function secondsUntilNextDayUTC(): number {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return Math.ceil((tomorrow.getTime() - now.getTime()) / 1000);
+}
+
+function secondsUntilNextMonthUTC(): number {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return Math.ceil((next.getTime() - now.getTime()) / 1000);
+}
 
 export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
   return async function enforceKeyPolicy(
@@ -27,10 +65,10 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
     reply: FastifyReply
   ): Promise<void> {
     const apiKeyHash = request.auth?.apiKeyHash;
-    if (!apiKeyHash) return; // auth middleware did not run or used a static key
+    if (!apiKeyHash) return;
 
     const record = deps.apiKeyService.findByHash(apiKeyHash);
-    if (!record) return; // static config-key path: no per-key policy applies
+    if (!record) return;
 
     // 1. Expiry
     if (deps.apiKeyService.isExpired(record)) {
@@ -58,7 +96,7 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
       }
     }
 
-    // 3 & 4. Model whitelist (key-level + team-level)
+    // 3 & 4. Model whitelist
     const model = deps.getModel?.(request);
     if (model) {
       if (record.allowedModels && record.allowedModels.length > 0) {
@@ -101,6 +139,81 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
         }
       });
       return;
+    }
+
+    // 6. Spend caps (Phase 32)
+    if (
+      model &&
+      deps.modelPricingService &&
+      deps.spendLedgerService &&
+      deps.getBody
+    ) {
+      const team = record.teamId ? deps.teamService.get(record.teamId) : undefined;
+      const dayCap = record.dailySpendLimitUsd ?? team?.dailySpendLimitUsd ?? null;
+      const monthCap = record.monthlySpendLimitUsd ?? team?.monthlySpendLimitUsd ?? null;
+
+      if (dayCap !== null || monthCap !== null) {
+        const body = deps.getBody(request);
+        const estimateUsd = estimateUpperBoundCost(model, body, deps.modelPricingService);
+
+        // Reserve against the key first
+        const keyScope = `key:${record.id}`;
+        const keyResult = deps.spendLedgerService.reserve({
+          scope: keyScope,
+          estimateUsd,
+          dayCap,
+          monthCap
+        });
+
+        if (!keyResult.ok) {
+          const retryAfter = keyResult.reason === "day_cap_exceeded"
+            ? secondsUntilNextDayUTC()
+            : secondsUntilNextMonthUTC();
+          reply.header("Retry-After", String(retryAfter));
+          await reply.code(429).send({
+            error: {
+              type: "rate_limit_exceeded",
+              message: `Spend cap exceeded for this API key (${keyResult.reason}). Limit: $${keyResult.cap.toFixed(2)}, current spend: $${keyResult.spent.toFixed(4)}.`,
+              code: "spend_limit_exceeded"
+            }
+          });
+          return;
+        }
+
+        const scopes = [keyScope];
+
+        // If team has its own caps and they're tighter, also reserve against team
+        if (team && (team.dailySpendLimitUsd || team.monthlySpendLimitUsd) && record.teamId) {
+          const teamScope = `team:${record.teamId}`;
+          const teamResult = deps.spendLedgerService.reserve({
+            scope: teamScope,
+            estimateUsd,
+            dayCap: team.dailySpendLimitUsd ?? null,
+            monthCap: team.monthlySpendLimitUsd ?? null
+          });
+          if (!teamResult.ok) {
+            // Roll back key reservation
+            deps.spendLedgerService.release(keyResult.reservationId);
+            const retryAfter = teamResult.reason === "day_cap_exceeded"
+              ? secondsUntilNextDayUTC()
+              : secondsUntilNextMonthUTC();
+            reply.header("Retry-After", String(retryAfter));
+            await reply.code(429).send({
+              error: {
+                type: "rate_limit_exceeded",
+                message: `Team "${team.name}" spend cap exceeded (${teamResult.reason}).`,
+                code: "spend_limit_exceeded"
+              }
+            });
+            return;
+          }
+          scopes.push(teamScope);
+          // Stash both reservation IDs separately so settle/release can target both
+          request.spendReservation = { id: `${keyResult.reservationId}|${teamResult.reservationId}`, scopes };
+        } else {
+          request.spendReservation = { id: keyResult.reservationId, scopes };
+        }
+      }
     }
   };
 }

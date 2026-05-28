@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppConfig } from "../config.js";
+import { HDR_BOUNDS_MS } from "../services/LatencyTrackerService.js";
 
 export async function registerMetricsRoute(
   app: FastifyInstance,
@@ -29,13 +30,50 @@ export async function registerMetricsRoute(
   app.get(
     "/metrics",
     {
-      preHandler: createInternalOrAdminAuth(app, config)
+      preHandler: createMetricsAuth(app, config)
     },
     async (_request, reply) => {
       reply.header("content-type", "text/plain; version=0.0.4; charset=utf-8");
-      return app.metricsService.toPrometheus();
+      return `${app.metricsService.toPrometheus()}${renderLatencyHistograms(app)}`;
     }
   );
+}
+
+function renderLatencyHistograms(app: FastifyInstance): string {
+  const exports = app.latencyTracker.exportHistograms();
+  if (exports.length === 0) return "";
+  const lines: string[] = [
+    "# HELP gateway_request_duration_ms Request latency in milliseconds.",
+    "# TYPE gateway_request_duration_ms histogram"
+  ];
+  for (const e of exports) {
+    const labels = `provider="${escapeLabel(e.providerInstanceId)}",model="${escapeLabel(e.publicModel)}",account="${escapeLabel(e.accountId)}",outcome="${e.outcome}"`;
+    for (let i = 0; i < HDR_BOUNDS_MS.length; i++) {
+      lines.push(
+        `gateway_request_duration_ms_bucket{${labels},le="${HDR_BOUNDS_MS[i]}"} ${e.cumulativeBuckets[i]}`
+      );
+    }
+    lines.push(
+      `gateway_request_duration_ms_bucket{${labels},le="+Inf"} ${e.cumulativeBuckets[HDR_BOUNDS_MS.length]}`
+    );
+    lines.push(`gateway_request_duration_ms_count{${labels}} ${e.count}`);
+    lines.push(`gateway_request_duration_ms_sum{${labels}} ${e.sumMs}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function escapeLabel(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function createMetricsAuth(app: FastifyInstance, config: AppConfig) {
+  // Phase 32 — METRICS_PUBLIC env flag bypasses auth
+  if (process.env.METRICS_PUBLIC === "true") {
+    return async function noAuth() {
+      // open
+    };
+  }
+  return createInternalOrAdminAuth(app, config);
 }
 
 function createInternalOrAdminAuth(app: FastifyInstance, config: AppConfig) {

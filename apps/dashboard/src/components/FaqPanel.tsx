@@ -41,6 +41,10 @@ const FAQ = [
     q: "What's paramOverride / headerOverride for?",
     a: "Per-channel injection. paramOverride shallow-merges into request body (e.g. force max_tokens=4096). headerOverride injects custom headers (e.g. azure-api-version). Reserved headers (Authorization, Content-Type, Host) cannot be overridden.",
   },
+  {
+    q: "Where do I see usage trends over time?",
+    a: "Usage page → scroll past the model leaderboard. The 'Usage trends' panel shows time-bucketed charts (Trend / Proportion / Top) with a metric switcher (cost / tokens / requests). Backed by GET /admin/v1/usage/aggregate.",
+  },
 ];
 
 export function FaqPanel() {

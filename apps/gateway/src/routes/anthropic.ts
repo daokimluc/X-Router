@@ -34,7 +34,10 @@ export async function registerAnthropicRoutes(
         createKeyPolicyEnforcer({
           apiKeyService: app.apiKeyService,
           teamService: app.teamService,
-          getModel: (req) => (req.body as { model?: string } | undefined)?.model
+          getModel: (req) => (req.body as { model?: string } | undefined)?.model,
+          modelPricingService: app.modelPricingService,
+          spendLedgerService: app.spendLedgerService,
+          getBody: (req) => req.body as { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined
         })
       ]
     },
@@ -115,6 +118,7 @@ export async function registerAnthropicRoutes(
           for (let attempt = 0; attempt < providerInstance.maxRetries + 1; attempt += 1) {
             let lease;
             let releaseProvider: (() => void) | undefined;
+            const requestStart = performance.now();
 
             try {
               app.circuitBreaker.beforeRequest(
@@ -161,6 +165,13 @@ export async function registerAnthropicRoutes(
                   });
                   lease.releaseSuccess();
                   app.circuitBreaker.recordSuccess(providerInstance.id);
+                  app.latencyTracker.record({
+                    providerInstanceId: candidate.providerInstanceId,
+                    publicModel: candidate.publicModel,
+                    accountId: lease.account.id,
+                    durationMs: Math.round(performance.now() - requestStart),
+                    ok: true
+                  });
                   // Phase 31 — prefer real usage from stream when adapter emits it,
                   // fall back to char-based estimation otherwise.
                   const reported = response.usage?.();
@@ -197,6 +208,13 @@ export async function registerAnthropicRoutes(
                     lease.account.id,
                     promptTokens + completionTokens
                   );
+                  // Phase 32 — settle spend reservation
+                  if (request.spendReservation) {
+                    const ids = request.spendReservation.id.split("|");
+                    for (const id of ids) {
+                      app.spendLedgerService.settle(id, app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens, reported?.cached_tokens ?? 0).totalCost);
+                    }
+                  }
                 } catch (streamError) {
                   lease.releaseFailure(
                     streamError instanceof Error
@@ -224,6 +242,13 @@ export async function registerAnthropicRoutes(
               lease.releaseSuccess();
               releaseProvider();
               app.circuitBreaker.recordSuccess(providerInstance.id);
+              app.latencyTracker.record({
+                providerInstanceId: candidate.providerInstanceId,
+                publicModel: candidate.publicModel,
+                accountId: lease.account.id,
+                durationMs: Math.round(performance.now() - requestStart),
+                ok: true
+              });
               if (response.usage) {
                 const cachedTokens = response.usage.cached_tokens ?? 0;
                 app.usageService.record({
@@ -255,6 +280,19 @@ export async function registerAnthropicRoutes(
                   lease.account.id,
                   response.usage.total_tokens
                 );
+                // Phase 32 — settle spend reservation
+                if (request.spendReservation) {
+                  const ids = request.spendReservation.id.split("|");
+                  const cost = app.modelPricingService.calculateCost(
+                    body.model,
+                    response.usage.prompt_tokens,
+                    response.usage.completion_tokens,
+                    cachedTokens
+                  ).totalCost;
+                  for (const id of ids) {
+                    app.spendLedgerService.settle(id, cost);
+                  }
+                }
               }
               return toAnthropicResponse(response, body.model);
             } catch (error) {
@@ -299,6 +337,13 @@ export async function registerAnthropicRoutes(
                   lease.account.id,
                   providerInstance.cooldownMs
                 );
+                app.latencyTracker.record({
+                  providerInstanceId: candidate.providerInstanceId,
+                  publicModel: candidate.publicModel,
+                  accountId: lease.account.id,
+                  durationMs: Math.round(performance.now() - requestStart),
+                  ok: false
+                });
               }
 
               if (isProviderFailureForCircuit(error)) {
@@ -309,6 +354,14 @@ export async function registerAnthropicRoutes(
               }
 
               if (!isRetryableProviderError(error)) {
+                // Phase 32 — release spend reservation on terminal failure
+                if (request.spendReservation) {
+                  const ids = request.spendReservation.id.split("|");
+                  for (const id of ids) {
+                    app.spendLedgerService.release(id);
+                  }
+                  request.spendReservation = undefined;
+                }
                 throw error;
               }
             }
@@ -316,6 +369,14 @@ export async function registerAnthropicRoutes(
         }
 
         if (lastError) {
+          // Phase 32 — release reservation if all retries exhausted
+          if (request.spendReservation) {
+            const ids = request.spendReservation.id.split("|");
+            for (const id of ids) {
+              app.spendLedgerService.release(id);
+            }
+            request.spendReservation = undefined;
+          }
           throw lastError;
         }
 

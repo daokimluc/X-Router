@@ -77,6 +77,7 @@ import { CopyChannelModal } from "./components/CopyChannelModal";
 import { ApiInfoPanel } from "./components/ApiInfoPanel";
 import { UptimePanel } from "./components/UptimePanel";
 import { FaqPanel } from "./components/FaqPanel";
+import { LatencyPanel } from "./components/LatencyPanel";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -282,6 +283,9 @@ type ApiKey = {
   groupName?: string;
   crossGroupRetry?: boolean;
   teamId?: string;
+  /** Phase 32 — spending caps */
+  dailySpendLimitUsd?: number;
+  monthlySpendLimitUsd?: number;
   createdAt?: string;
   limits?: {
     minuteRequests: number;
@@ -421,7 +425,7 @@ const pages: Array<{
   { id: "providers", label: "Providers", icon: Plug, description: "Provider connections and available models" },
   { id: "instances", label: "Provider Instances", icon: Network, description: "Runtime provider endpoints and circuit settings" },
   { id: "accounts", label: "Accounts", icon: Users, description: "Provider account pools and encrypted credentials" },
-  { id: "models", label: "Model Registry", icon: Database, description: "Public model aliases mapped to upstream models" },
+  { id: "models", label: "Models", icon: Database, description: "Public model names mapped to upstream channels — test, edit, and disable models served by the gateway" },
   { id: "profiles", label: "Routes", icon: Route, description: "Model routes with fallback support" },
   { id: "endpoint", label: "Endpoint", icon: Globe, description: "API endpoint configuration, tunnels, and access keys" },
   { id: "cli", label: "CLI Tools", icon: Terminal, description: "Client setup snippets for coding tools" },
@@ -928,7 +932,7 @@ function PageContent(props: {
 }) {
   switch (props.activePage) {
     case "overview":
-      return <Overview data={props.data} />;
+      return <Overview data={props.data} api={props.api} />;
     case "providers":
       return (
         <ProvidersPageWithDetail
@@ -988,7 +992,7 @@ function PageContent(props: {
     case "playground":
       return <Playground models={props.data.modelMappings} profiles={props.data.routingProfiles} />;
     case "usage":
-      return <UsagePage usage={props.data.usage} providerInstances={props.data.providerInstances} accounts={props.data.accounts} />;
+      return <UsagePage usage={props.data.usage} providerInstances={props.data.providerInstances} accounts={props.data.accounts} api={props.api} />;
     case "requests":
       return <RequestLogs logs={props.data.requestLogs} apiKeys={props.data.apiKeys} api={props.api} refresh={props.refresh} />;
     case "audit":
@@ -1016,7 +1020,7 @@ function PageContent(props: {
   }
 }
 
-function Overview({ data }: { data: DashboardData }) {
+function Overview({ data, api }: { data: DashboardData; api?: { get: <T>(path: string) => Promise<T> } }) {
   const { t } = useLang();
   const activeAccounts = data.accounts.filter((account) => account.status === "active").length;
   const disabledAccounts = data.accounts.filter((account) => account.status === "disabled").length;
@@ -1239,6 +1243,9 @@ function Overview({ data }: { data: DashboardData }) {
 
           {/* Phase 27 — API Info panel: clickable endpoints + speed test */}
           <ApiInfoPanel />
+
+          {/* Phase 32 — Latency panel: top-10 slowest channels by p95 */}
+          {api && <LatencyPanel api={api} />}
 
           {/* Phase 27 — Uptime panel: 24h hourly sparkline */}
           <UptimePanel sparkData={sparkData} errorRate={errorRate} totalRequests={totalRequests} />
@@ -4071,6 +4078,10 @@ function ModelRegistry(props: {
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [providerFilter, setProviderFilter] = useState("all");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{ publicModel: string; upstreamModel: string; capabilities: string }>({ publicModel: "", upstreamModel: "", capabilities: "" });
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms?: number; preview?: string; error?: string }>>({});
   const [draft, setDraft] = useState({
     id: "model_kiro_custom",
     publicModel: "kiro-custom",
@@ -4116,6 +4127,51 @@ function ModelRegistry(props: {
     await props.refresh();
   }
 
+  function startEdit(model: ModelMapping) {
+    setEditingId(model.id);
+    setEditDraft({
+      publicModel: model.publicModel,
+      upstreamModel: model.upstreamModel,
+      capabilities: model.capabilities.join(",")
+    });
+  }
+
+  async function saveEdit(model: ModelMapping) {
+    await props.api.patch(`/admin/v1/model-mappings/${model.id}`, {
+      publicModel: editDraft.publicModel.trim(),
+      upstreamModel: editDraft.upstreamModel.trim(),
+      capabilities: parseCsv(editDraft.capabilities)
+    });
+    setEditingId(null);
+    await props.refresh();
+  }
+
+  async function deleteModel(model: ModelMapping) {
+    if (!window.confirm(`Delete model mapping "${model.publicModel}" on ${model.providerInstanceId}?\n\nClients calling this model name will get 404 unless another channel still serves it.`)) return;
+    await props.api.delete(`/admin/v1/model-mappings/${model.id}`);
+    await props.refresh();
+  }
+
+  async function testModel(model: ModelMapping) {
+    setTestingId(model.id);
+    setTestResult((prev) => ({ ...prev, [model.id]: { ok: false } }));
+    const start = performance.now();
+    try {
+      const result = await props.api.post(
+        `/admin/v1/provider-instances/${model.providerInstanceId}/test-model`,
+        { model: model.publicModel, prompt: "Say hi in 3 words.", maxTokens: 32 }
+      ) as { choices?: Array<{ message?: { content?: string } }> };
+      const ms = Math.round(performance.now() - start);
+      const preview = result?.choices?.[0]?.message?.content?.slice(0, 80) ?? "(empty)";
+      setTestResult((prev) => ({ ...prev, [model.id]: { ok: true, ms, preview } }));
+    } catch (err) {
+      const ms = Math.round(performance.now() - start);
+      setTestResult((prev) => ({ ...prev, [model.id]: { ok: false, ms, error: err instanceof Error ? err.message : "Test failed" } }));
+    } finally {
+      setTestingId(null);
+    }
+  }
+
   function applyPreset(preset: ModelPreset) {
     const instance =
       props.instances.find((item) => item.type === preset.providerType) ??
@@ -4149,8 +4205,8 @@ function ModelRegistry(props: {
       <section className="modelBoard">
         <div className="modelBoardHeader">
           <div>
-            <h3>Available Models</h3>
-            <p>{enabledCount}/{props.models.length} enabled models mapped to provider upstream IDs.</p>
+            <h3>Models</h3>
+            <p>{enabledCount}/{props.models.length} enabled. Each tile is one (channel × public-model) mapping. The same public name can be served by multiple channels for failover.</p>
           </div>
           <div className="modelActions">
             <div className="modelFilters" aria-label="Provider filters">
@@ -4174,41 +4230,120 @@ function ModelRegistry(props: {
             const siblingCount = props.models.filter(
               (m) => m.publicModel === model.publicModel && m.id !== model.id
             ).length;
+            const isEditing = editingId === model.id;
+            const isTesting = testingId === model.id;
+            const lastTest = testResult[model.id];
             return (
               <article className={model.enabled ? "modelTile" : "modelTile disabled"} key={model.id}>
                 <div className="modelTileIcon"><Bot size={18} /></div>
                 <div className="modelTileBody">
-                  <div className="modelNameRow">
-                    <code>{model.publicModel}</code>
-                    {siblingCount > 0 && (
-                      <span
-                        title={`Also served by ${siblingCount} other channel(s) — gateway will failover automatically`}
-                        style={{
-                          fontSize: 10,
-                          padding: "1px 6px",
-                          borderRadius: 10,
-                          background: "rgba(59,130,246,0.15)",
-                          color: "#60a5fa",
-                          marginLeft: 6
-                        }}
-                      >
-                        +{siblingCount} more
-                      </span>
-                    )}
-                    <button className="iconButton compact" title="Copy public model" type="button" onClick={() => void navigator.clipboard.writeText(model.publicModel)}>
-                      <Clipboard size={15} />
-                    </button>
-                  </div>
-                  <span>{formatModelLabel(model.upstreamModel)}</span>
-                  <div className="modelMetaLine">
-                    <StatusBadge status={model.enabled ? "active" : "disabled"} label={model.enabled ? "enabled" : "disabled"} />
-                    <small>{provider?.name ?? model.providerInstanceId}</small>
-                  </div>
+                  {isEditing ? (
+                    <div className="modelEditForm">
+                      <label>
+                        Public model
+                        <input
+                          value={editDraft.publicModel}
+                          onChange={(e) => setEditDraft({ ...editDraft, publicModel: e.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Upstream model
+                        <input
+                          value={editDraft.upstreamModel}
+                          onChange={(e) => setEditDraft({ ...editDraft, upstreamModel: e.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Capabilities (csv)
+                        <input
+                          value={editDraft.capabilities}
+                          onChange={(e) => setEditDraft({ ...editDraft, capabilities: e.target.value })}
+                        />
+                      </label>
+                      <div className="modelEditFormActions">
+                        <button type="button" className="save" onClick={() => void saveEdit(model)}>Save</button>
+                        <button type="button" className="cancel" onClick={() => setEditingId(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="modelNameRow">
+                        <code>{model.publicModel}</code>
+                        {siblingCount > 0 && (
+                          <span
+                            title={`Also served by ${siblingCount} other channel(s) — gateway will failover automatically`}
+                            style={{
+                              fontSize: 10,
+                              padding: "1px 6px",
+                              borderRadius: 10,
+                              background: "rgba(59,130,246,0.15)",
+                              color: "#60a5fa",
+                              marginLeft: 6
+                            }}
+                          >
+                            +{siblingCount} more
+                          </span>
+                        )}
+                        <button className="iconButton compact" title="Copy public model" type="button" onClick={() => void navigator.clipboard.writeText(model.publicModel)}>
+                          <Clipboard size={15} />
+                        </button>
+                      </div>
+                      <span>{formatModelLabel(model.upstreamModel)}</span>
+                      <div className="modelMetaLine">
+                        <StatusBadge status={model.enabled ? "active" : "disabled"} label={model.enabled ? "enabled" : "disabled"} />
+                        <small>{provider?.name ?? model.providerInstanceId}</small>
+                      </div>
+                      <div className="modelActionRow">
+                        <button
+                          className="modelActionBtn primary"
+                          type="button"
+                          title="Test this model with a tiny prompt"
+                          disabled={isTesting}
+                          onClick={() => void testModel(model)}
+                        >
+                          <Zap size={12} /> {isTesting ? "Testing..." : "Test"}
+                        </button>
+                        <button
+                          className="modelActionBtn"
+                          type="button"
+                          title="Edit public/upstream/capabilities"
+                          onClick={() => startEdit(model)}
+                        >
+                          <Pencil size={12} /> Edit
+                        </button>
+                        <button
+                          className="modelActionBtn danger"
+                          type="button"
+                          title="Delete this mapping"
+                          onClick={() => void deleteModel(model)}
+                        >
+                          <Trash2 size={12} /> Delete
+                        </button>
+                      </div>
+                      {lastTest && (
+                        <div className={`modelTestResult ${lastTest.ok ? "ok" : "fail"}`}>
+                          {lastTest.ok ? (
+                            <>
+                              <strong>✓ {lastTest.ms}ms</strong>
+                              <div className="preview">{lastTest.preview}</div>
+                            </>
+                          ) : (
+                            <>
+                              <strong>✗ Failed</strong>
+                              <div className="errMsg">{lastTest.error}</div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-                <label className="switchControl" title={model.enabled ? "Disable model" : "Enable model"}>
-                  <input type="checkbox" checked={model.enabled} onChange={(event) => void setModelEnabled(model, event.target.checked)} />
-                  <span />
-                </label>
+                {!isEditing && (
+                  <label className="switchControl" title={model.enabled ? "Disable model" : "Enable model"}>
+                    <input type="checkbox" checked={model.enabled} onChange={(event) => void setModelEnabled(model, event.target.checked)} />
+                    <span />
+                  </label>
+                )}
               </article>
             );
           })}
@@ -4993,50 +5128,7 @@ function EndpointUrlsSection(props: {
             {copied ? <CheckCircle2 size={16} /> : <Clipboard size={16} />}
           </button>
         </div>
-        <div className="endpointUrlRow">
-          <span className="endpointUrlLabel">{t("ep.tunnel")}</span>
-          <button
-            type="button"
-            className={`pillButton tunnel ${
-              props.settings.tunnel.enabled ? "on" : ""
-            }`}
-            onClick={toggleTunnel}
-          >
-            <Cloud size={14} />
-            {props.settings.tunnel.enabled ? t("ep.disable") : t("ep.enable")}
-          </button>
-          {props.settings.tunnel.url ? (
-            <code className="endpointUrlValue">
-              {props.settings.tunnel.url}
-            </code>
-          ) : (
-            <span className="endpointUrlPlaceholder">
-              {t("ep.tunnelHint")}
-            </span>
-          )}
-        </div>
-        <div className="endpointUrlRow">
-          <span className="endpointUrlLabel">{t("ep.tailscale")}</span>
-          <button
-            type="button"
-            className={`pillButton tailscale ${
-              props.settings.tailscale.enabled ? "on" : ""
-            }`}
-            onClick={toggleTailscale}
-          >
-            <Network size={14} />
-            {props.settings.tailscale.enabled ? t("ep.disable") : t("ep.enable")}
-          </button>
-          {props.settings.tailscale.url ? (
-            <code className="endpointUrlValue">
-              {props.settings.tailscale.url}
-            </code>
-          ) : (
-            <span className="endpointUrlPlaceholder">
-              {t("ep.tailscaleHint")}
-            </span>
-          )}
-        </div>
+        {/* Tunnel + Tailscale UI hidden until backend integration is implemented */}
       </div>
       {/* QR Code */}
       <div className="endpointQrRow">

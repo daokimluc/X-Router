@@ -57,6 +57,9 @@ import { TeamService } from "./services/TeamService.js";
 import { AccountQuotaService } from "./services/AccountQuotaService.js";
 import { AutoRefreshService } from "./services/AutoRefreshService.js";
 import { CredentialWritebackService } from "./services/CredentialWritebackService.js";
+import { LatencyTrackerService } from "./services/LatencyTrackerService.js";
+import { SpendLedgerService } from "./services/SpendLedgerService.js";
+import { ResponseCacheService } from "./services/ResponseCacheService.js";
 import { RateLimitService } from "./services/RateLimitService.js";
 import { WebhookService } from "./services/WebhookService.js";
 import {
@@ -116,6 +119,9 @@ declare module "fastify" {
     mediaRouter: MediaRouter;
     accountQuotaService: AccountQuotaService;
     credentialWritebackService: CredentialWritebackService;
+    latencyTracker: LatencyTrackerService;
+    spendLedgerService: SpendLedgerService;
+    responseCacheService: ResponseCacheService;
   }
 }
 
@@ -323,6 +329,30 @@ export async function buildApp(
   app.decorate("mediaRouter", mediaRouter);
   app.decorate("accountQuotaService", new AccountQuotaService());
   app.decorate("credentialWritebackService", new CredentialWritebackService(secretService));
+  const latencyTracker = new LatencyTrackerService();
+  if (config.nodeEnv !== "test") {
+    latencyTracker.start();
+    app.addHook("onClose", () => latencyTracker.stop());
+  }
+  app.decorate("latencyTracker", latencyTracker);
+
+  // Phase 32 — spending-caps ledger
+  const spendLedgerService = new SpendLedgerService();
+  spendLedgerService.load(persistedState?.spendLedger ?? null);
+  spendLedgerService.setPersistCallback(() => {
+    if (persistenceEnabled) {
+      void app.persistenceService.save(createPersistedState(app));
+    }
+  });
+  app.decorate("spendLedgerService", spendLedgerService);
+
+  // Phase 32 — semantic-response-cache
+  const responseCacheService = new ResponseCacheService();
+  if (config.nodeEnv !== "test") {
+    responseCacheService.start();
+    app.addHook("onClose", () => responseCacheService.stop());
+  }
+  app.decorate("responseCacheService", responseCacheService);
 
   app.addHook("onSend", async (request, reply, payload) => {
     if (
@@ -444,6 +474,7 @@ function createPersistedState(app: FastifyInstance): PersistedGatewayState {
     requestLogs: app.requestLogService.listAll(),
     proxyPools: app.proxyPoolService.listAll(),
     rateLimitCounters: app.rateLimitService.exportState(),
-    modelPricing: app.modelPricingService.export()
+    modelPricing: app.modelPricingService.export(),
+    spendLedger: app.spendLedgerService.toPersisted()
   };
 }

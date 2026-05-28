@@ -29,6 +29,9 @@ export type ApiKeyForEdit = {
   groupName?: string;
   crossGroupRetry?: boolean;
   teamId?: string;
+  /** Phase 32 — spending caps */
+  dailySpendLimitUsd?: number;
+  monthlySpendLimitUsd?: number;
 };
 
 type Team = { id: string; name: string };
@@ -82,6 +85,8 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
   const [allowedModels, setAllowedModels] = useState<string[]>(apiKey.allowedModels ?? []);
   const [allowedIps, setAllowedIps] = useState<string[]>(apiKey.allowedIps ?? []);
   const [crossGroupRetry, setCrossGroupRetry] = useState(apiKey.crossGroupRetry ?? false);
+  const [dailySpendLimitUsd, setDailySpendLimitUsd] = useState(apiKey.dailySpendLimitUsd ? String(apiKey.dailySpendLimitUsd) : "");
+  const [monthlySpendLimitUsd, setMonthlySpendLimitUsd] = useState(apiKey.monthlySpendLimitUsd ? String(apiKey.monthlySpendLimitUsd) : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +116,8 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
         allowedIps,
         groupName: groupName.trim() || null,
         crossGroupRetry,
+        dailySpendLimitUsd: dailySpendLimitUsd ? Number.parseFloat(dailySpendLimitUsd) : null,
+        monthlySpendLimitUsd: monthlySpendLimitUsd ? Number.parseFloat(monthlySpendLimitUsd) : null,
       };
       await api.patch(`/admin/v1/api-keys/${apiKey.id}`, body);
       onSaved();
@@ -230,6 +237,28 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
                   min="0"
                   value={dailyTokenLimit}
                   onChange={(e) => setDailyTokenLimit(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                {t("apikey.spend.daily")}
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder={t("apikey.spend.unlimited")}
+                  value={dailySpendLimitUsd}
+                  onChange={(e) => setDailySpendLimitUsd(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                {t("apikey.spend.monthly")}
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder={t("apikey.spend.unlimited")}
+                  value={monthlySpendLimitUsd}
+                  onChange={(e) => setMonthlySpendLimitUsd(e.target.value)}
                 />
               </label>
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>

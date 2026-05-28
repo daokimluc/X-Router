@@ -2,7 +2,7 @@
  * Usage Page — modern analytics dashboard with topology, charts, and cost tracking.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Controls,
@@ -43,6 +43,9 @@ export type ProviderInstanceInfo = {
 
 type TimeRange = "today" | "24h" | "7d" | "30d" | "60d";
 type MetricMode = "tokens" | "cost";
+
+// Phase 32 — usage-time-series-charts (lazy chunk)
+const UsageChartsPanel = lazy(() => import("./components/UsageChartsPanel"));
 
 // ─── Cost estimation (per 1M tokens) ──────────────────────
 
@@ -148,6 +151,7 @@ export function UsagePage(props: {
   usage: UsageRecord[];
   providerInstances: ProviderInstanceInfo[];
   accounts?: AccountInfo[];
+  api?: { get: <T>(path: string) => Promise<T> };
 }) {
   const { usage, accounts = [] } = props;
 
@@ -298,6 +302,11 @@ export function UsagePage(props: {
           </div>
         </div>
         <ModelTable stats={modelStats} mode={metricMode} />
+        {props.api && (
+          <Suspense fallback={<div style={{ padding: 16, textAlign: "center", color: "var(--color-text-muted)" }}>Loading charts…</div>}>
+            <UsageChartsPanel api={props.api} range={range} />
+          </Suspense>
+        )}
       </div>
     </div>
   );

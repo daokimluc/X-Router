@@ -75,6 +75,16 @@ export type PersistedGatewayState = {
     dailyTokens: number;
   }>;
   modelPricing?: ModelPricing[];
+  /** Phase 32 — spending-caps ledger */
+  spendLedger?: {
+    entries: Record<string, {
+      dayKey: string;
+      monthKey: string;
+      day: number;
+      month: number;
+      lastBlocked: string | null;
+    }>;
+  };
 };
 
 export class PersistenceService {

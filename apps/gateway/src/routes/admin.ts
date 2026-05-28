@@ -183,7 +183,10 @@ const apiKeyCreateSchema = z.object({
   allowedModels: z.array(z.string().min(1)).max(200).optional(),
   allowedIps: z.array(z.string().min(1)).max(50).optional(),
   groupName: z.string().min(1).max(64).optional(),
-  crossGroupRetry: z.boolean().optional()
+  crossGroupRetry: z.boolean().optional(),
+  dailySpendLimitUsd: z.number().min(0).optional(),
+  monthlySpendLimitUsd: z.number().min(0).optional(),
+  cacheMode: z.enum(["client_choice", "force_use", "force_skip"]).optional()
 });
 const configDraftSchema = z.object({
   config: z.record(z.unknown())
@@ -2856,7 +2859,10 @@ export async function registerAdminRoutes(
         allowedModels: z.array(z.string().min(1)).max(200).optional(),
         allowedIps: z.array(z.string().min(1)).max(50).optional(),
         groupName: z.union([z.string().min(1).max(64), z.null()]).optional(),
-        crossGroupRetry: z.boolean().optional()
+        crossGroupRetry: z.boolean().optional(),
+        dailySpendLimitUsd: z.union([z.number().min(0), z.null()]).optional(),
+        monthlySpendLimitUsd: z.union([z.number().min(0), z.null()]).optional(),
+        cacheMode: z.enum(["client_choice", "force_use", "force_skip"]).optional()
       }).parse(request.body ?? {});
 
       // Validate IP allowlist entries
@@ -3446,6 +3452,140 @@ export async function registerAdminRoutes(
       }
 
       return { data: result.data, total: result.total };
+    }
+  );
+
+  // Phase 32 — usage-time-series-charts: server-side bucketed aggregate
+  app.get(
+    "/admin/v1/usage/aggregate",
+    {
+      preHandler: adminAuth
+    },
+    async (request) => {
+      const q = z.object({
+        from: z.string().datetime(),
+        to: z.string().datetime(),
+        bucket: z.enum(["hour", "day"]).optional().default("hour"),
+        groupBy: z.enum(["model", "provider"]).optional().default("model")
+      }).parse(request.query ?? {});
+
+      return app.usageService.aggregate({
+        from: new Date(q.from),
+        to: new Date(q.to),
+        bucket: q.bucket,
+        groupBy: q.groupBy
+      });
+    }
+  );
+
+  // Phase 32 — latency-observability: snapshot of rolling 5-min latency window
+  app.get(
+    "/admin/v1/metrics/latency",
+    {
+      preHandler: adminAuth
+    },
+    async () => {
+      return app.latencyTracker.snapshot();
+    }
+  );
+
+  // Phase 32 — spending-caps: spend snapshot per scope
+  app.get(
+    "/admin/v1/spend/key/:id",
+    {
+      preHandler: adminAuth
+    },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const key = app.apiKeyService.list().find((k) => k.id === params.id);
+      if (!key) {
+        return reply.code(404).send({
+          error: { type: "not_found", message: `API key ${params.id} not found`, code: "key_not_found" }
+        });
+      }
+      const team = key.teamId ? app.teamService.get(key.teamId) : undefined;
+      const dayCap = key.dailySpendLimitUsd ?? team?.dailySpendLimitUsd ?? null;
+      const monthCap = key.monthlySpendLimitUsd ?? team?.monthlySpendLimitUsd ?? null;
+      const snap = app.spendLedgerService.snapshot(`key:${key.id}`, dayCap, monthCap);
+      return {
+        scope: "key" as const,
+        id: key.id,
+        day: snap.day,
+        month: snap.month,
+        lastBlocked: snap.lastBlocked
+      };
+    }
+  );
+
+  app.get(
+    "/admin/v1/spend/team/:id",
+    {
+      preHandler: adminAuth
+    },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const team = app.teamService.get(params.id);
+      if (!team) {
+        return reply.code(404).send({
+          error: { type: "not_found", message: `Team ${params.id} not found`, code: "team_not_found" }
+        });
+      }
+      const snap = app.spendLedgerService.snapshot(
+        `team:${team.id}`,
+        team.dailySpendLimitUsd ?? null,
+        team.monthlySpendLimitUsd ?? null
+      );
+      return {
+        scope: "team" as const,
+        id: team.id,
+        day: snap.day,
+        month: snap.month,
+        lastBlocked: snap.lastBlocked
+      };
+    }
+  );
+
+  // Phase 32 — semantic-response-cache: stats and flush
+  app.get(
+    "/admin/v1/cache/stats",
+    {
+      preHandler: adminAuth
+    },
+    async () => {
+      return app.responseCacheService.stats();
+    }
+  );
+
+  app.delete(
+    "/admin/v1/cache",
+    {
+      preHandler: adminAuth
+    },
+    async () => {
+      const cleared = app.responseCacheService.delete();
+      app.adminAuditService.record({
+        action: "cache.flush_all",
+        targetType: "cache",
+        targetId: "all"
+      });
+      return { cleared };
+    }
+  );
+
+  app.delete(
+    "/admin/v1/cache/:keyPrefix",
+    {
+      preHandler: adminAuth
+    },
+    async (request) => {
+      const params = z.object({ keyPrefix: z.string().min(1).max(64) }).parse(request.params);
+      const cleared = app.responseCacheService.delete(params.keyPrefix);
+      app.adminAuditService.record({
+        action: "cache.flush_prefix",
+        targetType: "cache",
+        targetId: params.keyPrefix
+      });
+      return { cleared };
     }
   );
 

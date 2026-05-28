@@ -1,9 +1,12 @@
 /**
  * ApiInfoPanel — Phase 27 — show endpoint URLs + copy + speed test.
+ *
+ * Phase 32 — added "Client setup" section so users know what to put in
+ * `base_url` / `api_key` for each SDK.
  */
 
 import { useState } from "react";
-import { Network, Copy, Zap } from "lucide-react";
+import { Network, Copy, Zap, Check } from "lucide-react";
 
 type EndpointSpec = { label: string; method: string; path: string; auth: "admin" | "api-key" | "public" };
 
@@ -18,6 +21,26 @@ const ENDPOINTS: EndpointSpec[] = [
   { label: "Public pricing", method: "GET", path: "/v1/pricing", auth: "public" },
   { label: "Public models", method: "GET", path: "/v1/public/models", auth: "public" },
   { label: "Health", method: "GET", path: "/healthz", auth: "public" },
+];
+
+type ClientSetup = {
+  name: string;
+  examples: string;
+  /** Suffix appended to gateway origin to form the SDK base_url */
+  baseUrlSuffix: string;
+};
+
+const CLIENT_SETUPS: ClientSetup[] = [
+  {
+    name: "OpenAI-compatible",
+    examples: "openai SDK · LiteLLM · Cline · Continue · LangChain · Aider",
+    baseUrlSuffix: "/v1",
+  },
+  {
+    name: "Anthropic SDK",
+    examples: "@anthropic-ai/sdk · Claude Code · Anthropic Python SDK",
+    baseUrlSuffix: "",
+  },
 ];
 
 function getBaseUrl(): string {
@@ -91,7 +114,68 @@ export function ApiInfoPanel() {
           {pinging ? "Pinging..." : pingResult ? `${pingResult.ms}ms ${pingResult.ok ? "✓" : "✗"}` : "Speed test"}
         </button>
       </header>
+
+      {/* Client setup — shows what to put in `base_url` for each SDK family */}
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--color-border)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-muted)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Client setup
+        </div>
+        {CLIENT_SETUPS.map((c) => {
+          const fullBase = `${baseUrl}${c.baseUrlSuffix}`;
+          const key = `client-${c.name}`;
+          return (
+            <div key={c.name} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{c.name}</div>
+              <div style={{ fontSize: 10, color: "var(--color-text-muted)", marginBottom: 4 }}>{c.examples}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                <span style={{ color: "var(--color-text-muted)", minWidth: 56 }}>base_url</span>
+                <code
+                  style={{
+                    flex: 1,
+                    padding: "2px 6px",
+                    background: "var(--color-surface-2, #0f172a)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 4,
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    overflowX: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {fullBase}
+                </code>
+                <button
+                  type="button"
+                  className="iconButton compact"
+                  title="Copy base URL"
+                  onClick={() => void copyUrl(fullBase, key)}
+                >
+                  {copiedKey === key ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                </button>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 2 }}>
+                <span style={{ color: "var(--color-text-muted)", minWidth: 56 }}>api_key</span>
+                <code
+                  style={{
+                    flex: 1,
+                    padding: "2px 6px",
+                    color: "var(--color-text-muted)",
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                  }}
+                >
+                  &lt;your gateway API key from API Keys tab&gt;
+                </code>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-muted)", marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Raw endpoints (for curl / Postman)
+        </div>
         {ENDPOINTS.map((ep) => {
           const fullUrl = `${baseUrl}${ep.path}`;
           const key = `${ep.method}-${ep.path}`;
@@ -150,8 +234,7 @@ export function ApiInfoPanel() {
                 title="Copy full URL"
                 onClick={() => void copyUrl(fullUrl, key)}
               >
-                <Copy size={12} />
-                {copiedKey === key && <span style={{ marginLeft: 4, fontSize: 10, color: "#10b981" }}>✓</span>}
+                {copiedKey === key ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
               </button>
             </div>
           );

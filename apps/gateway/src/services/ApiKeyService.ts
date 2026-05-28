@@ -22,6 +22,12 @@ export type InternalApiKeyRecord = {
   groupName?: string;
   /** Phase 20c — when true, fall back to all groups if no candidate matches the key's group. */
   crossGroupRetry?: boolean;
+  /** Phase 32 — hard daily USD spend cap. undefined = unlimited (or inherit from team). */
+  dailySpendLimitUsd?: number;
+  /** Phase 32 — hard monthly USD spend cap. undefined = unlimited (or inherit from team). */
+  monthlySpendLimitUsd?: number;
+  /** Phase 32 — semantic-response-cache mode. undefined → "client_choice". */
+  cacheMode?: "client_choice" | "force_use" | "force_skip";
   createdAt: Date;
 };
 
@@ -106,6 +112,9 @@ export class ApiKeyService {
     allowedIps?: string[];
     groupName?: string | null;
     crossGroupRetry?: boolean;
+    dailySpendLimitUsd?: number | null;
+    monthlySpendLimitUsd?: number | null;
+    cacheMode?: "client_choice" | "force_use" | "force_skip";
   }): InternalApiKeyRecord | null {
     const record = Array.from(this.keys.values()).find((r) => r.id === id);
     if (!record) return null;
@@ -120,6 +129,9 @@ export class ApiKeyService {
     if (patch.allowedIps !== undefined) record.allowedIps = patch.allowedIps.length > 0 ? patch.allowedIps : undefined;
     if (patch.groupName !== undefined) record.groupName = patch.groupName ?? undefined;
     if (patch.crossGroupRetry !== undefined) record.crossGroupRetry = patch.crossGroupRetry;
+    if (patch.dailySpendLimitUsd !== undefined) record.dailySpendLimitUsd = (patch.dailySpendLimitUsd ?? 0) > 0 ? (patch.dailySpendLimitUsd as number) : undefined;
+    if (patch.monthlySpendLimitUsd !== undefined) record.monthlySpendLimitUsd = (patch.monthlySpendLimitUsd ?? 0) > 0 ? (patch.monthlySpendLimitUsd as number) : undefined;
+    if (patch.cacheMode !== undefined) record.cacheMode = patch.cacheMode;
     const { key: _key, ...safeRecord } = record;
     return structuredClone(safeRecord);
   }
@@ -141,6 +153,9 @@ export class ApiKeyService {
     allowedIps?: string[];
     groupName?: string;
     crossGroupRetry?: boolean;
+    dailySpendLimitUsd?: number;
+    monthlySpendLimitUsd?: number;
+    cacheMode?: "client_choice" | "force_use" | "force_skip";
   } = {}): CreatedInternalApiKey {
     const key = `igw_${randomBytes(24).toString("hex")}`;
     const record = {
@@ -158,6 +173,9 @@ export class ApiKeyService {
       allowedIps: input.allowedIps && input.allowedIps.length > 0 ? input.allowedIps : undefined,
       groupName: input.groupName,
       crossGroupRetry: input.crossGroupRetry,
+      dailySpendLimitUsd: input.dailySpendLimitUsd && input.dailySpendLimitUsd > 0 ? input.dailySpendLimitUsd : undefined,
+      monthlySpendLimitUsd: input.monthlySpendLimitUsd && input.monthlySpendLimitUsd > 0 ? input.monthlySpendLimitUsd : undefined,
+      cacheMode: input.cacheMode,
       createdAt: new Date()
     };
 

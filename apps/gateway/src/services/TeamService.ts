@@ -23,6 +23,10 @@ export type Team = {
   rpmLimit?: number;
   dailyLimit?: number;
   monthlyLimit?: number;
+  /** Phase 32 — hard daily USD spend cap inherited by team-bound keys when key has no own cap. */
+  dailySpendLimitUsd?: number;
+  /** Phase 32 — hard monthly USD spend cap. */
+  monthlySpendLimitUsd?: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -36,6 +40,8 @@ export type CreateTeamInput = {
   rpmLimit?: number;
   dailyLimit?: number;
   monthlyLimit?: number;
+  dailySpendLimitUsd?: number;
+  monthlySpendLimitUsd?: number;
 };
 
 export type UpdateTeamInput = Partial<CreateTeamInput>;
@@ -82,6 +88,8 @@ export class TeamService {
       rpmLimit: input.rpmLimit,
       dailyLimit: input.dailyLimit,
       monthlyLimit: input.monthlyLimit,
+      dailySpendLimitUsd: input.dailySpendLimitUsd && input.dailySpendLimitUsd > 0 ? input.dailySpendLimitUsd : undefined,
+      monthlySpendLimitUsd: input.monthlySpendLimitUsd && input.monthlySpendLimitUsd > 0 ? input.monthlySpendLimitUsd : undefined,
       createdAt: now,
       updatedAt: now,
     };

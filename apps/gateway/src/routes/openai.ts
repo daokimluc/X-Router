@@ -9,6 +9,8 @@ import { isProviderStream, writeOpenAIStream } from "../utils/sse.js";
 import { openAIChatCompletionRequestSchema } from "../validation/openaiSchemas.js";
 import type { ProviderProtocol } from "../providers/base/ProviderCapabilities.js";
 import { resolveAccountProxyOptions } from "../proxy/resolveAccountProxy.js";
+import { buildCacheKey, resolveCacheMode } from "../services/ResponseCacheService.js";
+import type { NormalizedOpenAIResponse } from "../providers/base/types.js";
 
 export async function registerOpenAIRoutes(
   app: FastifyInstance,
@@ -27,7 +29,10 @@ export async function registerOpenAIRoutes(
         createKeyPolicyEnforcer({
           apiKeyService: app.apiKeyService,
           teamService: app.teamService,
-          getModel: (req) => (req.body as { model?: string } | undefined)?.model
+          getModel: (req) => (req.body as { model?: string } | undefined)?.model,
+          modelPricingService: app.modelPricingService,
+          spendLedgerService: app.spendLedgerService,
+          getBody: (req) => req.body as { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined
         })
       ]
     },
@@ -54,6 +59,58 @@ export async function registerOpenAIRoutes(
       if (typeof directAccountId === "string" && directAccountId.length > 0) {
         const directResult = await handleDirectAccountRouting(app, request, reply, body, directAccountId, "openai_chat_completions");
         return directResult;
+      }
+
+      // Phase 32 — semantic-response-cache lookup (non-streaming only)
+      const apiKeyHash = request.auth?.apiKeyHash;
+      const apiKeyRecord = apiKeyHash ? app.apiKeyService.findByHash(apiKeyHash) : undefined;
+      const cacheControl = (body as { cache_control?: { mode?: string; ttl?: number } }).cache_control;
+      const cacheHeader = request.headers["x-gateway-cache-control"];
+      const cacheMode = resolveCacheMode({
+        bodyMode: cacheControl?.mode,
+        headerMode: typeof cacheHeader === "string" ? cacheHeader : undefined,
+        apiKeyMode: apiKeyRecord?.cacheMode,
+        temperature: body.temperature ?? null,
+        top_p: (body as { top_p?: number }).top_p ?? null,
+        top_k: (body as { top_k?: number }).top_k ?? null,
+        isStream: body.stream === true
+      });
+      const cacheKey = cacheMode !== "skip" ? buildCacheKey({
+        model: body.model,
+        protocol: "openai",
+        messages: body.messages,
+        temperature: body.temperature ?? null,
+        top_p: (body as { top_p?: number }).top_p ?? null,
+        top_k: (body as { top_k?: number }).top_k ?? null,
+        max_tokens: body.max_tokens ?? null,
+        stop: (body as { stop?: unknown }).stop,
+        reasoning_effort: (body as { reasoning_effort?: string }).reasoning_effort ?? null,
+        apiKeyHash
+      }) : null;
+
+      if (cacheMode === "use" && cacheKey) {
+        const cached = app.responseCacheService.read(cacheKey) as NormalizedOpenAIResponse | null;
+        if (cached) {
+          reply.header("x-gateway-cache", "hit");
+          // Record zero-cost UsageRecord with cacheHit
+          app.usageService.record({
+            requestId: request.id,
+            protocol: "openai",
+            model: body.model,
+            providerType: "cache",
+            providerInstanceId: "cache",
+            apiKeyHash,
+            promptTokens: cached.usage?.prompt_tokens ?? 0,
+            completionTokens: cached.usage?.completion_tokens ?? 0,
+            totalTokens: cached.usage?.total_tokens ?? 0,
+            estimatedCost: 0,
+            cacheHit: true
+          });
+          return cached;
+        }
+      }
+      if (cacheMode !== "skip") {
+        reply.header("x-gateway-cache", cacheMode === "refresh" ? "refresh" : "miss");
       }
 
       // Apply Token Saver compression to messages
@@ -127,6 +184,7 @@ export async function registerOpenAIRoutes(
         for (let attempt = 0; attempt < attempts; attempt += 1) {
           let lease;
           let releaseProvider: (() => void) | undefined;
+          const requestStart = performance.now();
 
           try {
             app.circuitBreaker.beforeRequest(
@@ -169,8 +227,13 @@ export async function registerOpenAIRoutes(
                 });
                 lease.releaseSuccess();
                 app.circuitBreaker.recordSuccess(providerInstance.id);
-                // Phase 31 — prefer real usage from stream when adapter emits it,
-                // fall back to char-based estimation otherwise.
+                app.latencyTracker.record({
+                  providerInstanceId: candidate.providerInstanceId,
+                  publicModel: candidate.publicModel,
+                  accountId: lease.account.id,
+                  durationMs: Math.round(performance.now() - requestStart),
+                  ok: true
+                });
                 const reported = response.usage?.();
                 let promptTokens: number;
                 let completionTokens: number;
@@ -213,6 +276,14 @@ export async function registerOpenAIRoutes(
                   lease.account.id,
                   promptTokens + completionTokens
                 );
+                // Phase 32 — settle spend reservation against actual cost
+                if (request.spendReservation) {
+                  const settleCost = app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens).totalCost;
+                  const ids = request.spendReservation.id.split("|");
+                  for (const id of ids) {
+                    app.spendLedgerService.settle(id, settleCost);
+                  }
+                }
               } catch (streamError) {
                 lease.releaseFailure(
                   streamError instanceof Error ? streamError.message : "stream failed"
@@ -246,6 +317,13 @@ export async function registerOpenAIRoutes(
             lease.releaseSuccess();
             releaseProvider();
             app.circuitBreaker.recordSuccess(providerInstance.id);
+            app.latencyTracker.record({
+              providerInstanceId: candidate.providerInstanceId,
+              publicModel: candidate.publicModel,
+              accountId: lease.account.id,
+              durationMs: Math.round(performance.now() - requestStart),
+              ok: true
+            });
             // Record usage — use real tokens if available, otherwise estimate from content
             const realUsage = response.usage;
             let promptTokens = realUsage?.prompt_tokens ?? 0;
@@ -288,6 +366,21 @@ export async function registerOpenAIRoutes(
               lease.account.id,
               promptTokens + completionTokens
             );
+            // Phase 32 — settle spend reservation against actual cost
+            if (request.spendReservation) {
+              const settleCost = app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens).totalCost;
+              const ids = request.spendReservation.id.split("|");
+              for (const id of ids) {
+                app.spendLedgerService.settle(id, settleCost);
+              }
+            }
+            // Phase 32 — semantic-response-cache write (non-stream, no tool_calls)
+            const respMessage = response.choices?.[0]?.message as Record<string, unknown> | undefined;
+            const hasToolCalls = Array.isArray(respMessage?.tool_calls) && (respMessage!.tool_calls as unknown[]).length > 0;
+            if (cacheKey && cacheMode !== "skip" && !hasToolCalls) {
+              const ttl = (body as { cache_control?: { ttl?: number } }).cache_control?.ttl;
+              app.responseCacheService.write(cacheKey, response, body.model, ttl);
+            }
             return {
               ...response,
               model: body.model
@@ -327,6 +420,13 @@ export async function registerOpenAIRoutes(
             if (lease) {
               lease.releaseFailure(error instanceof Error ? error.message : "unknown error");
               handleProviderAccountState(error, accountPool, lease.account.id, providerInstance.cooldownMs);
+              app.latencyTracker.record({
+                providerInstanceId: candidate.providerInstanceId,
+                publicModel: candidate.publicModel,
+                accountId: lease.account.id,
+                durationMs: Math.round(performance.now() - requestStart),
+                ok: false
+              });
             }
 
             if (isProviderFailureForCircuit(error)) {
@@ -337,6 +437,14 @@ export async function registerOpenAIRoutes(
             }
 
             if (!isRetryableProviderError(error)) {
+              // Phase 32 — release spend reservation on terminal failure
+              if (request.spendReservation) {
+                const ids = request.spendReservation.id.split("|");
+                for (const id of ids) {
+                  app.spendLedgerService.release(id);
+                }
+                request.spendReservation = undefined;
+              }
               throw error;
             }
           }
