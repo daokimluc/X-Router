@@ -21,4 +21,7 @@ DOCKER.md
 PLAN.md
 README_1.md
 SECURITY_CHECKLIST.md
+build/
+*.tgz
+bun.lock
 

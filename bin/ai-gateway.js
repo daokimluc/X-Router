@@ -22,7 +22,7 @@ for (let i = 0; i < args.length; i++) {
 
 function printHelp() {
   const help = `
-Usage: ai-gateway [options]
+Usage: x-router [options]
 
 Options:
   --port <number>  Port to listen on (default: 3100)
@@ -32,6 +32,8 @@ Options:
 Environment Variables (required):
   INTERNAL_API_KEYS   Comma-separated API keys for /v1 routes
   ADMIN_API_KEYS      Comma-separated API keys for /admin routes
+
+Documentation: https://github.com/daokimluc/AI-Gateway
 `.trim();
 
   console.log(help);

@@ -7,15 +7,96 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build (e.g. v0.1.0)"
+        description: "Tag to publish (e.g. v0.1.0)"
         required: true
 
 permissions:
   contents: write
+  packages: write
+  id-token: write
 
 jobs:
-  build:
-    name: Build all binaries (cross-compile from Linux)
+  npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install dashboard dependencies
+        working-directory: apps/dashboard
+        run: npm install
+
+      - name: Install gateway dependencies
+        working-directory: apps/gateway
+        run: npm install
+
+      - name: Build all
+        run: npm run build:all
+
+      - name: Publish to npm (public scoped)
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  docker:
+    name: Build & push Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "version_no_v=${{ inputs.tag }}" | sed 's/=v/=/' >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "version_no_v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/x-router
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version_no_v }}
+            type=raw,value=latest
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  github_release:
+    name: Create GitHub Release
+    needs: [npm, docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,190 +110,35 @@ jobs:
             echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install root dependencies
-        run: bun install --no-frozen-lockfile
-
-      - name: Install dashboard dependencies
-        working-directory: apps/dashboard
-        run: bun install --no-frozen-lockfile
-
-      - name: Install gateway dependencies
-        working-directory: apps/gateway
-        run: bun install --no-frozen-lockfile
-
-      - name: Build dashboard (production assets)
-        run: bun run build:dashboard
-
-      - name: Compile binaries for all targets
-        run: |
-          mkdir -p build
-
-          echo "→ Linux x64"
-          bun build scripts/bun-entry.ts \
-            --compile \
-            --target=bun-linux-x64 \
-            --outfile=build/ai-gateway-linux-x64
-
-          echo "→ macOS x64 (Intel)"
-          bun build scripts/bun-entry.ts \
-            --compile \
-            --target=bun-darwin-x64 \
-            --outfile=build/ai-gateway-macos-x64
-
-          echo "→ macOS arm64 (Apple Silicon)"
-          bun build scripts/bun-entry.ts \
-            --compile \
-            --target=bun-darwin-arm64 \
-            --outfile=build/ai-gateway-macos-arm64
-
-          echo "→ Windows x64"
-          bun build scripts/bun-entry.ts \
-            --compile \
-            --target=bun-windows-x64 \
-            --outfile=build/ai-gateway-windows-x64.exe
-
-          ls -la build/
-
-      - name: Stage release bundles
-        run: |
-          VERSION="${{ steps.ver.outputs.version }}"
-
-          stage() {
-            local label="$1"
-            local bin_src="$2"
-            local bin_name="$3"
-            local stage_dir="release/ai-gateway-${label}-${VERSION}"
-            mkdir -p "$stage_dir"
-            cp "$bin_src" "$stage_dir/$bin_name"
-            chmod +x "$stage_dir/$bin_name"
-            cp -r dashboard-dist "$stage_dir/"
-            cat > "$stage_dir/RUN.md" <<'EOF'
-          # AI Gateway — Quick start
-
-          ## 1. Set required environment variables
-
-          Linux / macOS:
-          ```bash
-          export INTERNAL_API_KEYS="my-key-1,my-key-2"
-          export ADMIN_API_KEYS="my-admin-key"
-          ```
-
-          Windows (PowerShell):
-          ```powershell
-          $env:INTERNAL_API_KEYS = "my-key-1,my-key-2"
-          $env:ADMIN_API_KEYS    = "my-admin-key"
-          ```
-
-          ## 2. Run
-
-          Linux / macOS:
-          ```bash
-          ./ai-gateway --port 3100
-          ```
-
-          Windows:
-          ```powershell
-          .\ai-gateway.exe --port 3100
-          ```
-
-          ## 3. Open dashboard
-
-          http://localhost:3100/
-
-          ---
-
-          ## macOS first-run note
-
-          The binary is not code-signed. On first run macOS may show a security
-          warning. Allow it via System Settings → Privacy & Security, or run:
-
-          ```bash
-          xattr -d com.apple.quarantine ai-gateway
-          ```
-          EOF
-          }
-
-          stage linux-x64    build/ai-gateway-linux-x64        ai-gateway
-          stage macos-x64    build/ai-gateway-macos-x64        ai-gateway
-          stage macos-arm64  build/ai-gateway-macos-arm64      ai-gateway
-          stage windows-x64  build/ai-gateway-windows-x64.exe  ai-gateway.exe
-
-          ls -la release/
-
-      - name: Create archives
-        run: |
-          VERSION="${{ steps.ver.outputs.version }}"
-          cd release
-          for label in linux-x64 macos-x64 macos-arm64; do
-            tar -czf "ai-gateway-${label}-${VERSION}.tar.gz" "ai-gateway-${label}-${VERSION}/"
-          done
-          # Windows → zip
-          sudo apt-get update && sudo apt-get install -y zip
-          zip -r "ai-gateway-windows-x64-${VERSION}.zip" "ai-gateway-windows-x64-${VERSION}/"
-
-          ls -la
-
-      - name: Generate checksums
-        run: |
-          cd release
-          sha256sum *.tar.gz *.zip > checksums.txt
-          cat checksums.txt
-
-      - name: Create GitHub Release
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.version }}
           name: ${{ steps.ver.outputs.version }}
           generate_release_notes: true
-          files: |
-            release/*.zip
-            release/*.tar.gz
-            release/checksums.txt
           body: |
-            ## AI Gateway ${{ steps.ver.outputs.version }}
+            ## X-Router ${{ steps.ver.outputs.version }}
 
-            Single-file binaries cross-compiled from Linux with Bun. Each archive contains:
-            - The `ai-gateway` (or `.exe`) binary
-            - `dashboard-dist/` static assets the binary serves
-            - `RUN.md` quick-start guide
-
-            ### Downloads
-
-            | Platform | File |
-            |---|---|
-            | Windows x64 | `ai-gateway-windows-x64-${{ steps.ver.outputs.version }}.zip` |
-            | macOS Apple Silicon | `ai-gateway-macos-arm64-${{ steps.ver.outputs.version }}.tar.gz` |
-            | macOS Intel | `ai-gateway-macos-x64-${{ steps.ver.outputs.version }}.tar.gz` |
-            | Linux x64 | `ai-gateway-linux-x64-${{ steps.ver.outputs.version }}.tar.gz` |
-
-            ### Quick start
+            ### Install via npm
 
             ```bash
-            export INTERNAL_API_KEYS="your-key-1,your-key-2"
-            export ADMIN_API_KEYS="your-admin-key"
-            ./ai-gateway --port 3100
+            npm install -g @daokimluc/x-router
+            x-router
+            ```
+
+            ### Run via Docker
+
+            ```bash
+            docker run -p 3100:3100 \
+              -e INTERNAL_API_KEYS="your-user-key" \
+              -e ADMIN_API_KEYS="your-admin-key" \
+              ghcr.io/daokimluc/x-router:${{ steps.ver.outputs.version }}
             ```
 
             Open `http://localhost:3100/` for the admin dashboard.
+            Login with any value from `ADMIN_API_KEYS`.
 
-            ### macOS users
+            ### Links
 
-            The binary is not code-signed. On first run, macOS may block it. Either
-            allow it via System Settings → Privacy & Security, or run:
-            ```bash
-            xattr -d com.apple.quarantine ai-gateway
-            ```
-
-            ### Verify integrity
-
-            ```bash
-            sha256sum -c checksums.txt
-            ```
+            - **npm**: https://www.npmjs.com/package/@daokimluc/x-router
+            - **Docker**: https://github.com/daokimluc/AI-Gateway/pkgs/container/x-router
