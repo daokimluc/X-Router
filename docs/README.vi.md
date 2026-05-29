@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/image.png" alt="X-Router" width="640" />
+  <img src="images/image.png" alt="X-Router" width="100%" />
 </p>
 
 <h1 align="center">X-Router</h1>
