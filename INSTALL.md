@@ -13,6 +13,11 @@ a personal access token. Works the same on **Windows** and **macOS**.
    - `repo` (the repository is private)
 4. **Generate token** and copy it (starts with `ghp_`). It is shown only once.
 
+> **Use a _classic_ token, not a fine-grained one.** GitHub Packages' npm
+> registry does not accept fine-grained tokens yet — they fail with
+> `403 ... token does not match expected scopes`. The link above already opens
+> the classic token page.
+
 ## 2. Tell npm to use the token (one time, per machine)
 
 Run this once, replacing `YOUR_TOKEN` with the token from step 1:
