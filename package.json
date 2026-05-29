@@ -1,6 +1,6 @@
 {
   "name": "@daokimluc/x-router",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "X-Router — unified AI Gateway with Fastify backend, React dashboard, multi-provider routing, spending caps, response cache, and observability",
   "keywords": [
@@ -14,13 +14,13 @@
     "llm",
     "fastify"
   ],
-  "homepage": "https://github.com/daokimluc/AI-Gateway#readme",
+  "homepage": "https://github.com/daokimluc/X-Router#readme",
   "bugs": {
-    "url": "https://github.com/daokimluc/AI-Gateway/issues"
+    "url": "https://github.com/daokimluc/X-Router/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/daokimluc/AI-Gateway.git"
+    "url": "git+https://github.com/daokimluc/X-Router.git"
   },
   "license": "MIT",
   "author": "Luc DK <daokimluc9xx@gmail.com>",
@@ -28,7 +28,7 @@
     "access": "public"
   },
   "bin": {
-    "x-router": "./bin/ai-gateway.js"
+    "x-router": "./bin/x-router.js"
   },
   "files": [
     "bin/",
@@ -42,11 +42,11 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "build:gateway": "cd apps/gateway && npx tsc --project tsconfig.json && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/gateway/dist',d='dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('✓ Gateway dist synced')\"",
-    "build:dashboard": "cd apps/dashboard && npm run build && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/dashboard/dist',d='dashboard-dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('✓ Dashboard dist synced')\"",
+    "build:gateway": "cd apps/gateway && npx tsc --project tsconfig.json && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/gateway/dist',d='dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('âœ“ Gateway dist synced')\"",
+    "build:dashboard": "cd apps/dashboard && npm run build && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/dashboard/dist',d='dashboard-dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('âœ“ Dashboard dist synced')\"",
     "build:all": "npm run build:dashboard && npm run build:gateway",
     "prepack": "npm run build:all",
-    "start": "node bin/ai-gateway.js"
+    "start": "node bin/x-router.js"
   },
   "dependencies": {
     "@fastify/static": "^9.1.3",

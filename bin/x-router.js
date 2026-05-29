@@ -1,11 +1,11 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
- * x-router — interactive CLI launcher.
+ * x-router â€” interactive CLI launcher.
  *
  * Spawns the gateway as a child process so the launcher console stays clean
  * for the menu while pino JSON logs go to ~/.x-router/server.log.
  *
- * No flags → banner + start + interactive menu.
+ * No flags â†’ banner + start + interactive menu.
  *
  * Flags:
  *   --port <n>       gateway port (default 3100)
@@ -58,7 +58,7 @@ Configuration:
   ~/.x-router/config.json   Saved API keys (auto-generated on first run)
   ~/.x-router/server.log    Server log (rotated each launch)
 
-Docs: https://github.com/daokimluc/AI-Gateway
+Docs: https://github.com/daokimluc/X-Router
 `.trim());
 }
 
@@ -68,7 +68,7 @@ if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
   process.exit(1);
 }
 
-// ─── Config ──────────────────────────────────────────────────
+// â”€â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const CONFIG_DIR = path.join(homedir(), '.x-router');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 const LOG_PATH = path.join(CONFIG_DIR, 'server.log');
@@ -79,7 +79,7 @@ function ensureConfig() {
   if (existsSync(CONFIG_PATH)) {
     try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch {}
   }
-  // Default admin key is literally "admin" — simple to remember on first run.
+  // Default admin key is literally "admin" â€” simple to remember on first run.
   // Admins can rotate it via the dashboard; the new value is read from
   // ADMIN_API_KEYS env on each launch (or kept here if persisted).
   if (!cfg.adminApiKeys) {
@@ -100,7 +100,7 @@ if (printKeysOnly) {
 const VERSION = readVersion();
 const url = `http://localhost:${portNum}`;
 
-// ─── --no-menu: run server inline (foreground) ───────────────
+// â”€â”€â”€ --no-menu: run server inline (foreground) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (noMenu) {
   process.env.PORT = String(portNum);
   process.env.HOST = host;
@@ -108,7 +108,7 @@ if (noMenu) {
   console.log(`X-Router v${VERSION} starting on ${url}`);
   await import('../dist/server.js');
 } else {
-  // ─── Interactive mode: spawn server as child ────────────────
+  // â”€â”€â”€ Interactive mode: spawn server as child â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   banner();
   console.log('Starting server...\n');
 
@@ -149,8 +149,8 @@ if (noMenu) {
     process.exit(1);
   }
 
-  console.log(`✓ Server ready at ${url}`);
-  console.log(`  Admin login key: ${adminKeys}  (rotate via dashboard → Settings)`);
+  console.log(`âœ“ Server ready at ${url}`);
+  console.log(`  Admin login key: ${adminKeys}  (rotate via dashboard â†’ Settings)`);
   console.log(`  Logs: ${LOG_PATH}`);
 
   // Auto-open browser on first launch
@@ -176,13 +176,13 @@ if (noMenu) {
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function banner() {
   const line = '='.repeat(40);
   console.log('');
   console.log(line);
   console.log(`  X-Router v${VERSION}`);
-  console.log(`  🚀 Server: ${url}`);
+  console.log(`  ðŸš€ Server: ${url}`);
   console.log(line);
 }
 
@@ -260,16 +260,16 @@ function showMenu(child) {
           ask();
         } else if (item.action === 'keys') {
           console.log(`\n  Admin login key: ${adminKeys}`);
-          console.log(`\n  Rotate via dashboard → Settings, or edit ${CONFIG_PATH}`);
+          console.log(`\n  Rotate via dashboard â†’ Settings, or edit ${CONFIG_PATH}`);
           console.log(`  then restart x-router.`);
           ask();
         } else if (item.action === 'hide') {
           if (child.unref) child.unref();
           console.log('');
-          console.log(`✓ Server keeps running in background at ${url}`);
+          console.log(`âœ“ Server keeps running in background at ${url}`);
           console.log(`  Logs: ${LOG_PATH}`);
           console.log(`  To stop: kill the node process on port ${portNum},`);
-          console.log(`  or run \`x-router\` again — it will detect & manage the existing instance.`);
+          console.log(`  or run \`x-router\` again â€” it will detect & manage the existing instance.`);
           rl.close();
           resolve('hide');
         } else if (item.action === 'exit') {

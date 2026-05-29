@@ -1,4 +1,4 @@
-name: Release
+﻿name: Release
 
 on:
   push:
@@ -141,4 +141,4 @@ jobs:
             ### Links
 
             - **npm**: https://www.npmjs.com/package/@daokimluc/x-router
-            - **Docker**: https://github.com/daokimluc/AI-Gateway/pkgs/container/x-router
+            - **Docker**: https://github.com/daokimluc/X-Router/pkgs/container/x-router

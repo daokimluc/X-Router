@@ -1,451 +1,296 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="AI Gateway" width="600" />
+  <img src="docs/images/banner.png" alt="X-Router" width="640" />
 </p>
 
-# AI Gateway — Internal AI Router & Token Saver
+<h1 align="center">X-Router</h1>
 
-> Never stop coding. Route requests across FREE & paid AI providers with auto-fallback, multi-account pooling, and 60-90% token savings.
+<p align="center">
+  <strong>One endpoint for every AI provider.</strong><br/>
+  Self-hosted AI gateway with multi-account pooling, auto-fallback, spending caps,
+  response caching, and a full control-plane dashboard.
+</p>
 
-Connect **Claude Code, Cursor, Cline, Kiro, Windsurf, Codex, OpenClaw, Antigravity** and any OpenAI-compatible tool to multiple AI providers through a single endpoint.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@daokimluc/x-router"><img src="https://img.shields.io/npm/v/@daokimluc/x-router.svg?label=npm" alt="npm" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg" alt="Node >=22" />
+</p>
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  Connect <strong>Claude Code, Cursor, Cline, Codex, Kiro, Windsurf, Aider</strong> and any
+  OpenAI- or Anthropic-compatible tool to <strong>50+ providers</strong> through a single local URL.
+</p>
 
-[🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🎨 Media Providers](#-media-providers) • [🏗️ Architecture](#️-architecture)
-
-[🇻🇳 Tiếng Việt](docs/README.vi.md)
-
----
-
-## 🤔 Why AI Gateway?
-
-Stop wasting money, tokens and hitting limits:
-
-- ❌ Subscription quota expires unused every month
-- ❌ Rate limits stop you mid-coding
-- ❌ Tool outputs (git diff, grep, ls...) burn tokens fast
-- ❌ Manual switching between providers when one goes down
-- ❌ No visibility into which accounts are healthy
-
-**AI Gateway solves this:**
-
-- ✅ **Token Saver** — Compress tool_result content (RTK), save 60-90% input tokens per request
-- ✅ **Caveman Mode** — Terse-style output prompt, save up to 65% output tokens
-- ✅ **Multi-account pooling** — Round-robin between accounts per provider
-- ✅ **Auto fallback** — Route chains with priority order, zero downtime
-- ✅ **Full dashboard** — Real-time monitoring, account health, usage analytics
-- ✅ **Media Providers** — Image generation, TTS, STT, Embedding, Web Search via unified API
-- ✅ **Proxy Pools** — Route through SOCKS5/HTTP proxies or Vercel relay
-- ✅ **Universal** — Works with any OpenAI/Anthropic-compatible CLI tool
-- ✅ **Single process** — One command, one port, one container
+<p align="center">
+  <strong>English</strong> · <a href="docs/README.vi.md">Tiếng Việt</a>
+</p>
 
 ---
 
-## 🔄 How It Works
+## Why X-Router?
 
-```
-┌─────────────────┐
-│  Your CLI Tool  │  (Claude Code, Cursor, Cline, Kiro, Windsurf, Codex...)
-└────────┬────────┘
-         │ http://localhost:3100/v1
-         ▼
-┌──────────────────────────────────────────────────┐
-│              AI Gateway (localhost:3100)          │
-│                                                  │
-│  • Dashboard UI at /                             │
-│  • LLM:    /v1/chat/completions                  │
-│  • Image:  /v1/images/generations                │
-│  • TTS:    /v1/audio/speech                      │
-│  • STT:    /v1/audio/transcriptions              │
-│  • Embed:  /v1/embeddings                        │
-│  • Search: /v1/search                            │
-│  • Fetch:  /v1/web/fetch                         │
-│  • Token Saver (RTK: -60-90% input tokens)       │
-│  • Multi-account round-robin & load balancing    │
-│  • Circuit breaker & auto-cooldown               │
-│  • Proxy pool routing (SOCKS5/HTTP/Vercel)       │
-└────────┬─────────────────────────────────────────┘
-         │
-         ├─→ Kiro AI (FREE Claude Sonnet 4.5)
-         ├─→ Windsurf (FREE via Cascade)
-         ├─→ Codex / Antigravity (OAuth)
-         ├─→ OpenAI / Anthropic / Gemini (API Key)
-         ├─→ Google TTS / Edge TTS (FREE, no key)
-         └─→ Any OpenAI-compatible endpoint
-```
+Running AI coding tools across many providers is messy: every tool wants its own
+API key, subscriptions hit rate limits, accounts sit idle, and you have no idea
+where the money goes. X-Router puts a single smart proxy in front of everything.
+
+- **One endpoint, every tool** — point Cursor, Cline, Claude Code, Codex at one URL.
+- **Multi-account pooling** — round-robin across N accounts per provider to multiply throughput.
+- **Auto-fallback** — provider down or rate-limited? The next candidate is tried instantly.
+- **Spend control** — hard daily/monthly USD caps per key and per team, enforced before the call.
+- **Token savings** — optional Token Saver compresses tool output before it hits the provider.
+- **Response cache** — identical requests return instantly at zero token cost (opt-in).
+- **Full observability** — latency p50/p95/p99, usage charts, request logs, Prometheus `/metrics`.
+- **Web dashboard** — manage providers, accounts, keys, routes, teams, and pricing from a browser.
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
-### Prerequisites
-
-- Node.js 22+
-- npm
-
-### 1. Clone & Install
+### npm (fastest)
 
 ```bash
-git clone https://github.com/daokimluc/AI-Gateway.git
-cd AI-Gateway
-npm install
+npm install -g @daokimluc/x-router
+x-router
 ```
 
-### 2. Build
+That's it. The CLI:
+
+1. Generates a default admin key (`admin`) on first run.
+2. Starts the gateway on `http://localhost:3100`.
+3. Opens the dashboard and shows an interactive menu.
+
+Log into the dashboard with the admin key, then add a provider and create client
+API keys from the **Endpoint & Keys** tab.
+
+### Docker
 
 ```bash
-npm run build
-```
-
-### 3. Start Gateway
-
-```bash
-# Linux/macOS
-export INTERNAL_API_KEYS="your-internal-key"
-export ADMIN_API_KEYS="your-admin-password"
-node bin/ai-gateway.js
-```
-
-```powershell
-# Windows PowerShell
-$env:INTERNAL_API_KEYS="your-internal-key"
-$env:ADMIN_API_KEYS="your-admin-password"
-node bin/ai-gateway.js
-```
-
-- 🌐 Dashboard: `http://localhost:3100`
-- 🔌 API Endpoint: `http://localhost:3100/v1`
-- 🔑 Admin password: value of `ADMIN_API_KEYS`
-
-### 4. Add a Provider Account
-
-Dashboard → Providers → Kiro/Windsurf → Add Account → Import from IDE (1 click)
-
-### 5. Connect Your CLI Tool
-
-```
-Claude Code / Cursor / Cline Settings:
-  API Provider: OpenAI Compatible
-  Base URL:     http://localhost:3100/v1
-  API Key:      [copy from Dashboard → Endpoint → API Keys]
-  Model:        strong (or: kiro-sonnet, coding, fast, balanced)
-```
-
----
-
-## 🐳 Docker
-
-```bash
-docker build -t ai-gateway .
 docker run -p 3100:3100 \
-  -e INTERNAL_API_KEYS="your-key" \
-  -e ADMIN_API_KEYS="your-admin-password" \
-  -v ./data:/app/data \
-  ai-gateway
+  -e ADMIN_API_KEYS="your-admin-key" \
+  ghcr.io/daokimluc/x-router:latest
 ```
 
----
+Open `http://localhost:3100/` and log in with your admin key.
 
-## 🎨 Media Providers
-
-AI Gateway routes media requests through the same multi-account pooling infrastructure as LLM chat.
-
-### Endpoints
-
-| Kind | Endpoint | Example Model |
-|------|----------|---------------|
-| Image Generation | `POST /v1/images/generations` | `cx/gpt-5.5-image` |
-| Text to Speech | `POST /v1/audio/speech` | `google-tts/en` |
-| Speech to Text | `POST /v1/audio/transcriptions` | `oa/whisper-1` |
-| Embedding | `POST /v1/embeddings` | `oa/text-embedding-3-small` |
-| Web Search | `POST /v1/search` | *(auto-select)* |
-| Web Fetch | `POST /v1/web/fetch` | *(auto-select)* |
-
-### Free Media Providers (no API key needed)
-
-| Provider | Kind | Notes |
-|----------|------|-------|
-| **Google TTS** | TTS | 58 languages, scrapes Google Translate |
-| **Edge TTS** | TTS | 400+ neural voices, scrapes Bing Translator |
-| **SearXNG** | Web Search | Self-hosted, no auth |
-
-### Quick Examples
+### From source
 
 ```bash
-# Image generation (Codex — requires ChatGPT Plus)
-curl -X POST http://localhost:3100/v1/images/generations \
-  -H "Authorization: Bearer YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"cx/gpt-5.5-image","prompt":"A cat wearing a hat","size":"1024x1024"}' \
-  --output image.png
-
-# TTS — Google (free, no API key needed)
-curl -X POST http://localhost:3100/v1/audio/speech \
-  -H "Authorization: Bearer YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"google-tts/vi","input":"Xin chào thế giới"}' \
-  --output speech.mp3
-
-# Embedding
-curl -X POST http://localhost:3100/v1/embeddings \
-  -H "Authorization: Bearer YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"oa/text-embedding-3-small","input":"Hello world"}'
-```
-
-📖 Full provider list: [docs/MEDIA_PROVIDERS.md](docs/MEDIA_PROVIDERS.md)
-
----
-
-## 🔀 Proxy Pools
-
-Route requests through SOCKS5/HTTP proxies or Vercel relay to bypass IP-based rate limits.
-
-Dashboard → Proxy Pools → Add Pool → assign to provider accounts.
-
-📖 Details: [docs/PROXY_POOLS.md](docs/PROXY_POOLS.md)
-
----
-
-## 🛠️ Supported CLI Tools
-
-| Tool | Status |
-|------|--------|
-| Claude Code | ✅ |
-| Cursor IDE | ✅ |
-| Cline | ✅ |
-| Kiro IDE | ✅ |
-| Windsurf | ✅ |
-| OpenAI Codex | ✅ |
-| Antigravity | ✅ |
-| Continue | ✅ |
-| Any OpenAI-compatible | ✅ |
-
----
-
-## 🌐 Supported Providers
-
-### 🆓 Free Providers (Built-in Adapters)
-
-| Provider | Models | Auth |
-|----------|--------|------|
-| **Kiro AI** | Claude Sonnet 4.5, GLM-5, MiniMax | OAuth / Local Import |
-| **Windsurf** | Claude Sonnet 4.6 Thinking | OAuth / Local Import |
-| **Codex** | GPT-5.x (ChatGPT Plus) | OAuth PKCE |
-| **Antigravity** | Gemini 3 Pro, Claude Sonnet 4.6 | OAuth PKCE |
-| **Google TTS** | 58 languages | None |
-| **Edge TTS** | 400+ neural voices | None |
-
-### 🔑 API Key Providers
-
-OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek, Together, Fireworks, Nebius, ElevenLabs, Deepgram, AssemblyAI, Tavily, Brave, Serper, Exa, Firecrawl, Jina, Voyage AI, and 30+ more.
-
----
-
-## 💡 Key Features
-
-| Feature | Description |
-|---------|-------------|
-| 🚀 **Token Saver (RTK)** | Compress tool outputs (git diff, grep, ls, tree...) — 60-90% fewer input tokens |
-| 🪨 **Caveman Mode** | Inject terse-mode system prompt — up to 65% fewer output tokens |
-| 🔄 **Multi-Account Pool** | Round-robin, weighted, least-busy account selection |
-| 🎯 **Route Chains** | Priority-ordered model fallback, zero downtime |
-| ⚡ **Circuit Breaker** | Per-provider failure detection, auto-cooldown |
-| 🎨 **Media Providers** | Image, TTS, STT, Embedding, Web Search via unified API |
-| 🔀 **Proxy Pools** | SOCKS5/HTTP/Vercel relay with health testing |
-| 📊 **Real-Time Dashboard** | Provider health, request logs, usage analytics |
-| 🔐 **API Key Management** | Per-key rate limits, team quotas |
-| 👥 **Teams & Quotas** | Group API keys, shared RPM/daily limits |
-| 🔄 **Auto Token Refresh** | Provider sessions refresh automatically |
-| 📝 **Config Versioning** | Draft → Validate → Publish → Rollback |
-| 🌐 **Dual Protocol** | OpenAI `/v1/chat/completions` + Anthropic `/v1/messages` |
-| 🎨 **i18n Dashboard** | English + Vietnamese |
-| 📦 **Single Package** | One process, one port, one container |
-
----
-
-## 📖 Setup Guide
-
-### Adding Accounts
-
-**Method 1: Import from IDE (Fastest)**
-
-Dashboard → Providers → Select Provider → Add Account → "Nhập từ máy" tab → Click import
-
-**Method 2: Paste Token**
-
-Dashboard → Providers → Select Provider → Add Account → "Token / Key" tab
-
-**Method 3: OAuth (Windsurf, Codex, Antigravity)**
-
-Dashboard → Providers → Select Provider → Add Account → "Ủy quyền OAuth" tab
-
-### Creating Routes (Fallback Chains)
-
-Dashboard → Routes → Create Route → Add models in priority order
-
-```
-Route: "coding"
-  1. kiro-sonnet        (free, primary)
-  2. windsurf-sonnet    (free, backup)
-```
-
-### Available Model IDs
-
-| Model ID | Description |
-|----------|-------------|
-| `strong` | Best quality |
-| `coding` | Optimized for code |
-| `fast` | Fastest response |
-| `balanced` | Balance of speed and quality |
-| `kiro-sonnet` | Direct to Kiro |
-| `windsurf-sonnet` | Direct to Windsurf |
-
----
-
-## 🏗️ Architecture
-
-```
-ai-gateway/
-├── bin/ai-gateway.js          # CLI entry point
-├── apps/
-│   ├── gateway/src/
-│   │   ├── routes/            # LLM + Admin + OAuth routes
-│   │   ├── media/             # Media routing (image/tts/stt/embed/search)
-│   │   │   ├── MediaRouter.ts
-│   │   │   ├── handlers/      # Per-kind handlers (30+ provider formats)
-│   │   │   └── autoSyncMediaConfig.ts
-│   │   ├── proxy/             # Proxy pool service + ProxyAwareFetch
-│   │   ├── providers/         # Provider adapter system
-│   │   │   └── adapters/      # kiro, windsurf, codex, antigravity, github
-│   │   └── services/          # Secret, Audit, Persistence, RateLimit
-│   └── dashboard/src/
-│       ├── components/        # Provider catalog UI components
-│       ├── media/             # Per-kind provider pages
-│       └── providerCatalog.ts # 50+ provider definitions
-├── docs/                      # Documentation
-└── Dockerfile                 # Multi-stage, non-root user
-```
-
-### Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Node.js 22+ / TypeScript 5.6 |
-| Gateway | Fastify 5 |
-| Dashboard | React 19 + Vite 7 |
-| Storage | JSON file persistence |
-| Auth | Bearer token + AES-256-GCM encryption |
-| Streaming | Server-Sent Events (SSE) |
-| Container | node:22-alpine, non-root user |
-
----
-
-## 📝 API Reference
-
-### Chat Completions
-
-```http
-POST /v1/chat/completions
-Authorization: Bearer <key>
-
-{"model": "strong", "messages": [{"role": "user", "content": "Hello"}], "stream": true}
-```
-
-### Image Generation
-
-```http
-POST /v1/images/generations
-Authorization: Bearer <key>
-
-{"model": "cx/gpt-5.5-image", "prompt": "A cat", "size": "1024x1024"}
-```
-
-### Text to Speech
-
-```http
-POST /v1/audio/speech
-Authorization: Bearer <key>
-
-{"model": "google-tts/en", "input": "Hello world"}
-```
-
-### Embedding
-
-```http
-POST /v1/embeddings
-Authorization: Bearer <key>
-
-{"model": "oa/text-embedding-3-small", "input": "Hello world"}
-```
-
-Full API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
-
----
-
-## ⚙️ CLI Options
-
-```
-Usage: ai-gateway [options]
-
-Options:
-  --port <number>  Port to listen on (default: 3100)
-  --host <string>  Host to bind to (default: 0.0.0.0)
-  --help           Show help
-
-Environment Variables:
-  INTERNAL_API_KEYS   API keys for /v1 routes (required)
-  ADMIN_API_KEYS      API keys for /admin routes (required)
-  DATA_FILE           State file path (default: data/gateway-state.json)
-  DASHBOARD_DIST      Override dashboard static files path
-  LOG_LEVEL           info | debug | warn | error (default: info)
+git clone https://github.com/daokimluc/X-Router.git
+cd X-Router
+npm install
+npm run build:all
+ADMIN_API_KEYS=admin npm start
 ```
 
 ---
 
-## 🗺️ Roadmap
+## How It Works
 
-- [x] Kiro / Windsurf / Codex / Antigravity provider adapters
-- [x] Multi-account pool with round-robin
-- [x] Route chains with fallback
-- [x] Token Saver (RTK) + Caveman Mode
-- [x] Dashboard with full admin control
-- [x] API key management with team quotas
-- [x] Circuit breaker per provider
-- [x] **Media Providers** — Image, TTS, STT, Embedding, Web Search, Web Fetch
-- [x] **Proxy Pools** — SOCKS5/HTTP/Vercel relay with health testing
-- [x] **50+ provider catalog** with auto-sync on startup
-- [x] Google TTS + Edge TTS (free, no API key)
-- [ ] Text to Video (Gemini Veo, Runway ML)
-- [ ] Docker Hub image
-- [ ] npm publish (npx ai-gateway)
+```
+  Your tools (Cursor · Cline · Claude Code · Codex · Aider · any SDK)
+        │
+        │  http://localhost:3100/v1   (OpenAI-compatible)
+        │  http://localhost:3100      (Anthropic-compatible)
+        ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │                       X-Router                            │
+  │                                                           │
+  │   Auth ─▶ Spend cap ─▶ Cache ─▶ Resolve model ─▶ Pick    │
+  │   key      check        lookup    → channel       account │
+  │                                                  (pool)   │
+  │                                                     │     │
+  │   Token Saver · Latency tracking · Usage logging    │     │
+  └─────────────────────────────────────────────────────┼─────┘
+                                                         ▼
+        ┌────────────────────┬────────────────────┬──────────────┐
+        ▼                    ▼                    ▼              ▼
+   OAuth subs          Cheap APIs            Free tier      Cloud
+   (Claude Code,       (DeepSeek, GLM,       (Kiro,         (Vertex,
+    Codex, Copilot)     MiniMax, Groq)        OpenCode)      Bedrock)
+```
 
----
-
-## 📚 Documentation
-
-| Doc | Description |
-|-----|-------------|
-| [API Reference](docs/API_REFERENCE.md) | Full REST API docs |
-| [Media Providers](docs/MEDIA_PROVIDERS.md) | Image, TTS, STT, Embedding, Search |
-| [Proxy Pools](docs/PROXY_POOLS.md) | SOCKS5/HTTP/Vercel relay setup |
-| [Architecture](docs/ARCHITECTURE.md) | System design |
-| [Dashboard](docs/DASHBOARD.md) | Dashboard guide |
-| [Operations](docs/OPERATIONS.md) | Deployment & ops |
-
----
-
-## 🙏 Acknowledgments
-
-- [RTK](https://github.com/rtk-ai/rtk) — Token compression pipeline (60-90% fewer input tokens)
-- [Caveman](https://github.com/JuliusBrussee/caveman) — Terse output prompt (up to 65% fewer output tokens)
-- [WindsurfAPI](https://github.com/dwgx/WindsurfAPI) — Windsurf Cascade protocol reference
+A request enters, gets authenticated against an API key, checked against spend
+caps, looked up in the response cache, then resolved to a **channel** (a
+provider instance serving a public model). The account pool picks the least-busy
+account, the request is forwarded, and the response streams back — with usage,
+latency, and cost recorded along the way. If a channel fails or is rate-limited,
+the next candidate for the same model is tried automatically.
 
 ---
 
-## 📄 License
+## Features
 
-MIT — see [LICENSE](LICENSE)
+### Routing & reliability
+
+- **Multi-channel routing** — the same public model name (e.g. `claude-opus-4-7`) can be served by several provider channels. The resolver collects all of them, sorts by priority, and fails over automatically.
+- **Model name variants** — clients can send `claude-opus-4-7`, `claude-opus-4.7`, `claude-opus-4-7-20250101`, or Bedrock/Vertex-style names; the gateway normalizes them and reformats per provider.
+- **Account pooling** — round-robin, least-busy, weighted, or priority strategies across N accounts per channel.
+- **Circuit breaker** — auto-disable a channel after N consecutive failures, with a half-open probe to detect recovery.
+- **Inline auth refresh** — OAuth/refresh-token credentials are refreshed on `401` and the request is retried, then written back so later requests reuse the new token.
+- **Per-account proxy** — bind individual accounts to HTTP or Vercel-relay proxy pools.
+
+### Cost control
+
+- **Spending caps** — hard daily and monthly USD limits per API key and per team, enforced *before* the upstream call (hold-and-settle). Exceeding returns `429 spend_limit_exceeded`.
+- **Token Saver** — compresses `tool_result` blocks (and optionally LLM output) before forwarding, cutting 20–40% of tokens on tool-heavy agent loops.
+- **Response cache** — opt-in per request (`cache_control: { mode: "use" }`). Identical (model + messages + params) requests return cached completions at zero cost. LRU + TTL, bounded by entry count and bytes.
+- **Per-key balance & quota** — optional credit balance, requests/minute, requests/day, tokens/day.
+
+### Observability
+
+- **Usage charts** — time-bucketed Trend / Proportion / Top views with a cost/tokens/requests switcher.
+- **Latency tracking** — p50/p95/p99 per (channel × model × account) over a rolling 5-minute window.
+- **Prometheus exporter** — `GET /metrics` with request and latency histograms for Grafana/Datadog.
+- **Request logs & audit logs** — metadata-only request stream plus a full admin control-plane activity log.
+
+### Management
+
+- **Web dashboard** — providers, accounts, channels, models, routes, teams, pricing, keys — all from the browser.
+- **Channel quick-create wizard** — create a provider instance + N accounts + M model mappings + overrides in one form.
+- **Per-channel overrides** — `paramOverride` (force body params), `headerOverride` (inject headers), `statusCodeMapping` (retry/disable/passthrough), `maxInputTokens`, `systemPromptOverride`.
+- **Teams** — group keys, share quotas, restrict allowed models/providers.
+- **API key policies** — expiry, IP allowlist, model whitelist, group routing, cache mode, spend caps.
 
 ---
 
-<p align="center">Built with ❤️ for developers who code 24/7</p>
+## Supported Providers
+
+50+ provider types across categories. A few highlights:
+
+| Category | Providers |
+|---|---|
+| **OAuth subscription** | Claude Code, Codex, GitHub Copilot, Cursor, Gemini CLI, Qwen, iFlow |
+| **Free tier** | Kiro, OpenCode Free |
+| **Cheap API** | DeepSeek, GLM (Zhipu), MiniMax, Groq, Cerebras, Together, Fireworks, OpenRouter, SiliconFlow, Nebius, Hyperbolic, Chutes, Mistral, Cohere, Moonshot/Kimi, xAI/Grok, and more |
+| **Premium API** | OpenAI, Anthropic, Gemini, Alibaba (Qwen), ByteDance/Volcengine, Perplexity |
+| **Cloud platform** | Vertex AI, Azure OpenAI, Cloudflare AI |
+| **Custom** | Any OpenAI-compatible (`custom_openai`) or no-auth endpoint |
+
+Each provider type ships with sensible defaults (base URL, paths, auth method).
+Add accounts to a provider, and it becomes a routable channel.
+
+---
+
+## Client Setup
+
+X-Router speaks two protocols on the same port:
+
+| Your tool | Base URL | Auth |
+|---|---|---|
+| OpenAI-compatible (Cline, Continue, LiteLLM, Aider, LangChain) | `http://localhost:3100/v1` | `Authorization: Bearer <client-key>` |
+| Anthropic-compatible (Claude Code, `@anthropic-ai/sdk`) | `http://localhost:3100` | `Authorization: Bearer <client-key>` or `x-api-key` |
+
+Example (OpenAI SDK):
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:3100/v1",
+    api_key="your-client-key",   # created in the dashboard - Endpoint & Keys
+)
+
+resp = client.chat.completions.create(
+    model="claude-opus-4-7",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Enable the response cache for a request:
+
+```jsonc
+{
+  "model": "claude-opus-4-7",
+  "messages": [ /* ... */ ],
+  "cache_control": { "mode": "use" }   // "skip" (default) | "use" | "refresh"
+}
+```
+
+---
+
+## Configuration
+
+X-Router is configured at runtime through the dashboard. The only environment
+variable you normally set is the admin key:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ADMIN_API_KEYS` | `admin` (dev) | Comma-separated keys to log into the dashboard and call `/admin/*`. Required in production. |
+| `PORT` | `3100` | Listen port. |
+| `HOST` | `0.0.0.0` | Bind host. |
+| `DATA_FILE` | `data/gateway-state.json` | Where runtime state (providers, keys, usage) is persisted. |
+| `LOG_LEVEL` | `info` | `fatal`/`error`/`warn`/`info`/`debug`/`trace`/`silent`. |
+| `METRICS_PUBLIC` | `false` | When `true`, `/metrics` is reachable without auth. |
+
+> Client API keys are **not** set via environment variables. Log into the
+> dashboard with your admin key and create them under **Endpoint & Keys** —
+> there you get per-key rate limits, model whitelists, IP allowlists, expiry,
+> spend caps, and cache mode.
+
+### CLI
+
+```bash
+x-router --port 3100          # start with interactive menu
+x-router --no-menu            # foreground mode (Docker/systemd), logs to stdout
+x-router --print-keys         # print the admin key and exit
+x-router --help
+```
+
+Config and logs live in `~/.x-router/` (`config.json`, `server.log`).
+
+---
+
+## Admin API
+
+All admin endpoints require `Authorization: Bearer <admin-key>` and live under
+`/admin/v1`. Highlights:
+
+| Area | Endpoints |
+|---|---|
+| Providers | `GET/POST /admin/v1/provider-instances`, `/channels/quick-create`, `/provider-instances/:id/test-model` |
+| Accounts | `GET/POST /admin/v1/accounts`, `/accounts/:id/{enable,disable,test,reset-suspension}` |
+| Models | `GET/POST/PATCH/DELETE /admin/v1/model-mappings`, `/sync-models/bulk` |
+| API keys | `GET/POST/PATCH/DELETE /admin/v1/api-keys`, `/api-keys/:id/{reveal,enable,disable}` |
+| Teams | `GET/POST/PATCH/DELETE /admin/v1/teams` |
+| Spend | `GET /admin/v1/spend/{key,team}/:id` |
+| Usage | `GET /admin/v1/usage`, `/usage/aggregate` |
+| Metrics | `GET /admin/v1/metrics/latency`, `GET /metrics` (Prometheus) |
+| Cache | `GET /admin/v1/cache/stats`, `DELETE /admin/v1/cache[/:prefix]` |
+| Version | `GET /admin/v1/version` (current + latest + update check) |
+
+---
+
+## Development
+
+```bash
+# Gateway (Fastify + TypeScript) - hot reload
+cd apps/gateway && npm install && npm run dev
+
+# Dashboard (React + Vite)
+cd apps/dashboard && npm install && npm run dev
+
+# Run the test suite (443 tests)
+cd apps/gateway && npx vitest run
+```
+
+Build everything for distribution:
+
+```bash
+npm run build:all   # builds dashboard-dist/ + dist/
+```
+
+---
+
+## Tech Stack
+
+- **Backend** — Node.js 22+, Fastify 5, TypeScript, Zod, undici, pino
+- **Frontend** — React 19, Vite 7, Recharts, @xyflow/react, lucide-react
+- **Persistence** — JSON state file (no external DB required)
+
+---
+
+## License
+
+MIT - Luc DK. See [LICENSE](LICENSE).
+
