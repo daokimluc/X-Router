@@ -25,7 +25,7 @@
   "license": "MIT",
   "author": "Luc DK <daokimluc9xx@gmail.com>",
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   },
   "bin": {
     "x-router": "./bin/x-router.js"
