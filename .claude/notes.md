@@ -200,3 +200,13 @@ Both pushed to origin/main and published. Global install updated to 0.3.1.
 - Dashboard-only change (no gateway logic) → gateway tests untouched. Dashboard tsc clean, build clean, built dist title verified = X-Router.
 - Commit `da4158d`, tag v0.3.2, pushed, published to npm, global updated to 0.3.2.
 
+## 0.3.3 — data file moved to ~/.x-router (was "data lost" bug)
+
+**Symptom:** user ran `x-router` (global) and Usage page (+ accounts/logs) showed empty — "mất hết dữ liệu".
+**Root cause:** `DATA_FILE` defaults to RELATIVE `data/gateway-state.json` (config.ts:26). The bin never pinned it, so the gateway read/wrote state in whatever cwd `x-router` was launched from. Dev gateway ran from `apps/gateway` → real data at `apps/gateway/data/gateway-state.json` (197KB, 27 usage + 500 logs). Global launched from elsewhere → empty fresh file. **Data was never lost.**
+**Fix:** `bin/x-router.js` now pins `DATA_FILE` to `~/.x-router/gateway-state.json` (constant `DATA_PATH`) in BOTH the spawn and `--no-menu` paths, alongside config.json. Explicit `DATA_FILE` env still overrides. Help text updated.
+**Data migration done:** copied the 197KB `apps/gateway/data/gateway-state.json` → `~/.x-router/gateway-state.json` (verified 27 usage / 500 logs / accounts / apiKeys intact) so the global instance sees the history.
+**Released:** commit `e5df0d9`, tag v0.3.3, pushed, published to npm (registry latest=0.3.3).
+
+**IMPORTANT user feedback (this session):** user said "đừng tự update nhé" — do NOT run `npm i -g` to update the global install automatically anymore. Publish to npm is OK (user confirmed), but leave the global update for the user to do. Global still on 0.3.2 as of this commit. See [[feedback-dont-auto-update-global]].
+
