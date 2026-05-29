@@ -1,6 +1,6 @@
 {
   "name": "@daokimluc/x-router",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "X-Router — unified AI Gateway with Fastify backend, React dashboard, multi-provider routing, spending caps, response cache, and observability",
   "keywords": [

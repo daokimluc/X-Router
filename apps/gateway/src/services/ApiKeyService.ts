@@ -38,8 +38,14 @@ export type CreatedInternalApiKey = InternalApiKeyRecord & {
 export class ApiKeyService {
   private readonly keys = new Map<string, InternalApiKeyRecord & { key: string }>();
 
-  constructor(initialKeys: string[] = []) {
-    initialKeys.forEach((key, index) => {
+  /**
+   * @param seedKeys  Optional initial keys (legacy boot-strap). When the list
+   *                  is empty AND no keys are loaded later via `loadKeys()`,
+   *                  the gateway calls `seedDefaultKey()` to create a default
+   *                  client key (`admin`) so the dashboard is usable on first run.
+   */
+  constructor(seedKeys: string[] = []) {
+    seedKeys.forEach((key, index) => {
       this.keys.set(key, {
         id: `internal_key_${index + 1}`,
         key,
@@ -48,6 +54,28 @@ export class ApiKeyService {
         createdAt: new Date()
       });
     });
+  }
+
+  /**
+   * Auto-seed a default client API key (literal value `admin`) when the
+   * service has no keys yet. Idempotent — does nothing if any key already
+   * exists. Returns the seeded record (or the existing record if one was
+   * already there).
+   */
+  seedDefaultKey(): InternalApiKeyRecord & { key: string } {
+    const existing = Array.from(this.keys.values())[0];
+    if (existing) return structuredClone(existing);
+    const key = "admin";
+    const record = {
+      id: "default",
+      key,
+      keyHash: hashApiKey(key),
+      enabled: true,
+      owner: "default",
+      createdAt: new Date()
+    };
+    this.keys.set(key, record);
+    return structuredClone(record);
   }
 
   isValid(key: string): boolean {

@@ -21,7 +21,6 @@ const envSchema = z.object({
     .default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3100),
   HOST: z.string().min(1).default("0.0.0.0"),
-  INTERNAL_API_KEYS: z.string().default("dev-key-1,dev-key-2"),
   ADMIN_API_KEYS: z.string().default(""),
   REQUEST_BODY_LIMIT: z.string().min(1).default("1mb"),
   DATA_FILE: z.string().min(1).default("data/gateway-state.json"),
@@ -63,12 +62,7 @@ export function parseAddAccountRateLimit(raw?: string): number {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(env);
-  const internalApiKeys = parseCsv(parsed.INTERNAL_API_KEYS);
   const adminApiKeys = parseCsv(parsed.ADMIN_API_KEYS);
-
-  if (internalApiKeys.length === 0) {
-    throw new Error("INTERNAL_API_KEYS must contain at least one key");
-  }
 
   if (parsed.NODE_ENV === "production" && adminApiKeys.length === 0) {
     throw new Error("ADMIN_API_KEYS must contain at least one key in production");
@@ -78,7 +72,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     nodeEnv: parsed.NODE_ENV,
     port: parsed.PORT,
     host: parsed.HOST,
-    internalApiKeys,
+    internalApiKeys: [], // legacy field; client API keys live in ApiKeyService now
     adminApiKeys:
       adminApiKeys.length > 0 || parsed.NODE_ENV === "production"
         ? adminApiKeys

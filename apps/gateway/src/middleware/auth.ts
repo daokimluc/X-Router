@@ -17,13 +17,11 @@ declare module "fastify" {
 }
 
 export function createAuthMiddleware(
-  config: AppConfig,
+  _config: AppConfig,
   apiKeyService?: ApiKeyService,
   rateLimitService?: RateLimitService,
   teamService?: TeamService
 ) {
-  const validKeys = new Set(config.internalApiKeys);
-
   return async function authMiddleware(
     request: FastifyRequest,
     reply: FastifyReply
@@ -32,7 +30,7 @@ export function createAuthMiddleware(
     const xApiKey = request.headers["x-api-key"];
     const token = parseBearerToken(authorization) ?? (typeof xApiKey === "string" ? xApiKey.trim() : null);
 
-    if (!token || (!validKeys.has(token) && !apiKeyService?.isValid(token))) {
+    if (!token || !apiKeyService?.isValid(token)) {
       await reply.code(401).send({
         error: {
           type: "authentication_error",

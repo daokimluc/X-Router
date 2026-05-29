@@ -80,10 +80,6 @@ function ensureConfig() {
     try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch {}
   }
   let changed = false;
-  if (!cfg.internalApiKeys) {
-    cfg.internalApiKeys = `xrk_${randomBytes(16).toString('hex')}`;
-    changed = true;
-  }
   if (!cfg.adminApiKeys) {
     cfg.adminApiKeys = `xra_${randomBytes(16).toString('hex')}`;
     changed = true;
@@ -93,12 +89,12 @@ function ensureConfig() {
 }
 
 const cfg = ensureConfig();
-const internalKeys = process.env.INTERNAL_API_KEYS || cfg.internalApiKeys;
 const adminKeys = process.env.ADMIN_API_KEYS || cfg.adminApiKeys;
 
 if (printKeysOnly) {
-  console.log(`INTERNAL_API_KEYS=${internalKeys}`);
   console.log(`ADMIN_API_KEYS=${adminKeys}`);
+  console.log('');
+  console.log('Default client API key (rotate via dashboard): admin');
   process.exit(0);
 }
 
@@ -109,11 +105,9 @@ const url = `http://localhost:${portNum}`;
 if (noMenu) {
   process.env.PORT = String(portNum);
   process.env.HOST = host;
-  process.env.INTERNAL_API_KEYS = internalKeys;
   process.env.ADMIN_API_KEYS = adminKeys;
   console.log(`X-Router v${VERSION} starting on ${url}`);
   await import('../dist/server.js');
-  // server's setInterval / listen keeps event loop alive
 } else {
   // ─── Interactive mode: spawn server as child ────────────────
   banner();
@@ -127,7 +121,6 @@ if (noMenu) {
       ...process.env,
       PORT: String(portNum),
       HOST: host,
-      INTERNAL_API_KEYS: internalKeys,
       ADMIN_API_KEYS: adminKeys,
     },
     stdio: ['ignore', logFd, logFd],
@@ -159,6 +152,7 @@ if (noMenu) {
 
   console.log(`✓ Server ready at ${url}`);
   console.log(`  Admin login key: ${adminKeys}`);
+  console.log(`  Default client key: admin  (rotate in dashboard → Endpoint & Keys)`);
   console.log(`  Logs: ${LOG_PATH}`);
 
   // Auto-open browser on first launch
@@ -261,9 +255,9 @@ function showMenu(child) {
           tailLog(30);
           ask();
         } else if (item.action === 'keys') {
-          console.log(`\n  INTERNAL_API_KEYS = ${internalKeys}`);
-          console.log(`  ADMIN_API_KEYS    = ${adminKeys}`);
-          console.log(`\n  (saved at ${CONFIG_PATH})`);
+          console.log(`\n  ADMIN_API_KEYS    = ${adminKeys}`);
+          console.log(`  Default client key = admin  (rotate via dashboard → Endpoint & Keys)`);
+          console.log(`\n  (admin key saved at ${CONFIG_PATH})`);
           ask();
         } else if (item.action === 'exit') {
           rl.close();
