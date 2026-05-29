@@ -30,6 +30,7 @@ let port = '3100';
 let host = '0.0.0.0';
 let noMenu = false;
 let printKeysOnly = false;
+let resetAdminKey = false;
 
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
@@ -37,6 +38,7 @@ for (let i = 0; i < args.length; i++) {
     case '--host': host = args[++i]; break;
     case '--no-menu': noMenu = true; break;
     case '--print-keys': printKeysOnly = true; break;
+    case '--reset-admin-key': resetAdminKey = true; break;
     case '--help':
     case '-h':
       printHelp(); process.exit(0);
@@ -52,6 +54,7 @@ Options:
   --host <string>     Host to bind to (default: 0.0.0.0)
   --no-menu           Run in foreground (no menu, logs to stdout)
   --print-keys        Print saved API keys and exit
+  --reset-admin-key   Reset the admin login password to "admin" and exit
   --help, -h          Show this help
 
 Configuration:
@@ -91,6 +94,14 @@ function ensureConfig() {
 
 const cfg = ensureConfig();
 const adminKeys = process.env.ADMIN_API_KEYS || cfg.adminApiKeys;
+
+if (resetAdminKey) {
+  cfg.adminApiKeys = "admin";
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  console.log('Admin login password reset to: admin');
+  console.log(`(saved to ${CONFIG_PATH}) — restart x-router for it to take effect.`);
+  process.exit(0);
+}
 
 if (printKeysOnly) {
   console.log(`ADMIN_API_KEYS=${adminKeys}`);

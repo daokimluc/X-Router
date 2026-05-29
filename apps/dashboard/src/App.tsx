@@ -487,6 +487,20 @@ function LoginScreen(props: { onLogin: (key: string) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [defaultPassword, setDefaultPassword] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/v1/public/auth-info")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { isDefaultPassword?: boolean; defaultPassword?: string | null } | null) => {
+        if (active && d?.isDefaultPassword && d.defaultPassword) {
+          setDefaultPassword(d.defaultPassword);
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -535,7 +549,11 @@ function LoginScreen(props: { onLogin: (key: string) => void }) {
             {busy ? t("login.verifying") : t("login.button")}
           </button>
         </form>
-        <small className="loginHint">{t("login.hint")}</small>
+        {defaultPassword && (
+          <small className="loginHint">
+            {t("login.hint")} <code>{defaultPassword}</code>
+          </small>
+        )}
       </div>
     </div>
   );
@@ -6810,6 +6828,21 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
     }
   }
 
+  async function handleResetPassword() {
+    if (!window.confirm(t("settings.resetPasswordConfirm"))) return;
+    try {
+      const res = await api.post<{ success: boolean; defaultPassword?: string }>(
+        "/admin/v1/settings/reset-password",
+        {}
+      );
+      const def = res?.defaultPassword ?? "admin";
+      window.sessionStorage.setItem("gateway.adminKey", def);
+      setMessage({ type: "success", text: t("settings.resetPasswordDone").replace("{pw}", def) });
+    } catch {
+      setMessage({ type: "error", text: "Failed to reset password" });
+    }
+  }
+
   return (
     <div className="stack">
       <div className="settingsHeader">
@@ -6913,6 +6946,15 @@ function SettingsPage({ api }: { api: ReturnType<typeof createApiClient> }) {
               </div>
               <button className="endpointKeyBtn" onClick={() => setChangePwModal(true)}>
                 <Lock size={14} /> {t("settings.changePassword")}
+              </button>
+            </div>
+            <div className="settingsRow">
+              <div>
+                <strong>{t("settings.resetPassword")}</strong>
+                <span>{t("settings.resetPasswordDesc")}</span>
+              </div>
+              <button className="endpointKeyBtn" onClick={() => void handleResetPassword()}>
+                <Lock size={14} /> {t("settings.resetPassword")}
               </button>
             </div>
             <div className="settingsRow">

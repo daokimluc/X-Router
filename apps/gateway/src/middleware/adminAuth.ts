@@ -13,15 +13,17 @@ declare module "fastify" {
 }
 
 export function createAdminAuthMiddleware(config: AppConfig) {
-  const validAdminKeys = new Set(config.adminApiKeys);
-
+  // Read the keys array live on each request rather than snapshotting into a
+  // Set at startup. config.adminApiKeys is mutated in place by AdminKeyService
+  // when the password is changed/reset, so this picks up runtime changes
+  // without a process restart.
   return async function adminAuthMiddleware(
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     const token = parseBearerToken(request.headers.authorization);
 
-    if (!token || !validAdminKeys.has(token)) {
+    if (!token || !config.adminApiKeys.includes(token)) {
       await reply.code(401).send({
         error: {
           type: "authentication_error",

@@ -48,6 +48,7 @@ import { AdminAuditService } from "./services/AdminAuditService.js";
 import { MetricsService } from "./services/MetricsService.js";
 import { ConfigRevisionService } from "./services/ConfigRevisionService.js";
 import { ApiKeyService } from "./services/ApiKeyService.js";
+import { AdminKeyService } from "./services/AdminKeyService.js";
 import { RequestLogService } from "./services/RequestLogService.js";
 import { UsageService } from "./services/UsageService.js";
 import { ModelPricingService } from "./services/ModelPricingService.js";
@@ -86,6 +87,7 @@ export type AppDependencies = {
   metricsService?: MetricsService;
   configRevisionService?: ConfigRevisionService;
   apiKeyService?: ApiKeyService;
+  adminKeyService?: AdminKeyService;
   requestLogService?: RequestLogService;
   usageService?: UsageService;
   rateLimitService?: RateLimitService;
@@ -106,6 +108,7 @@ declare module "fastify" {
     metricsService: MetricsService;
     configRevisionService: ConfigRevisionService;
     apiKeyService: ApiKeyService;
+    adminKeyService: AdminKeyService;
     requestLogService: RequestLogService;
     usageService: UsageService;
     rateLimitService: RateLimitService;
@@ -304,6 +307,10 @@ export async function buildApp(
   app.decorate("metricsService", metricsService);
   app.decorate("configRevisionService", configRevisionService);
   app.decorate("apiKeyService", apiKeyService);
+  app.decorate(
+    "adminKeyService",
+    dependencies.adminKeyService ?? new AdminKeyService(config.adminApiKeys)
+  );
   if (persistedState && !dependencies.apiKeyService) {
     for (const apiKey of persistedState.apiKeys) {
       apiKeyService.addRecord(apiKey);

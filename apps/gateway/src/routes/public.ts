@@ -7,11 +7,24 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { DEFAULT_ADMIN_KEY } from "../services/AdminKeyService.js";
 
 export async function registerPublicRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/pricing", async () => {
     return {
       data: app.modelPricingService.list(),
+    };
+  });
+
+  // Login page support: tells the (unauthenticated) login screen whether the
+  // admin key is still the out-of-the-box default, so it can surface the
+  // "Default password: admin" hint on first run only. Once the password has
+  // been changed, no value is exposed.
+  app.get("/v1/public/auth-info", async () => {
+    const isDefaultPassword = app.adminKeyService.isDefault();
+    return {
+      isDefaultPassword,
+      defaultPassword: isDefaultPassword ? DEFAULT_ADMIN_KEY : null,
     };
   });
 

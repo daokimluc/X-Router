@@ -29,7 +29,7 @@ export async function registerReadyzRoute(
 }
 
 function createInternalOrAdminAuth(app: FastifyInstance, config: AppConfig) {
-  const validKeys = new Set([...config.internalApiKeys, ...config.adminApiKeys]);
+  const internalKeys = new Set(config.internalApiKeys);
 
   return async function internalOrAdminAuth(
     request: FastifyRequest,
@@ -37,7 +37,12 @@ function createInternalOrAdminAuth(app: FastifyInstance, config: AppConfig) {
   ): Promise<void> {
     const token = parseBearerToken(request.headers.authorization);
 
-    if (!token || (!validKeys.has(token) && !app.apiKeyService.isValid(token))) {
+    if (
+      !token ||
+      (!internalKeys.has(token) &&
+        !config.adminApiKeys.includes(token) &&
+        !app.apiKeyService.isValid(token))
+    ) {
       await reply.code(401).send({
         error: {
           type: "authentication_error",

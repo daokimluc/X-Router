@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config.js";
 import { createAdminAuthMiddleware } from "../middleware/adminAuth.js";
+import { DEFAULT_ADMIN_KEY } from "../services/AdminKeyService.js";
 import { AccountPool } from "../account-pool/AccountPool.js";
 import { createAccountSelectionStrategy } from "../account-pool/strategyFactory.js";
 import { KiroAuthClient, applyKiroToken } from "../providers/adapters/kiro/KiroAuthClient.js";
@@ -3360,18 +3361,38 @@ export async function registerAdminRoutes(
   app.post(
     "/admin/v1/settings/change-password",
     { preHandler: adminAuth },
-    async (request) => {
+    async (request, reply) => {
       const body = z.object({
         currentPassword: z.string().min(1),
         newPassword: z.string().min(4)
       }).parse(request.body);
-      // Verify current password matches admin key
+      // Verify current password matches a live admin key
       if (!config.adminApiKeys.includes(body.currentPassword)) {
+        reply.code(400);
         return { success: false, message: "Current password is incorrect" };
       }
-      // Note: In production this would update .env or a secrets store.
-      // For MVP we just validate — actual password change requires restart.
-      return { success: true, message: "Password validated. Update ADMIN_API_KEYS in .env and restart gateway to apply." };
+      try {
+        // Persists to ~/.x-router/config.json and mutates the live key array
+        // in place, so the change takes effect immediately without a restart.
+        app.adminKeyService.setKey(body.newPassword);
+      } catch (error) {
+        reply.code(400);
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : "Failed to change password"
+        };
+      }
+      return { success: true, message: "Password changed. Use the new password on next login." };
+    }
+  );
+
+  app.post(
+    "/admin/v1/settings/reset-password",
+    { preHandler: adminAuth },
+    async () => {
+      // Reset the admin key back to the default ("admin").
+      app.adminKeyService.reset();
+      return { success: true, message: "Password reset to default.", defaultPassword: DEFAULT_ADMIN_KEY };
     }
   );
 
