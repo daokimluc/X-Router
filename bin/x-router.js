@@ -58,8 +58,9 @@ Options:
   --help, -h          Show this help
 
 Configuration:
-  ~/.x-router/config.json   Saved API keys (auto-generated on first run)
-  ~/.x-router/server.log    Server log (rotated each launch)
+  ~/.x-router/config.json          Saved API keys (auto-generated on first run)
+  ~/.x-router/gateway-state.json   Gateway data (accounts, usage, logs, ...)
+  ~/.x-router/server.log           Server log (rotated each launch)
 
 Docs: https://github.com/daokimluc/X-Router
 `.trim());
@@ -75,6 +76,12 @@ if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
 const CONFIG_DIR = path.join(homedir(), '.x-router');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 const LOG_PATH = path.join(CONFIG_DIR, 'server.log');
+// Persist gateway state under the user's home dir (like config.json), NOT in
+// the directory the command happens to be run from. DATA_FILE defaults to a
+// relative path, so without this the data "follows" the cwd and a user
+// launching x-router from a different folder would see an empty dashboard.
+// An explicit DATA_FILE env var still wins (advanced/override use).
+const DATA_PATH = process.env.DATA_FILE || path.join(CONFIG_DIR, 'gateway-state.json');
 
 function ensureConfig() {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
@@ -116,6 +123,7 @@ if (noMenu) {
   process.env.PORT = String(portNum);
   process.env.HOST = host;
   process.env.ADMIN_API_KEYS = adminKeys;
+  process.env.DATA_FILE = DATA_PATH;
   console.log(`X-Router v${VERSION} starting on ${url}`);
   await import('../dist/server.js');
 } else {
@@ -132,6 +140,7 @@ if (noMenu) {
       PORT: String(portNum),
       HOST: host,
       ADMIN_API_KEYS: adminKeys,
+      DATA_FILE: DATA_PATH,
     },
     stdio: ['ignore', logFd, logFd],
     windowsHide: true,
