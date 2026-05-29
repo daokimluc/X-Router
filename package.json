@@ -45,6 +45,7 @@
     "build:gateway": "cd apps/gateway && npx tsc --project tsconfig.json && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/gateway/dist',d='dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('âœ“ Gateway dist synced')\"",
     "build:dashboard": "cd apps/dashboard && npm run build && cd ../.. && node -e \"const{cpSync,rmSync,existsSync}=require('fs');const s='apps/dashboard/dist',d='dashboard-dist';if(existsSync(d))rmSync(d,{recursive:true,force:true});cpSync(s,d,{recursive:true});console.log('âœ“ Dashboard dist synced')\"",
     "build:all": "npm run build:dashboard && npm run build:gateway",
+    "deploy:local": "npm run build:all && npm i -g .",
     "prepack": "npm run build:all",
     "start": "node bin/x-router.js"
   },
