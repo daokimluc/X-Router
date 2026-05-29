@@ -193,3 +193,10 @@ Both pushed to origin/main and published. Global install updated to 0.3.1.
 
 **Still deferred:** title still says "Internal AI Gateway" (old branding in `apps/dashboard/index.html`, present in 0.3.1) — user aware, not yet changed. npm tarball still bundles `dist/test/**` (~335 files) — should add to .npmignore eventually.
 
+## 0.3.2 — update command + copy button + X-Router rebrand
+
+- `VersionBadge.tsx` — when `hasUpdate`, now renders the literal command `npm i -g @daokimluc/x-router@latest` in a `.brandUpdateCmd` box with a copy button (Copy/Check icon toggle, uses `copyText` helper so it works over plain HTTP/LAN). CSS added in styles.css (`.brandUpdateCmd`, `.brandUpdateCopyBtn`).
+- Rebrand: `login.title` "AI Gateway" → "X-Router" (both EN+VI blocks in i18n.ts); `apps/dashboard/index.html` `<title>` "Internal AI Gateway" → "X-Router". Now matches badge / CLI banner / npm package name. (Remaining "AI Gateway" strings in App.tsx ASCII diagrams + UsagePage node label left as-is — not branding-critical.)
+- Dashboard-only change (no gateway logic) → gateway tests untouched. Dashboard tsc clean, build clean, built dist title verified = X-Router.
+- Commit `da4158d`, tag v0.3.2, pushed, published to npm, global updated to 0.3.2.
+
