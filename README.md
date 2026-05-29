@@ -290,6 +290,23 @@ npm run build:all   # builds dashboard-dist/ + dist/
 
 ---
 
+## Acknowledgements
+
+X-Router is an independent project with its own codebase (Fastify + TypeScript
+backend, React dashboard) and its own design decisions. It operates in the same
+problem space as other self-hosted AI gateways such as
+[9Router](https://github.com/decolua/9router) and
+[New API](https://github.com/QuantumNous/new-api) — tools that, like X-Router,
+aim to make AI providers easier to route, pool, and observe.
+
+We respect the work and authorship of those projects. X-Router does not reuse
+their source code; any conceptual overlap reflects shared, well-established
+patterns in the API-gateway space (request routing, account pooling, fallback,
+usage tracking) rather than a port of any specific implementation. If you are
+looking for an alternative, those projects are worth a look too.
+
+---
+
 ## License
 
 MIT - Luc DK. See [LICENSE](LICENSE).
