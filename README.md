@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="X-Router" width="640" />
+  <img src="docs/images/image.png" alt="X-Router" width="640" />
 </p>
 
 <h1 align="center">X-Router</h1>
@@ -293,14 +293,12 @@ npm run build:all   # builds dashboard-dist/ + dist/
 ## Acknowledgements
 
 During development, X-Router drew inspiration from several excellent open-source
-AI gateways. Many thanks to their authors and communities:
-
-- [9Router](https://github.com/decolua/9router) — token-saving router with auto-fallback and a polished CLI experience.
-- [New API](https://github.com/QuantumNous/new-api) — feature-rich AI gateway and management console.
+AI gateways such as [9Router](https://github.com/decolua/9router) and
+[New API](https://github.com/QuantumNous/new-api). Many thanks to their authors
+and communities.
 
 X-Router is built on its own independent codebase (Fastify + TypeScript backend,
-React dashboard) and does not reuse source code from these projects — it simply
-learned from the great ideas they pioneered in the AI-gateway space.
+React dashboard) and does not reuse source code from these projects.
 
 ---
 
