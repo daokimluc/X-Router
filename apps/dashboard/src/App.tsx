@@ -63,6 +63,7 @@ import { TTSProvidersPage } from "./media/TTSProvidersPage";
 import { STTProvidersPage } from "./media/STTProvidersPage";
 import { WebProvidersPage } from "./media/WebProvidersPage";
 import { useLang } from "./i18n";
+import { copyText } from "./clipboard";
 import { getKnownModels } from "./providerModels";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { QuickSetupWizard } from "./components/QuickSetupWizard";
@@ -1995,7 +1996,7 @@ function AddAccountModal(props: {
                       type="button"
                       className="iconButton"
                       title="Copy"
-                      onClick={() => void navigator.clipboard.writeText(oauthUrl ?? "")}
+                      onClick={() => void copyText(oauthUrl ?? "")}
                     >
                       <Clipboard size={16} />
                     </button>
@@ -2967,7 +2968,7 @@ function ProviderDetail(props: {
                   <code>{model.publicModel}</code>
                   <span>{formatModelLabel(model.upstreamModel)}</span>
                 </div>
-                <button className="iconButton compact" type="button" title="Copy model id" onClick={() => { void navigator.clipboard.writeText(model.publicModel); setMessage({ type: "success", text: `Copied: ${model.publicModel}` }); }}>
+                <button className="iconButton compact" type="button" title="Copy model id" onClick={() => { void copyText(model.publicModel); setMessage({ type: "success", text: `Copied: ${model.publicModel}` }); }}>
                   <Clipboard size={15} />
                 </button>
                 <button className="iconButton compact" type="button" title="Test model" onClick={() => void testCustomModel2(model.publicModel)} disabled={props.accounts.filter(a => a.status === "active").length === 0}>
@@ -3894,7 +3895,7 @@ function Accounts(props: {
                     className="textButton"
                     type="button"
                     disabled={!authorizationUrl}
-                    onClick={() => void navigator.clipboard.writeText(authorizationUrl)}
+                    onClick={() => void copyText(authorizationUrl)}
                   >
                     <Clipboard size={16} />Copy Link
                   </button>
@@ -4262,7 +4263,7 @@ function ModelRegistry(props: {
                             +{siblingCount} more
                           </span>
                         )}
-                        <button className="iconButton compact" title="Copy public model" type="button" onClick={() => void navigator.clipboard.writeText(model.publicModel)}>
+                        <button className="iconButton compact" title="Copy public model" type="button" onClick={() => void copyText(model.publicModel)}>
                           <Clipboard size={15} />
                         </button>
                       </div>
@@ -4653,7 +4654,7 @@ function RoutingProfiles(props: {
                     <span className="toggleSwitchKnob" />
                   </button>
                 </label>
-                <button className="iconButton" title={t("routes.copyId")} onClick={() => void navigator.clipboard.writeText(profile.id)}>
+                <button className="iconButton" title={t("routes.copyId")} onClick={() => void copyText(profile.id)}>
                   <Clipboard size={16} />
                 </button>
                 <button className="iconButton" title={t("common.edit")} onClick={() => { setEditingProfile(profile); setShowCreate(true); }}>
@@ -5059,7 +5060,7 @@ function EndpointUrlsSection(props: {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(props.localUrl);
+      await copyText(props.localUrl);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1_500);
     } catch {
@@ -5336,7 +5337,7 @@ function ApiKeysSection(props: {
     try {
       const result = await props.api.get<{ key: string }>(`/admin/v1/api-keys/${key.id}/reveal`);
       if (result.key) {
-        await navigator.clipboard.writeText(result.key);
+        await copyText(result.key);
         setRevealedKeyId(key.id);
         setRevealedKeyValue(result.key);
         window.setTimeout(() => { setRevealedKeyId(null); setRevealedKeyValue(null); }, 8_000);
@@ -5351,7 +5352,7 @@ function ApiKeysSection(props: {
       return;
     }
     try {
-      await navigator.clipboard.writeText(createdKey);
+      await copyText(createdKey);
       setCopiedKeyId("created");
       window.setTimeout(() => setCopiedKeyId(null), 1_500);
     } catch {
@@ -5936,7 +5937,7 @@ function CliTools({ keys }: { keys: ApiKey[] }) {
   const [copied, setCopied] = useState<string | null>(null);
 
   function copySnippet(id: string, value: string) {
-    void navigator.clipboard.writeText(value);
+    void copyText(value);
     setCopied(id);
     showToast("success", "Copied to clipboard");
     setTimeout(() => setCopied(null), 2000);

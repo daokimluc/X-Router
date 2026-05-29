@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronRight, Copy, X, Sparkles, Zap, Wand2 } from "lucide-react";
+import { copyText } from "../clipboard";
 
 type ApiClient = {
   get<T>(path: string): Promise<T>;
@@ -519,7 +520,7 @@ function Step3({
         <button
           type="button"
           className="ghostButton"
-          onClick={() => void navigator.clipboard.writeText(snippet)}
+          onClick={() => void copyText(snippet)}
           style={{ marginTop: 8, fontSize: 11 }}
         >
           <Copy size={12} /> Copy snippet

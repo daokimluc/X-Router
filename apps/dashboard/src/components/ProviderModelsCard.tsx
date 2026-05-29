@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy, Plus, X } from "lucide-react";
+import { copyText } from "../clipboard";
 import type { CatalogProvider, ServiceKind } from "../providerCatalog";
 
 type ApiClient = {
@@ -380,7 +381,7 @@ function ModelPill({ model, provider }: { model: ModelEntry; provider: CatalogPr
 
   async function copyId() {
     try {
-      await navigator.clipboard.writeText(fullId);
+      await copyText(fullId);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {

@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { Check, Copy, ExternalLink } from "lucide-react";
+import { copyText } from "../clipboard";
 import type { CatalogProvider, ServiceKind } from "../providerCatalog";
 
 type Props = {
@@ -97,7 +98,7 @@ function EndpointRow({ label, value }: { label: string; value: string }) {
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {

@@ -11,6 +11,7 @@
 
 import { useState } from "react";
 import { Globe, Copy, Zap, Check } from "lucide-react";
+import { copyText } from "../clipboard";
 
 type EndpointSpec = { label: string; method: string; path: string; auth: "admin" | "api-key" | "public" };
 
@@ -68,7 +69,7 @@ export function ApiInfoPanel() {
 
   async function copyUrl(url: string, key: string) {
     try {
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopiedKey(key);
       window.setTimeout(() => setCopiedKey(null), 1500);
     } catch {

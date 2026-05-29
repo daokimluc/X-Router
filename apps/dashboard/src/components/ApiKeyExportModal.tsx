@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { X, Clipboard, CheckCircle2, Download } from "lucide-react";
+import { copyText } from "../clipboard";
 
 type Props = {
   fetchCsv: () => Promise<string>;
@@ -29,7 +30,7 @@ export function ApiKeyExportModal({ fetchCsv, onClose }: Props) {
   async function copy() {
     if (!csv) return;
     try {
-      await navigator.clipboard.writeText(csv);
+      await copyText(csv);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {

@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy, Play } from "lucide-react";
+import { copyText } from "../clipboard";
 import type { CatalogProvider, ServiceKind } from "../providerCatalog";
 
 type ApiClient = {
@@ -531,7 +532,7 @@ export function ProviderExampleCard({ api, provider, kind, kindLabel }: Props) {
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(curl);
+      await copyText(curl);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
