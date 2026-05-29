@@ -108,7 +108,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "topbar.lightMode": "Switch to light mode",
 
     // Login
-    "login.title": "AI Gateway",
+    "login.title": "X-Router",
     "login.subtitle": "Enter your admin password to continue",
     "login.placeholder": "Password",
     "login.button": "Sign In",
@@ -633,7 +633,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "topbar.lightMode": "Chuyển sang chế độ sáng",
 
     // Login
-    "login.title": "AI Gateway",
+    "login.title": "X-Router",
     "login.subtitle": "Nhập mật khẩu admin để tiếp tục",
     "login.placeholder": "Mật khẩu",
     "login.button": "Đăng nhập",
