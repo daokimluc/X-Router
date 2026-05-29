@@ -90,8 +90,77 @@ Test count: 371 → 382 pass (added Phase 31 multi-channel + post-audit tests).
 **P3 spending-caps** — DONE. Hold-and-settle ledger + 429 enforcement + persistence + admin endpoints + ApiKeyEditModal Limits inputs + key-list SpendBadge + team modal spend inputs + team-list SpendBadge.
 **P4 semantic-response-cache** — DONE. LRU+TTL cache + buildCacheKey + resolveCacheMode + openai.ts + anthropic.ts wiring + admin stats/flush + cacheMode field + Overview CachePanel + ApiKeyEditModal cacheMode dropdown + EN/VI i18n + FaqPanel entry.
 
-## Next session
+## Phase 33 — Kiro tool calling (Anthropic Messages protocol)
 
-1. Manual UI smoke browser (verify all 4 panels render correctly).
-2. P4 task 7.2 (cached tag on RequestLogs row) — skipped because RequestLog doesn't carry cacheHit (it's on UsageRecord).
-3. Manual end-to-end smoke for caps + cache (curl/Postman with cache_control header, set $0.01 cap to trigger 429).
+**Why:** Claude Desktop (Anthropic Messages API + MCP tools) connected through gateway returned only intro text ("Để mình xem qua thư mục…") and stopped — no `tool_use` blocks. Cline (OpenAI mode) worked because Cline parses XML in text. kiro.rs and new-api both supported it, so the upstream Kiro/CodeWhisperer service is capable; the gateway was the bottleneck.
+
+**Root cause (4 strip layers, all fixed):**
+1. `validation/openaiSchemas.ts` — schemas had no `tools`/`tool_choice` fields, zod stripped them on `.parse()`. Now `.passthrough()` everywhere.
+2. `routes/anthropic.ts` — non-stream + stream path both forced `toOpenAIChatRequest` + `chatCompletions`, dropping native Anthropic shape. Now prefers `adapter.messages()` when available.
+3. `KiroProviderAdapter.anthropicToKiroMessages` — filtered to text-only blocks. Now preserves `tool_use` (→ assistant `toolUses` history) and `tool_result` (→ user `toolResults`).
+4. `KiroClient.buildKiroPayload` — hardcoded `userInputMessage: { content, modelId, origin }` with no `userInputMessageContext`. Now builds `{ tools: [{ toolSpecification }], toolResults }` from request.
+
+**Stream path:** `ProviderStream` gained optional `events?: () => AsyncIterable<ProviderStreamEvent>` (text_delta | tool_use_start | tool_use_delta | tool_use_stop | message_stop). `KiroClient.kiroEventStream` parses `toolUseEvent` frames and accumulates partial-JSON `input` per `toolUseId`. `routes/anthropic.ts` `writeAnthropicStream` switches to structured emission when `events()` is present — emits `content_block_start{type:tool_use,id,name}` + `input_json_delta` deltas + `content_block_stop`, sets `message_delta.stop_reason: "tool_use"`.
+
+**Other fixes:**
+- `NormalizedAnthropicResponse.content` widened to `Array<text | tool_use>` discriminated union.
+- `mapAnthropicStopReason` extended with `tool_use → tool_calls`.
+- `ResponseCacheService.resolveCacheMode` skips when `hasTools` (cached tool_use responses depend on partial conversation state and tool definitions).
+
+**Tests added:** 4 in `kiroToolUse.test.ts` — payload `userInputMessageContext.tools`, payload `toolResults` + history `toolUses`, stream `events()` order, non-stream tool_use entry collection.
+
+**Verification:** gateway tsc clean, 447 pass + 7 skip (was 443 + 7), build clean.
+
+**Out of scope (next session if needed):**
+- Manual Claude Desktop smoke (restart gateway port 3100, point Claude Desktop at `http://localhost:3100`, ask for tool call, verify tool execution).
+- OpenAI native tool calling (Cline doesn't need it — uses XML workaround). Skipped to keep scope small.
+- kiro.rs heuristics not ported: tool name shortening (>63 chars), JSON schema normalization, thinking prefix injection, system chunked policy, prefill stripping, orphaned tool_use/tool_result pairing validation. Add when needed.
+
+## Phase 33b — Anthropic adapter tool calling (P1 follow-up)
+
+**Why:** After Phase 33 (Kiro), audit found `AnthropicMessagesAdapter` had 3 strip points on the OpenAI client → real Anthropic API path. Anyone proxying their Anthropic API key through x-router with tool calling would hit the same symptom.
+
+**Fixed (4 commits worth, single session):**
+1. `translateOpenAIToAnthropic` (line 408+) — was rebuilding body from scratch with only `model/max_tokens/messages/stream`. Now: forwards `temperature`, top-level `system` (from system-role messages), `tools` (translated `{type:function,function:{name,description,parameters}}` → `{name,description,input_schema}`), `tool_choice` (translated `auto/none/required/{type:function,function:{name}}` → Anthropic `{type:auto/none/any/tool,name?}`). Also handles assistant messages with `tool_calls` → Anthropic `tool_use` blocks, and `tool` role messages → Anthropic `user` with `tool_result` block.
+2. `normalizeAnthropicContent` — was filtering to `type==="text"` only, dropping upstream `tool_use` blocks. Now preserves both as `AnthropicContentBlock[]`.
+3. `normalizeStopReason` — was returning `null` for `"tool_use"`. Now returns `"tool_use"` directly (the type was widened in Phase 33).
+4. `translateAnthropicToOpenAI` — when response has `tool_use` blocks, populates `message.tool_calls: [{id,type:"function",function:{name,arguments:JSON.stringify(input)}}]` alongside `content` (text from text blocks only).
+
+**Type addition:** `OpenAIToolCall` exported from `base/types.ts`; `NormalizedOpenAIResponse.choices[].message.tool_calls?: OpenAIToolCall[]`.
+
+**Tests:** 4 in `anthropicAdapter.test.ts` — tools/tool_choice/system forwarded; OpenAI tool_calls + tool message → Anthropic tool_use/tool_result; tool_calls populated when upstream returns tool_use; native `messages()` preserves tool_use + stop_reason. Total: 451 pass + 7 skip (was 447 + 7).
+
+**Still drops tools (not fixed in P1):**
+- `codex/CodexAdapter.translateToCodex` (line 306+) — Codex Responses API.
+- `vertex-ai/VertexAIAdapter` + `antigravity/AntigravityAdapter` — Gemini shape, needs `functionDeclarations` mapping.
+- `routes/anthropic.ts handleDirectAnthropicRouting` fallback chatCompletions path (rare — only when client sends `x-provider-account-id` header AND adapter has no `messages()`).
+- `AnthropicMessagesAdapter.createAnthropicStream` yields raw SSE lines that get double-wrapped by `writeAnthropicStream`. Not exercised in current routing because the route path always re-encodes. If adapters were ever piped directly to clients, this would break.
+
+**Adapters confirmed OK (forward tools via spread/passthrough):** github-copilot, azure-openai, generic-openai, oauth-pkce, no-auth.
+
+## Phase 33c — Full tool-calling sweep + critical stream bug (P2/P3)
+
+**Critical bug found & fixed — `writeOpenAIStream` double-wrap (`utils/sse.ts`):** the OpenAI stream writer wrapped EVERY adapter chunk into `delta.content`, even when the adapter already yielded SSE-formatted `data: {...}` blocks (Codex, Azure, GenericOpenAI, Copilot, oauth-pkce, no-auth all yield raw upstream SSE). This corrupted ALL structured fields (tool_calls, role, finish_reason) for OpenAI-protocol streaming — not just tools. Fix: decide passthrough-vs-wrap ONCE from the first non-empty chunk (an adapter's stream is uniform), relay SSE blocks verbatim, only wrap plain-text deltas. Per-chunk classification was rejected because a `data:` block can split across network reads (regression test added). Also made `writeOpenAIStream` events-aware: when a stream exposes `events()`, render text + tool_use as proper `delta.tool_calls` chunks — this closes Kiro/Anthropic tool calling on the `/v1/chat/completions` route too.
+
+**Codex (`CodexAdapter.ts`):** `transformToCodexFormat` now forwards tools (translated to flat Codex shape `{type:"function",name,description,parameters}`), tool_choice, and handles assistant `tool_calls` → `function_call` input items + `tool` role → `function_call_output`. New module-scope `extractCodexEvent` parses `response.output_item.added`(function_call) + `response.function_call_arguments.delta` → stream emits `delta.tool_calls`; `collectCodexResponse` accumulates them into `message.tool_calls`.
+
+**Vertex + Antigravity (Gemini shape):** both now map tools → `tools[].functionDeclarations`, tool_choice → `toolConfig.functionCallingConfig.mode` (AUTO/NONE/ANY + allowedFunctionNames), assistant tool_calls → `functionCall` parts, `tool` role → `functionResponse` part. Responses + streams surface Gemini `functionCall` parts as OpenAI `tool_calls`. **Vertex `createSSEStream` previously yielded raw Gemini JSON** (pre-existing corruption, same class as the writeOpenAIStream bug) — now converts to OpenAI chunks. Both flag `tool_calling` capability.
+
+**Anthropic adapter stream (`createAnthropicStream`):** was yielding raw upstream SSE lines that `writeAnthropicStream` double-wrapped. Rewritten to parse upstream Anthropic SSE into the uniform ProviderStream: `[Symbol.asyncIterator]` (text only) + `events()` (text + tool_use) + `usage()`. New module helper `parseSSEDataLine`.
+
+**Direct-routing fallbacks:** `routes/anthropic.ts handleDirectAnthropicRouting` + main `toOpenAIChatRequest` now translate tools/tool_choice (Anthropic↔OpenAI shapes) and `toAnthropicResponse` surfaces `tool_calls` → `tool_use` blocks with `stop_reason:"tool_use"`. `openai.ts handleDirectAccountRouting` passes full body (tools included) — already OK.
+
+**Tests added (+11):** anthropic stream events; 2 codex tool (forward + stream); antigravity tool; openai-route events→tool_calls; SSE passthrough preserves tool_calls; split-chunk relay regression. Total: **458 pass + 7 skip** (was 443 at start of Phase 33).
+
+**Still not done (low priority):**
+- Windsurf cloud-chat path drops tools — but it's `describe.skip` legacy (Windsurf is FIM/autocomplete, not tool-calling chat). Left as-is.
+- kiro.rs heuristics still not ported (tool name shortening >63 chars, JSON schema normalization, orphaned tool_use/result pairing validation, thinking prefix, system chunked policy, prefill stripping). Add only if upstream 400s appear.
+- mock adapter (test-only) — n/a.
+
+## Phase 33d — multi-turn validation fix (same session)
+
+**Bug:** `openAIChatCompletionRequestSchema` required `content` as `string | array` (line ~8). But per the OpenAI spec, an assistant turn that made tool calls comes back on the NEXT request with `content: null`. That second turn was rejected at validation (400) — first turn worked, follow-up broke. Cline and other OpenAI clients send this routinely.
+
+**Fix:** schema `content` now `z.union([string, array, z.null()]).optional()`. `OpenAIChatMessage.content` type widened to `content?: string | array | null` (+ already-added `tool_calls?`, `tool_call_id?`). Hardened the OpenAI→Anthropic `translateOpenAIToAnthropic` user/assistant fallthrough branches to coerce non-string/non-array content to `""` instead of casting null as array. Verified downstream readers (`stringifyMessageContent`, codex/gemini transforms, openai.ts token estimation with `?? ""`) are all null-safe.
+
+**Tests:** +2 — `openaiRoute` multi-turn (assistant content:null + tool role → 200, not 400); `anthropicAdapter` content:null → only tool_use block emitted (no spurious empty text). **Total: 460 pass + 7 skip.**
