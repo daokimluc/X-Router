@@ -292,19 +292,15 @@ npm run build:all   # build dashboard-dist/ + dist/
 
 ## Lời cảm ơn
 
-X-Router là một dự án độc lập với codebase riêng (backend Fastify + TypeScript,
-dashboard React) và các quyết định thiết kế riêng. Nó hoạt động trong cùng không
-gian vấn đề với các AI gateway tự host khác như
-[9Router](https://github.com/decolua/9router) và
-[New API](https://github.com/QuantumNous/new-api) — những công cụ cũng hướng tới
-việc giúp định tuyến, gộp pool và giám sát các nhà cung cấp AI dễ dàng hơn.
+Trong quá trình phát triển, X-Router đã tham khảo ý tưởng từ một số AI gateway
+mã nguồn mở rất xuất sắc. Xin chân thành cảm ơn các tác giả và cộng đồng của họ:
 
-Chúng tôi tôn trọng công sức và quyền tác giả của các dự án đó. X-Router không sử
-dụng lại mã nguồn của họ; bất kỳ sự trùng lặp nào về mặt ý tưởng đều phản ánh các
-mẫu thiết kế phổ biến, đã được thiết lập sẵn trong lĩnh vực API gateway (định
-tuyến request, gộp tài khoản, fallback, theo dõi usage) chứ không phải bản port
-từ một triển khai cụ thể nào. Nếu bạn đang tìm giải pháp thay thế, các dự án đó
-cũng rất đáng tham khảo.
+- [9Router](https://github.com/decolua/9router) — router tiết kiệm token với auto-fallback và trải nghiệm CLI chỉn chu.
+- [New API](https://github.com/QuantumNous/new-api) — AI gateway và console quản trị nhiều tính năng.
+
+X-Router được xây dựng trên codebase độc lập của riêng mình (backend Fastify +
+TypeScript, dashboard React) và không sử dụng lại mã nguồn từ các dự án này — chỉ
+học hỏi những ý tưởng hay mà họ đã tiên phong trong lĩnh vực AI gateway.
 
 ---
 
