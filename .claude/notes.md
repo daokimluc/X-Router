@@ -210,3 +210,27 @@ Both pushed to origin/main and published. Global install updated to 0.3.1.
 
 **IMPORTANT user feedback (this session):** user said "đừng tự update nhé" — do NOT run `npm i -g` to update the global install automatically anymore. Publish to npm is OK (user confirmed), but leave the global update for the user to do. Global still on 0.3.2 as of this commit. See [[feedback-dont-auto-update-global]].
 
+## Distribution switched to PRIVATE via GitHub Packages (post-0.3.3)
+
+**Why:** user worried the public npm package let anyone download + reuse + rebuild the code. Confirmed it did (335 files incl. full built `dist/` — only the *names* on npm UI looked like "3 folders"; inside `dist/` is the whole logic). No credentials were ever in the package, but the logic was public.
+
+**What was done:**
+- User **deleted the package from public npm** via the web UI (Danger Zone → Delete package). CLI unpublish was blocked by npm's mandatory OTP-for-unpublish (token auth can't satisfy it). Verified gone: `registry.npmjs.org/@daokimluc/x-router` → 404.
+- GitHub repo `daokimluc/X-Router` is **private** (confirmed: unauthenticated API → 404).
+- Switched `package.json` `publishConfig` from `{access:public}` to `{registry:"https://npm.pkg.github.com"}` (commit `1d1056f`). `npm publish` now goes to **GitHub Packages** (private), republished 0.3.3 there. Verified readable with token.
+- **fine-grained PATs do NOT work** with GitHub Packages npm registry → `403 token does not match expected scopes`. Must use **classic** token: `read:packages`+`repo` to install, `write:packages`+`repo` to publish. (Verified by testing a fine-grained token → 403; classic publish token → worked.)
+- Distribution model chosen: **each user makes their own classic token** on their own GitHub account; admin invites them as repo Collaborator (Read). Considered a shared read-only token but fine-grained can't scope it to one repo and classic `repo` scope reads ALL the owner's private repos — rejected as too risky.
+- Added `INSTALL.md` (commit `a32f58e`) with two sections: **For Users** (token + .npmrc + install/update) and **For the Admin** (deploy:local, publish auth, release flow, collaborator management, scripts table, security notes).
+- Added `deploy:local` script (`a32f58e`/`39cac5f`): `npm run build:all && npm i -g .` — admin updates their OWN global from local source, no token/registry needed.
+
+**Update-check feature status:** `routes/admin.ts` `/admin/v1/version` hardcodes `fetch("https://registry.npmjs.org/@daokimluc/x-router/latest")`. Since the package was removed from public npm, this returns 404 → `hasUpdate=false` → **the in-app update badge is effectively OFF during the private/GitHub-Packages phase.** User chose to LEAVE IT AS-IS. If the package is ever republished to public npm, the badge auto-works again (no code change needed).
+
+**If user later wants PUBLIC npm again (they said this is the plan "someday"):**
+1. Change `publishConfig` back to `{ "access": "public" }` (remove the GitHub Packages registry line).
+2. Wait past the 24h name-lock from the unpublish (deleted 2026-05-29) — npm blocks republishing the same name for 24h. Name is NOT lost, just locked.
+3. `npm whoami` (re-`npm login` if token expired) → `npm run build:all` → `npm publish`.
+4. Update badge resumes automatically. Consider license (currently MIT = anyone can reuse) before going public.
+
+**Security TODO for user (tokens pasted in chat this session):** revoke publish token `ghp_9PgL...` and the fine-grained `github_pat_11AF...`, regenerate, then `npm config set //npm.pkg.github.com/:_authToken=<new>`.
+
+
