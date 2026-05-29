@@ -154,7 +154,7 @@ describe("POST /v1/messages", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      id: "msg_1",
+      id: "chatcmpl_1",
       type: "message",
       role: "assistant",
       model: "kiro-sonnet",

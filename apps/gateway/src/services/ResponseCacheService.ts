@@ -246,6 +246,9 @@ export class ResponseCacheService {
  * Resolve effective cache mode for a request.
  * Priority: per-key admin override > client `cache_control.mode` > header > default skip.
  * Then apply non-determinism policy: high temperature with top_p/top_k → coerce to skip.
+ * Tool-calling requests are always skipped: cached tool_use responses depend
+ * on partial conversation state and tool definitions, so reusing them risks
+ * returning stale tool calls or calls referencing tools the new request didn't declare.
  */
 export function resolveCacheMode(args: {
   bodyMode?: string;
@@ -255,8 +258,10 @@ export function resolveCacheMode(args: {
   top_p?: number | null;
   top_k?: number | null;
   isStream?: boolean;
+  hasTools?: boolean;
 }): CacheMode {
   if (args.isStream) return "skip";
+  if (args.hasTools) return "skip";
   if (args.apiKeyMode === "force_skip") return "skip";
 
   let mode: CacheMode = "skip";

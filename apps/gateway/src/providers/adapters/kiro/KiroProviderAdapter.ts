@@ -3,6 +3,7 @@ import type { ProviderAccount } from "../../base/ProviderAccount.js";
 import type { ProviderCapabilities } from "../../base/ProviderCapabilities.js";
 import { ProviderConfigError } from "../../base/ProviderErrors.js";
 import type {
+  AnthropicContentBlock,
   AnthropicMessagesRequest,
   NormalizedAnthropicResponse,
   NormalizedOpenAIResponse,
@@ -17,7 +18,7 @@ import type {
 import { applyKiroToken, KiroAuthClient, shouldRefreshKiroCredential } from "./KiroAuthClient.js";
 import { KiroClient } from "./KiroClient.js";
 import { KiroSessionManager } from "./KiroSessionManager.js";
-import type { KiroChatResponse, KiroCredentialPayload, KiroProviderConfig } from "./kiroTypes.js";
+import type { KiroChatResponse, KiroCredentialPayload, KiroMessage, KiroProviderConfig, KiroToolDef, KiroToolResult, KiroToolUseEntry } from "./kiroTypes.js";
 
 export class KiroProviderAdapter implements AIProviderAdapter {
   readonly type = "kiro";
@@ -143,6 +144,7 @@ export class KiroProviderAdapter implements AIProviderAdapter {
 
     const upstreamModel = resolveKiroModel(config, request.model);
     const kiroMessages = anthropicToKiroMessages(request);
+    const tools = anthropicToKiroTools(request.tools);
 
     if (request.stream) {
       const stream = await this.client.streamChatCompletions({
@@ -152,7 +154,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
           model: upstreamModel,
           messages: kiroMessages,
           stream: false,
-          max_tokens: request.max_tokens
+          max_tokens: request.max_tokens,
+          tools
         },
         requestId: context.requestId,
         timeoutMs: context.providerInstance.defaultTimeoutMs,
@@ -169,7 +172,8 @@ export class KiroProviderAdapter implements AIProviderAdapter {
         model: upstreamModel,
         messages: kiroMessages,
         stream: false,
-        max_tokens: request.max_tokens
+        max_tokens: request.max_tokens,
+        tools
       },
       requestId: context.requestId,
       timeoutMs: context.providerInstance.defaultTimeoutMs,
@@ -322,10 +326,32 @@ function normalizeUsage(
   };
 }
 
+function anthropicToKiroTools(
+  tools: AnthropicMessagesRequest["tools"]
+): KiroToolDef[] | undefined {
+  if (!tools || tools.length === 0) return undefined;
+  const out: KiroToolDef[] = [];
+  for (const t of tools) {
+    const name = (t as { name?: unknown }).name;
+    if (typeof name !== "string" || name.length === 0) continue;
+    const description = (t as { description?: unknown }).description;
+    const inputSchema = (t as { input_schema?: unknown }).input_schema;
+    out.push({
+      name,
+      description: typeof description === "string" ? description : "",
+      inputSchema:
+        inputSchema && typeof inputSchema === "object"
+          ? (inputSchema as Record<string, unknown>)
+          : { type: "object", properties: {} }
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function anthropicToKiroMessages(
   request: AnthropicMessagesRequest
-): Array<{ role: string; content: unknown }> {
-  const messages: Array<{ role: string; content: unknown }> = [];
+): KiroMessage[] {
+  const messages: KiroMessage[] = [];
 
   if (request.system) {
     const systemText =
@@ -334,21 +360,77 @@ function anthropicToKiroMessages(
         : (request.system as Array<{ text?: string }>)
             .map((b) => b.text ?? "")
             .join("\n");
-    messages.push({ role: "system", content: systemText });
+    if (systemText) {
+      // Pair system with a synthetic assistant ack so Kiro history remains
+      // alternating user/assistant; matches kiro.rs behavior.
+      messages.push({ role: "system", content: systemText });
+      messages.push({ role: "assistant", content: "I will follow these instructions." });
+    }
   }
 
   for (const msg of request.messages) {
-    const content =
-      typeof msg.content === "string"
-        ? msg.content
-        : (msg.content as Array<Record<string, unknown>>)
-            .map((block) => {
-              if (block.type === "text") return block.text as string;
+    if (typeof msg.content === "string") {
+      messages.push({ role: msg.role, content: msg.content });
+      continue;
+    }
+    if (!Array.isArray(msg.content)) {
+      messages.push({ role: msg.role, content: "" });
+      continue;
+    }
+
+    const blocks = msg.content as Array<Record<string, unknown>>;
+    const textParts: string[] = [];
+    const toolUses: KiroToolUseEntry[] = [];
+    const toolResults: KiroToolResult[] = [];
+
+    for (const block of blocks) {
+      const type = block.type;
+      if (type === "text") {
+        const t = block.text;
+        if (typeof t === "string") textParts.push(t);
+      } else if (type === "tool_use") {
+        const id = block.id;
+        const name = block.name;
+        const input = block.input;
+        if (typeof id === "string" && typeof name === "string") {
+          toolUses.push({
+            toolUseId: id,
+            name,
+            input: (input as unknown) ?? {}
+          });
+        }
+      } else if (type === "tool_result") {
+        const id = block.tool_use_id;
+        if (typeof id !== "string") continue;
+        const isError = block.is_error === true;
+        const c = block.content;
+        let text = "";
+        if (typeof c === "string") {
+          text = c;
+        } else if (Array.isArray(c)) {
+          text = c
+            .map((part) => {
+              if (part && typeof part === "object" && "text" in part) {
+                const v = (part as { text?: unknown }).text;
+                return typeof v === "string" ? v : "";
+              }
               return "";
             })
             .filter(Boolean)
             .join("\n");
-    messages.push({ role: msg.role, content });
+        }
+        toolResults.push({ toolUseId: id, content: text, isError: isError || undefined });
+      }
+      // image / other block types: dropped (Kiro images flow is separate; not in scope here)
+    }
+
+    const message: KiroMessage = {
+      role: msg.role,
+      content: textParts.join("\n")
+    };
+    if (toolUses.length > 0) message.toolUses = toolUses;
+    if (toolResults.length > 0) message.toolResults = toolResults;
+    messages.push(message);
   }
 
   return messages;
@@ -361,14 +443,27 @@ function normalizeKiroAnthropicResponse(
   const text =
     response.choices?.[0]?.message?.content ?? response.content ?? response.text ?? "";
   const usage = response.usage;
+  const blocks: AnthropicContentBlock[] = [];
+  if (text) blocks.push({ type: "text", text });
+  if (response.toolUses && response.toolUses.length > 0) {
+    for (const tu of response.toolUses) {
+      const input =
+        tu.input && typeof tu.input === "object" ? (tu.input as Record<string, unknown>) : {};
+      blocks.push({ type: "tool_use", id: tu.toolUseId, name: tu.name, input });
+    }
+  }
+  if (blocks.length === 0) blocks.push({ type: "text", text: "" });
+
+  const stopReason: NormalizedAnthropicResponse["stop_reason"] =
+    response.toolUses && response.toolUses.length > 0 ? "tool_use" : "end_turn";
 
   return {
     id: response.id ?? `msg_kiro_${Date.now()}`,
     type: "message",
     role: "assistant",
     model,
-    content: [{ type: "text", text }],
-    stop_reason: "end_turn",
+    content: blocks,
+    stop_reason: stopReason,
     usage: usage
       ? {
           input_tokens: usage.prompt_tokens ?? 0,

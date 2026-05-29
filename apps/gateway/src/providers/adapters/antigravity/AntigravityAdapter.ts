@@ -349,21 +349,77 @@ export class AntigravityAdapter implements AIProviderAdapter {
     const contents: GeminiContent[] = [];
     let systemInstruction = "";
 
-    for (const msg of request.messages) {
-      if (msg.role === "system") {
-        systemInstruction += typeof msg.content === "string"
-          ? msg.content
-          : JSON.stringify(msg.content);
+    for (const msg of request.messages as Array<Record<string, unknown>>) {
+      const role = msg.role as string;
+      const rawContent = msg.content;
+      if (role === "system") {
+        systemInstruction +=
+          typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
         continue;
       }
 
-      const role: "user" | "model" = msg.role === "assistant" ? "model" : "user";
+      // OpenAI tool result message → Gemini user message with functionResponse part.
+      if (role === "tool") {
+        const toolCallId = (msg.tool_call_id as string | undefined) ?? "";
+        const text =
+          typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
+        contents.push({
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                // Gemini doesn't have a tool-call id; we use the call id as a
+                // synthetic name so successive paired calls still match.
+                name: toolCallId || "tool",
+                response: { result: text }
+              }
+            }
+          ]
+        });
+        continue;
+      }
+
+      const geminiRole: "user" | "model" = role === "assistant" ? "model" : "user";
       const parts: GeminiPart[] = [];
 
-      if (typeof msg.content === "string") {
-        parts.push({ text: msg.content });
-      } else if (Array.isArray(msg.content)) {
-        for (const part of msg.content) {
+      // OpenAI assistant with tool_calls → Gemini model parts with functionCall.
+      if (role === "assistant") {
+        const toolCalls = msg.tool_calls as
+          | Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+          | undefined;
+        if (typeof rawContent === "string" && rawContent.length > 0) {
+          parts.push({ text: rawContent });
+        } else if (Array.isArray(rawContent)) {
+          for (const part of rawContent as Array<Record<string, unknown>>) {
+            if (part.type === "text" && typeof part.text === "string") {
+              parts.push({ text: part.text });
+            }
+          }
+        }
+        if (toolCalls && toolCalls.length > 0) {
+          for (const call of toolCalls) {
+            let args: Record<string, unknown> = {};
+            const argsStr = call.function?.arguments ?? "";
+            if (argsStr.trim().length > 0) {
+              try {
+                const parsed = JSON.parse(argsStr);
+                if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
+              } catch {
+                args = { _raw: argsStr };
+              }
+            }
+            parts.push({
+              functionCall: {
+                name: call.function?.name ?? "",
+                args
+              }
+            });
+          }
+        }
+      } else if (typeof rawContent === "string") {
+        parts.push({ text: rawContent });
+      } else if (Array.isArray(rawContent)) {
+        for (const part of rawContent as Array<Record<string, unknown>>) {
           if (part.type === "text") {
             parts.push({ text: part.text as string });
           } else {
@@ -373,7 +429,7 @@ export class AntigravityAdapter implements AIProviderAdapter {
       }
 
       if (parts.length > 0) {
-        contents.push({ role, parts });
+        contents.push({ role: geminiRole, parts });
       }
     }
 
@@ -402,18 +458,27 @@ export class AntigravityAdapter implements AIProviderAdapter {
       generationConfig.temperature = request.temperature;
     }
 
-    // Antigravity uses a wrapper format with project/model/request fields
+    const innerRequest: Record<string, unknown> = {
+      contents,
+      generationConfig,
+      sessionId: randomUUID()
+    };
+    if (request.tools && request.tools.length > 0) {
+      innerRequest.tools = [
+        { functionDeclarations: request.tools.map(translateOpenAIToolToGemini) }
+      ];
+    }
+    if (request.tool_choice !== undefined) {
+      innerRequest.toolConfig = translateToolChoiceToGemini(request.tool_choice);
+    }
+
     return {
       project: credential.projectId ?? this.generateProjectId(),
       model: request.model,
       userAgent: "antigravity",
       requestType: "agent",
       requestId: `agent-${randomUUID()}`,
-      request: {
-        contents,
-        generationConfig,
-        sessionId: randomUUID()
-      }
+      request: innerRequest
     };
   }
 
@@ -424,23 +489,47 @@ export class AntigravityAdapter implements AIProviderAdapter {
     requestedModel: string
   ): NormalizedOpenAIResponse {
     const candidate = geminiResponse.candidates?.[0];
-    const textParts = candidate?.content?.parts
-      ?.filter((p): p is { text: string } => "text" in p)
-      .map((p) => p.text) ?? [];
+    const parts = candidate?.content?.parts ?? [];
+    const textParts: string[] = [];
+    const toolCalls: Array<{
+      id: string;
+      type: "function";
+      function: { name: string; arguments: string };
+    }> = [];
+    for (const p of parts) {
+      if (typeof p.text === "string") {
+        textParts.push(p.text);
+      } else if (p.functionCall) {
+        toolCalls.push({
+          id: `call_${randomUUID().slice(0, 8)}`,
+          type: "function",
+          function: {
+            name: p.functionCall.name,
+            arguments: JSON.stringify(p.functionCall.args ?? {})
+          }
+        });
+      }
+    }
 
-    const content = textParts.join("");
     const finishReason = this.mapFinishReason(candidate?.finishReason);
+    const message: NormalizedOpenAIResponse["choices"][number]["message"] = {
+      role: "assistant",
+      content: textParts.join("")
+    };
+    if (toolCalls.length > 0) message.tool_calls = toolCalls;
 
     return {
       id: `chatcmpl-ag-${randomUUID().slice(0, 8)}`,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
       model: requestedModel,
-      choices: [{
-        index: 0,
-        message: { role: "assistant", content },
-        finish_reason: finishReason
-      }],
+      choices: [
+        {
+          index: 0,
+          message,
+          finish_reason: toolCalls.length > 0 ? "tool_calls" : finishReason
+        }
+      ],
       usage: {
         prompt_tokens: geminiResponse.usageMetadata?.promptTokenCount ?? 0,
         completion_tokens: geminiResponse.usageMetadata?.candidatesTokenCount ?? 0,
@@ -459,6 +548,7 @@ export class AntigravityAdapter implements AIProviderAdapter {
     const decoder = new TextDecoder();
     let buffer = "";
     const completionId = `chatcmpl-ag-${randomUUID().slice(0, 8)}`;
+    let toolCallCount = 0;
 
     try {
       while (true) {
@@ -482,25 +572,68 @@ export class AntigravityAdapter implements AIProviderAdapter {
           try {
             const geminiChunk = JSON.parse(jsonStr) as GeminiResponse;
             const candidate = geminiChunk.candidates?.[0];
-            const textParts = candidate?.content?.parts
-              ?.filter((p): p is { text: string } => "text" in p)
-              .map((p) => p.text) ?? [];
+            const parts = candidate?.content?.parts ?? [];
+            const textParts: string[] = [];
+            const toolCallChunks: Array<{
+              index: number;
+              id: string;
+              name: string;
+              arguments: string;
+            }> = [];
+            for (const p of parts) {
+              if (typeof p.text === "string") textParts.push(p.text);
+              else if (p.functionCall) {
+                const idx = toolCallCount;
+                toolCallCount += 1;
+                toolCallChunks.push({
+                  index: idx,
+                  id: `call_${randomUUID().slice(0, 8)}`,
+                  name: p.functionCall.name,
+                  arguments: JSON.stringify(p.functionCall.args ?? {})
+                });
+              }
+            }
 
             const delta = textParts.join("");
-            if (!delta && !candidate?.finishReason) continue;
+            if (
+              !delta &&
+              toolCallChunks.length === 0 &&
+              !candidate?.finishReason
+            ) {
+              continue;
+            }
+
+            const deltaObj: Record<string, unknown> = {};
+            if (delta) deltaObj.content = delta;
+            if (toolCallChunks.length > 0) {
+              deltaObj.tool_calls = toolCallChunks.map((tc) => ({
+                index: tc.index,
+                id: tc.id,
+                type: "function",
+                function: { name: tc.name, arguments: tc.arguments }
+              }));
+            }
+
+            const mappedFinish = candidate?.finishReason
+              ? this.mapFinishReason(candidate.finishReason)
+              : null;
+            const finishReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
+              mappedFinish !== null && toolCallCount > 0 && mappedFinish === "stop"
+                ? "tool_calls"
+                : mappedFinish;
 
             const openaiChunk = {
               id: completionId,
               object: "chat.completion.chunk",
               created: Math.floor(Date.now() / 1000),
               model,
-              choices: [{
-                index: 0,
-                delta: delta ? { content: delta } : {},
-                finish_reason: candidate?.finishReason
-                  ? this.mapFinishReason(candidate.finishReason)
-                  : null
-              }]
+              choices: [
+                {
+                  index: 0,
+                  delta: deltaObj,
+                  finish_reason: finishReason
+                }
+              ]
             };
 
             yield `data: ${JSON.stringify(openaiChunk)}\n\n`;
@@ -574,4 +707,54 @@ export class AntigravityAdapter implements AIProviderAdapter {
     }
     return new ProviderUnavailableError(this.type, status);
   }
+}
+
+/**
+ * OpenAI tool: `{ type:"function", function:{ name, description, parameters } }`.
+ * Gemini functionDeclaration: `{ name, description, parameters }` (parameters
+ * is JSON Schema, identical to OpenAI's `parameters`).
+ */
+function translateOpenAIToolToGemini(tool: Record<string, unknown>): {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+} {
+  if (tool.type === "function" && tool.function && typeof tool.function === "object") {
+    const fn = tool.function as Record<string, unknown>;
+    return {
+      name: typeof fn.name === "string" ? fn.name : "",
+      description: typeof fn.description === "string" ? fn.description : undefined,
+      parameters:
+        fn.parameters && typeof fn.parameters === "object"
+          ? (fn.parameters as Record<string, unknown>)
+          : undefined
+    };
+  }
+  return { name: typeof tool.name === "string" ? tool.name : "" };
+}
+
+/**
+ * OpenAI tool_choice: "auto" | "none" | "required" | { type:"function", function:{ name } }.
+ * Gemini toolConfig.functionCallingConfig.mode: "AUTO" | "NONE" | "ANY".
+ * Specific function targeting uses { mode: "ANY", allowedFunctionNames: [name] }.
+ */
+function translateToolChoiceToGemini(
+  choice: string | Record<string, unknown>
+): { functionCallingConfig: { mode: string; allowedFunctionNames?: string[] } } {
+  if (typeof choice === "string") {
+    const upper = choice.toUpperCase();
+    if (upper === "NONE") return { functionCallingConfig: { mode: "NONE" } };
+    if (upper === "REQUIRED" || upper === "ANY") return { functionCallingConfig: { mode: "ANY" } };
+    return { functionCallingConfig: { mode: "AUTO" } };
+  }
+  if (choice.type === "function" && choice.function && typeof choice.function === "object") {
+    const fn = choice.function as { name?: unknown };
+    return {
+      functionCallingConfig: {
+        mode: "ANY",
+        allowedFunctionNames: typeof fn.name === "string" ? [fn.name] : []
+      }
+    };
+  }
+  return { functionCallingConfig: { mode: "AUTO" } };
 }

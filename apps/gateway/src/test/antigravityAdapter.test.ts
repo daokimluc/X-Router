@@ -183,6 +183,83 @@ describe("AntigravityAdapter", () => {
     expect(chunks.some(c => c.includes("chat.completion.chunk"))).toBe(true);
   });
 
+  it("forwards tools as Gemini functionDeclarations and surfaces functionCall as tool_calls", async () => {
+    const geminiResponse = {
+      candidates: [{
+        content: {
+          parts: [
+            { text: "let me check" },
+            { functionCall: { name: "get_weather", args: { city: "SF" } } }
+          ]
+        },
+        finishReason: "STOP"
+      }],
+      usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 6, totalTokenCount: 11 }
+    };
+    const mockFetch = createMockFetch({ body: geminiResponse });
+    const adapter = new AntigravityAdapter(mockFetch);
+
+    const ctx = {
+      providerInstance: {
+        id: "test-instance",
+        type: "antigravity",
+        name: "Test",
+        enabled: true,
+        config: {},
+        defaultTimeoutMs: 30000,
+        maxRetries: 0,
+        cooldownMs: 60000,
+        accountSelectionStrategy: "round_robin" as const,
+        maxConcurrentRequests: 10,
+        maxConcurrentRequestsPerAccount: 3,
+        circuitBreaker: { enabled: false, failureThreshold: 5, cooldownMs: 60000, halfOpenMaxRequests: 1 },
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      account: { id: "acc-1" } as any,
+      requestId: "req-ag-tools",
+      credentialPayload: { accessToken: "ya29.test" }
+    };
+
+    const result = await adapter.chatCompletions(
+      {
+        model: "gemini-3-flash",
+        messages: [{ role: "user", content: "weather?" }],
+        stream: false,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "get_weather",
+              description: "Get weather",
+              parameters: { type: "object", properties: { city: { type: "string" } } }
+            }
+          }
+        ],
+        tool_choice: "required"
+      },
+      ctx
+    );
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.request.tools).toHaveLength(1);
+    expect(body.request.tools[0].functionDeclarations[0]).toMatchObject({
+      name: "get_weather",
+      description: "Get weather",
+      parameters: { type: "object", properties: { city: { type: "string" } } }
+    });
+    expect(body.request.toolConfig.functionCallingConfig.mode).toBe("ANY");
+
+    const normalized = result as any;
+    expect(normalized.choices[0].finish_reason).toBe("tool_calls");
+    expect(normalized.choices[0].message.content).toBe("let me check");
+    expect(normalized.choices[0].message.tool_calls).toHaveLength(1);
+    expect(normalized.choices[0].message.tool_calls[0]).toMatchObject({
+      type: "function",
+      function: { name: "get_weather", arguments: '{"city":"SF"}' }
+    });
+  });
+
   it("refreshes Google OAuth token", async () => {
     const tokenResponse = {
       access_token: "ya29.new-token",

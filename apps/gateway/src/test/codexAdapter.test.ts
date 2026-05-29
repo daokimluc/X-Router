@@ -156,6 +156,86 @@ describe("CodexAdapter", () => {
     expect(chunks.some(c => c.includes("[DONE]"))).toBe(true);
   });
 
+  it("forwards tools (flat Codex shape) and surfaces function_call as tool_calls", async () => {
+    const sseChunks = [
+      'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"fc_1","name":"get_weather"}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\\"city\\":"}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"\\"SF\\"}"}\n\n',
+      'data: {"type":"response.completed"}\n\n',
+      'data: [DONE]\n\n'
+    ];
+    const mockFetch = createMockFetch({ stream: sseChunks });
+    const adapter = new CodexAdapter(mockFetch);
+
+    const result = await adapter.chatCompletions(
+      {
+        model: "gpt-5.4",
+        messages: [{ role: "user", content: "weather in SF?" }],
+        stream: false,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "get_weather",
+              description: "Get weather",
+              parameters: { type: "object", properties: { city: { type: "string" } } }
+            }
+          }
+        ]
+      },
+      baseContext
+    );
+
+    // Codex tools shape is flat: { type:"function", name, description, parameters }
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.tools).toHaveLength(1);
+    expect(body.tools[0]).toMatchObject({
+      type: "function",
+      name: "get_weather",
+      description: "Get weather",
+      parameters: { type: "object", properties: { city: { type: "string" } } }
+    });
+    expect(body.tools[0].function).toBeUndefined();
+
+    const normalized = result as any;
+    expect(normalized.choices[0].finish_reason).toBe("tool_calls");
+    expect(normalized.choices[0].message.tool_calls).toHaveLength(1);
+    expect(normalized.choices[0].message.tool_calls[0]).toMatchObject({
+      id: "fc_1",
+      type: "function",
+      function: { name: "get_weather", arguments: '{"city":"SF"}' }
+    });
+  });
+
+  it("streams function_call as OpenAI tool_calls deltas", async () => {
+    const sseChunks = [
+      'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"fc_2","name":"calc"}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{}"}\n\n',
+      'data: {"type":"response.completed"}\n\n',
+      'data: [DONE]\n\n'
+    ];
+    const mockFetch = createMockFetch({ stream: sseChunks });
+    const adapter = new CodexAdapter(mockFetch);
+
+    const result = await adapter.chatCompletions(
+      {
+        model: "gpt-5.4",
+        messages: [{ role: "user", content: "calc" }],
+        stream: true,
+        tools: [{ type: "function", function: { name: "calc", parameters: {} } }]
+      },
+      baseContext
+    );
+
+    const chunks: string[] = [];
+    for await (const chunk of result as AsyncIterable<string>) chunks.push(chunk);
+    const joined = chunks.join("");
+    expect(joined).toContain('"tool_calls"');
+    expect(joined).toContain('"name":"calc"');
+    expect(joined).toContain('"id":"fc_2"');
+    expect(joined).toContain('"finish_reason":"tool_calls"');
+  });
+
   it("refreshes token via OpenAI OAuth endpoint", async () => {
     const tokenResponse = {
       access_token: "new-codex-token",

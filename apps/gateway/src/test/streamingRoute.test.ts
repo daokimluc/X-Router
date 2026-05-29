@@ -150,6 +150,197 @@ describe("POST /v1/chat/completions streaming", () => {
     await app.close();
   });
 
+  it("passes through SSE-formatted adapter chunks (preserves tool_calls)", async () => {
+    // Adapter that already yields full SSE-formatted blocks (the shape Codex/
+    // Azure/GenericOpenAI/Copilot adapters produce). The route must relay them
+    // verbatim — wrapping each block into delta.content would corrupt the
+    // structured fields like tool_calls.
+    const adapter: AIProviderAdapter = {
+      type: "kiro",
+      getCapabilities: () => ({
+        protocols: ["openai_chat_completions"],
+        flags: ["chat", "streaming"]
+      }),
+      validateConfig: async () => undefined,
+      validateCredential: async () => undefined,
+      listModels: async () => [],
+      chatCompletions: async () =>
+        (async function* stream() {
+          yield 'data: {"id":"u1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}\n\n';
+          yield 'data: {"id":"u1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}\n\n';
+          yield "data: [DONE]\n\n";
+        })(),
+      messages: async () => {
+        throw new Error("not used");
+      },
+      healthCheck: async () => ({ status: "ok" as const })
+    };
+    const providerRegistry = new ProviderAdapterRegistry();
+    providerRegistry.register(kiroProviderDefinition, adapter);
+    const accountPool = new AccountPool([makeAccount("kiro-1")]);
+    const app = await buildApp(testConfig({ requestBodyLimit: "16kb" }), {
+      providerRegistry,
+      providerRuntimeRegistry: new ProviderRuntimeRegistry(
+        [providerInstance],
+        [{ providerInstanceId: "provider_kiro_main", accountPool }]
+      ),
+      secretService: buildSecretService()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: "Bearer dev-key-1" },
+      payload: {
+        model: "kiro-sonnet",
+        stream: true,
+        messages: [{ role: "user", content: "go" }]
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    // Original upstream id "u1" survives — would be rewritten to chatcmpl_stream
+    // if the chunk had been re-wrapped by the route.
+    expect(response.body).toContain('"id":"u1"');
+    expect(response.body).toContain('"tool_calls"');
+    expect(response.body).toContain('"name":"f"');
+    expect(response.body.trim().endsWith("data: [DONE]")).toBe(true);
+    // Must NOT contain the raw SSE block embedded inside delta.content
+    expect(response.body).not.toContain('"content":"data: ');
+
+    await app.close();
+  });
+
+  it("relays SSE blocks split across network reads without wrapping", async () => {
+    // Upstream SSE where a single `data:` block is split mid-line across two
+    // reads. Per-chunk classification would wrap the continuation as text; the
+    // stream-level mode decision keeps the whole stream in passthrough.
+    const adapter: AIProviderAdapter = {
+      type: "kiro",
+      getCapabilities: () => ({
+        protocols: ["openai_chat_completions"],
+        flags: ["chat", "streaming"]
+      }),
+      validateConfig: async () => undefined,
+      validateCredential: async () => undefined,
+      listModels: async () => [],
+      chatCompletions: async () =>
+        (async function* stream() {
+          yield 'data: {"id":"u2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"par';
+          yield 'tial"}}]}\n\n';
+          yield "data: [DONE]\n\n";
+        })(),
+      messages: async () => {
+        throw new Error("not used");
+      },
+      healthCheck: async () => ({ status: "ok" as const })
+    };
+    const providerRegistry = new ProviderAdapterRegistry();
+    providerRegistry.register(kiroProviderDefinition, adapter);
+    const accountPool = new AccountPool([makeAccount("kiro-1")]);
+    const app = await buildApp(testConfig({ requestBodyLimit: "16kb" }), {
+      providerRegistry,
+      providerRuntimeRegistry: new ProviderRuntimeRegistry(
+        [providerInstance],
+        [{ providerInstanceId: "provider_kiro_main", accountPool }]
+      ),
+      secretService: buildSecretService()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: "Bearer dev-key-1" },
+      payload: {
+        model: "kiro-sonnet",
+        stream: true,
+        messages: [{ role: "user", content: "go" }]
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    // The continuation chunk must NOT have been wrapped into its own delta.content
+    expect(response.body).not.toContain('"content":"tial');
+    // The reassembled block (verbatim relay) is present
+    expect(response.body).toContain('"id":"u2"');
+    expect(response.body).toContain('"content":"partial"');
+
+    await app.close();
+  });
+
+  it("renders structured events() as OpenAI tool_calls SSE on the chat route", async () => {
+    // Adapter that exposes events() (the Anthropic/Kiro structured stream
+    // contract). The OpenAI route must translate tool_use events into
+    // delta.tool_calls chunks and finish with tool_calls.
+    const makeEventsStream = () => {
+      const events = [
+        { type: "text_delta", text: "ok" },
+        { type: "tool_use_start", id: "tu_x", name: "search" },
+        { type: "tool_use_delta", id: "tu_x", partial_json: '{"q":' },
+        { type: "tool_use_delta", id: "tu_x", partial_json: '"hi"}' },
+        { type: "tool_use_stop", id: "tu_x" },
+        { type: "message_stop", stop_reason: "tool_use" }
+      ];
+      const stream: any = (async function* () {
+        // text-only fallback iterator
+        yield "ok";
+      })();
+      stream.events = () => (async function* () {
+        for (const ev of events) yield ev;
+      })();
+      return stream;
+    };
+
+    const adapter: AIProviderAdapter = {
+      type: "kiro",
+      getCapabilities: () => ({
+        protocols: ["openai_chat_completions"],
+        flags: ["chat", "streaming", "tool_calling"]
+      }),
+      validateConfig: async () => undefined,
+      validateCredential: async () => undefined,
+      listModels: async () => [],
+      chatCompletions: async () => makeEventsStream(),
+      messages: async () => {
+        throw new Error("not used");
+      },
+      healthCheck: async () => ({ status: "ok" as const })
+    };
+    const providerRegistry = new ProviderAdapterRegistry();
+    providerRegistry.register(kiroProviderDefinition, adapter);
+    const accountPool = new AccountPool([makeAccount("kiro-1")]);
+    const app = await buildApp(testConfig({ requestBodyLimit: "16kb" }), {
+      providerRegistry,
+      providerRuntimeRegistry: new ProviderRuntimeRegistry(
+        [providerInstance],
+        [{ providerInstanceId: "provider_kiro_main", accountPool }]
+      ),
+      secretService: buildSecretService()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: "Bearer dev-key-1" },
+      payload: {
+        model: "kiro-sonnet",
+        stream: true,
+        messages: [{ role: "user", content: "search hi" }],
+        tools: [{ type: "function", function: { name: "search", parameters: {} } }]
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('"content":"ok"');
+    expect(response.body).toContain('"tool_calls"');
+    expect(response.body).toContain('"name":"search"');
+    expect(response.body).toContain('"arguments":"{\\"q\\":"');
+    expect(response.body).toContain('"finish_reason":"tool_calls"');
+    expect(response.body.trim().endsWith("data: [DONE]")).toBe(true);
+
+    await app.close();
+  });
+
   it("does not retry another account after a stream has started", async () => {
     let calls = 0;
     const adapter: AIProviderAdapter = {

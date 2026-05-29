@@ -1,4 +1,4 @@
-import { createSign } from "node:crypto";
+import { createSign, randomUUID } from "node:crypto";
 import type { AIProviderAdapter } from "../../base/AIProviderAdapter.js";
 import type { ProviderCapabilities } from "../../base/ProviderCapabilities.js";
 import {
@@ -47,9 +47,26 @@ export type ServiceAccountJSON = {
   token_uri: string;
 };
 
+type GeminiPart =
+  | { text: string }
+  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | { functionResponse: { name: string; response: Record<string, unknown> } };
+
 type GeminiContent = {
   role: "user" | "model";
-  parts: Array<{ text: string }>;
+  parts: GeminiPart[];
+};
+
+type GeminiTool = {
+  functionDeclarations: Array<{
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  }>;
+};
+
+type GeminiToolConfig = {
+  functionCallingConfig: { mode: string; allowedFunctionNames?: string[] };
 };
 
 type GeminiRequest = {
@@ -60,12 +77,17 @@ type GeminiRequest = {
     maxOutputTokens?: number;
     stopSequences?: string[];
   };
+  tools?: GeminiTool[];
+  toolConfig?: GeminiToolConfig;
 };
 
 type GeminiCandidate = {
-  content: {
-    role: string;
-    parts: Array<{ text: string }>;
+  content?: {
+    role?: string;
+    parts?: Array<{
+      text?: string;
+      functionCall?: { name: string; args: Record<string, unknown> };
+    }>;
   };
   finishReason?: string;
 };
@@ -112,7 +134,7 @@ export class VertexAIAdapter implements AIProviderAdapter {
   getCapabilities(): ProviderCapabilities {
     return {
       protocols: ["openai_chat_completions"],
-      flags: ["chat", "streaming"]
+      flags: ["chat", "streaming", "tool_calling"]
     };
   }
 
@@ -240,7 +262,7 @@ export class VertexAIAdapter implements AIProviderAdapter {
           throw new ProviderUnavailableError(this.type, 502);
         }
         clearTimeout(timeout);
-        return this.createSSEStream(response.body);
+        return this.createSSEStream(response.body, model);
       }
 
       // Non-streaming response
@@ -442,16 +464,68 @@ export class VertexAIAdapter implements AIProviderAdapter {
     const contents: GeminiContent[] = [];
     let systemInstruction: { parts: Array<{ text: string }> } | undefined;
 
-    for (const message of request.messages) {
-      if (message.role === "system") {
-        const text = this.extractTextContent(message);
+    for (const message of request.messages as Array<Record<string, unknown>>) {
+      const role = message.role as string;
+      const rawContent = message.content;
+
+      if (role === "system") {
+        const text =
+          typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
         systemInstruction = { parts: [{ text }] };
         continue;
       }
 
-      const role = message.role === "assistant" ? "model" : "user";
-      const text = this.extractTextContent(message);
-      contents.push({ role, parts: [{ text }] });
+      // OpenAI tool result → Gemini functionResponse part.
+      if (role === "tool") {
+        const toolCallId = (message.tool_call_id as string | undefined) ?? "";
+        const text =
+          typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
+        contents.push({
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name: toolCallId || "tool",
+                response: { result: text }
+              }
+            }
+          ]
+        });
+        continue;
+      }
+
+      const geminiRole: "user" | "model" = role === "assistant" ? "model" : "user";
+      const parts: GeminiPart[] = [];
+
+      if (role === "assistant") {
+        const toolCalls = message.tool_calls as
+          | Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+          | undefined;
+        const text = this.extractTextContent(message as OpenAIChatMessage);
+        if (text) parts.push({ text });
+        if (toolCalls && toolCalls.length > 0) {
+          for (const call of toolCalls) {
+            let args: Record<string, unknown> = {};
+            const argsStr = call.function?.arguments ?? "";
+            if (argsStr.trim().length > 0) {
+              try {
+                const parsed = JSON.parse(argsStr);
+                if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
+              } catch {
+                args = { _raw: argsStr };
+              }
+            }
+            parts.push({ functionCall: { name: call.function?.name ?? "", args } });
+          }
+        }
+      } else {
+        const text = this.extractTextContent(message as OpenAIChatMessage);
+        parts.push({ text });
+      }
+
+      if (parts.length > 0) {
+        contents.push({ role: geminiRole, parts });
+      }
     }
 
     const geminiRequest: GeminiRequest = { contents };
@@ -471,6 +545,15 @@ export class VertexAIAdapter implements AIProviderAdapter {
       }
     }
 
+    if (request.tools && request.tools.length > 0) {
+      geminiRequest.tools = [
+        { functionDeclarations: request.tools.map(translateOpenAIToolToGemini) }
+      ];
+    }
+    if (request.tool_choice !== undefined) {
+      geminiRequest.toolConfig = translateToolChoiceToGemini(request.tool_choice);
+    }
+
     return geminiRequest;
   }
 
@@ -479,8 +562,34 @@ export class VertexAIAdapter implements AIProviderAdapter {
    */
   transformFromGemini(response: GeminiResponse, model: string): NormalizedOpenAIResponse {
     const candidate = response.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text ?? "";
+    const parts = candidate?.content?.parts ?? [];
+    const textParts: string[] = [];
+    const toolCalls: Array<{
+      id: string;
+      type: "function";
+      function: { name: string; arguments: string };
+    }> = [];
+    for (const p of parts) {
+      if (typeof p.text === "string") {
+        textParts.push(p.text);
+      } else if (p.functionCall) {
+        toolCalls.push({
+          id: `call_${randomUUID().slice(0, 8)}`,
+          type: "function",
+          function: {
+            name: p.functionCall.name,
+            arguments: JSON.stringify(p.functionCall.args ?? {})
+          }
+        });
+      }
+    }
     const finishReason = this.mapFinishReason(candidate?.finishReason);
+
+    const message: NormalizedOpenAIResponse["choices"][number]["message"] = {
+      role: "assistant",
+      content: textParts.join("")
+    };
+    if (toolCalls.length > 0) message.tool_calls = toolCalls;
 
     const result: NormalizedOpenAIResponse = {
       id: `chatcmpl-vertex-${Date.now()}`,
@@ -490,11 +599,8 @@ export class VertexAIAdapter implements AIProviderAdapter {
       choices: [
         {
           index: 0,
-          message: {
-            role: "assistant",
-            content: text
-          },
-          finish_reason: finishReason
+          message,
+          finish_reason: toolCalls.length > 0 ? "tool_calls" : finishReason
         }
       ]
     };
@@ -613,29 +719,117 @@ export class VertexAIAdapter implements AIProviderAdapter {
     return new ProviderUnavailableError(this.type, status);
   }
 
+  /**
+   * Convert the upstream Gemini SSE stream into OpenAI-shaped SSE chunks.
+   * Previously this yielded raw Gemini JSON lines, which the route then wrapped
+   * into delta.content — corrupting the payload for OpenAI clients. Now each
+   * Gemini chunk is translated into a proper chat.completion.chunk, surfacing
+   * text deltas and functionCall parts as tool_calls deltas.
+   */
   private async *createSSEStream(
-    body: ReadableStream<Uint8Array>
+    body: ReadableStream<Uint8Array>,
+    model: string
   ): ProviderStream {
     const reader = body.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
+    const completionId = `chatcmpl-vertex-${randomUUID().slice(0, 8)}`;
+    let toolCallCount = 0;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
+        if (done) break;
 
-        if (done) {
-          break;
-        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
 
-        const chunk = decoder.decode(value, { stream: true });
-        if (chunk) {
-          yield chunk;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+          const jsonStr = trimmed.slice(6);
+          if (jsonStr === "[DONE]") {
+            yield "data: [DONE]\n\n";
+            continue;
+          }
+
+          try {
+            const geminiChunk = JSON.parse(jsonStr) as GeminiResponse;
+            const candidate = geminiChunk.candidates?.[0];
+            const parts = candidate?.content?.parts ?? [];
+            const textParts: string[] = [];
+            const toolCallChunks: Array<{
+              index: number;
+              id: string;
+              name: string;
+              arguments: string;
+            }> = [];
+            for (const p of parts) {
+              if (typeof p.text === "string") textParts.push(p.text);
+              else if (p.functionCall) {
+                const idx = toolCallCount;
+                toolCallCount += 1;
+                toolCallChunks.push({
+                  index: idx,
+                  id: `call_${randomUUID().slice(0, 8)}`,
+                  name: p.functionCall.name,
+                  arguments: JSON.stringify(p.functionCall.args ?? {})
+                });
+              }
+            }
+
+            const delta = textParts.join("");
+            if (!delta && toolCallChunks.length === 0 && !candidate?.finishReason) {
+              continue;
+            }
+
+            const deltaObj: Record<string, unknown> = {};
+            if (delta) deltaObj.content = delta;
+            if (toolCallChunks.length > 0) {
+              deltaObj.tool_calls = toolCallChunks.map((tc) => ({
+                index: tc.index,
+                id: tc.id,
+                type: "function",
+                function: { name: tc.name, arguments: tc.arguments }
+              }));
+            }
+
+            const mappedFinish = candidate?.finishReason
+              ? this.mapFinishReason(candidate.finishReason)
+              : null;
+            const finishReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
+              mappedFinish === "stop" && toolCallCount > 0 ? "tool_calls" : mappedFinish;
+
+            const openaiChunk = {
+              id: completionId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: deltaObj,
+                  finish_reason: finishReason
+                }
+              ]
+            };
+
+            yield `data: ${JSON.stringify(openaiChunk)}\n\n`;
+          } catch {
+            // Skip malformed JSON chunks
+          }
         }
       }
 
       const final = decoder.decode();
-      if (final) {
-        yield final;
+      if (final) buffer += final;
+      if (buffer.trim()) {
+        const trimmed = buffer.trim();
+        if (trimmed.startsWith("data: ") && trimmed.slice(6) === "[DONE]") {
+          yield "data: [DONE]\n\n";
+        }
       }
     } finally {
       reader.releaseLock();
@@ -646,4 +840,52 @@ export class VertexAIAdapter implements AIProviderAdapter {
     return Buffer.from(str, "utf8")
       .toString("base64url");
   }
+}
+
+/**
+ * OpenAI tool `{ type:"function", function:{ name, description, parameters } }`
+ * → Gemini functionDeclaration `{ name, description, parameters }`.
+ */
+function translateOpenAIToolToGemini(tool: Record<string, unknown>): {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+} {
+  if (tool.type === "function" && tool.function && typeof tool.function === "object") {
+    const fn = tool.function as Record<string, unknown>;
+    return {
+      name: typeof fn.name === "string" ? fn.name : "",
+      description: typeof fn.description === "string" ? fn.description : undefined,
+      parameters:
+        fn.parameters && typeof fn.parameters === "object"
+          ? (fn.parameters as Record<string, unknown>)
+          : undefined
+    };
+  }
+  return { name: typeof tool.name === "string" ? tool.name : "" };
+}
+
+/**
+ * OpenAI tool_choice → Gemini toolConfig.functionCallingConfig.
+ * "auto"→AUTO, "none"→NONE, "required"/"any"→ANY, {function:{name}}→ANY+allowedFunctionNames.
+ */
+function translateToolChoiceToGemini(
+  choice: string | Record<string, unknown>
+): { functionCallingConfig: { mode: string; allowedFunctionNames?: string[] } } {
+  if (typeof choice === "string") {
+    const upper = choice.toUpperCase();
+    if (upper === "NONE") return { functionCallingConfig: { mode: "NONE" } };
+    if (upper === "REQUIRED" || upper === "ANY") return { functionCallingConfig: { mode: "ANY" } };
+    return { functionCallingConfig: { mode: "AUTO" } };
+  }
+  if (choice.type === "function" && choice.function && typeof choice.function === "object") {
+    const fn = choice.function as { name?: unknown };
+    return {
+      functionCallingConfig: {
+        mode: "ANY",
+        allowedFunctionNames: typeof fn.name === "string" ? [fn.name] : []
+      }
+    };
+  }
+  return { functionCallingConfig: { mode: "AUTO" } };
 }

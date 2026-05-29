@@ -266,17 +266,58 @@ export class CodexAdapter implements AIProviderAdapter {
     const input: Array<Record<string, unknown>> = [];
     let instructions = DEFAULT_INSTRUCTIONS;
 
-    for (const msg of request.messages) {
-      if (msg.role === "system") {
-        instructions = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+    for (const msg of request.messages as Array<Record<string, unknown>>) {
+      const role = msg.role as string;
+      if (role === "system") {
+        instructions =
+          typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
         continue;
+      }
+
+      // OpenAI tool-result message → Codex function_call_output input item.
+      if (role === "tool") {
+        const toolCallId = (msg.tool_call_id as string | undefined) ?? "";
+        const text =
+          typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        input.push({
+          type: "function_call_output",
+          call_id: toolCallId,
+          output: text
+        });
+        continue;
+      }
+
+      // OpenAI assistant with tool_calls → Codex function_call input items.
+      if (role === "assistant") {
+        const toolCalls = msg.tool_calls as
+          | Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+          | undefined;
+        if (toolCalls && toolCalls.length > 0) {
+          // Emit any text content first, then each function_call as a separate item.
+          if (typeof msg.content === "string" && msg.content.length > 0) {
+            input.push({
+              type: "message",
+              role: "assistant",
+              content: [{ type: "input_text", text: msg.content }]
+            });
+          }
+          for (const call of toolCalls) {
+            input.push({
+              type: "function_call",
+              call_id: call.id ?? "",
+              name: call.function?.name ?? "",
+              arguments: call.function?.arguments ?? "{}"
+            });
+          }
+          continue;
+        }
       }
 
       const content: Array<Record<string, unknown>> = [];
       if (typeof msg.content === "string") {
         content.push({ type: "input_text", text: msg.content });
       } else if (Array.isArray(msg.content)) {
-        for (const part of msg.content) {
+        for (const part of msg.content as Array<Record<string, unknown>>) {
           if (part.type === "text") {
             content.push({ type: "input_text", text: part.text as string });
           } else {
@@ -288,7 +329,7 @@ export class CodexAdapter implements AIProviderAdapter {
       if (content.length > 0) {
         input.push({
           type: "message",
-          role: msg.role === "assistant" ? "assistant" : "user",
+          role: role === "assistant" ? "assistant" : "user",
           content
         });
       }
@@ -303,7 +344,7 @@ export class CodexAdapter implements AIProviderAdapter {
       });
     }
 
-    return {
+    const out: Record<string, unknown> = {
       model: request.model,
       instructions,
       input,
@@ -312,6 +353,14 @@ export class CodexAdapter implements AIProviderAdapter {
       reasoning: { effort: "low", summary: "auto" },
       include: ["reasoning.encrypted_content"]
     };
+    // Codex Responses API tools: flat shape `[{type:"function", name, description, parameters}]`.
+    if (request.tools && request.tools.length > 0) {
+      out.tools = request.tools.map(translateOpenAIToolToCodex);
+    }
+    if (request.tool_choice !== undefined) {
+      out.tool_choice = request.tool_choice;
+    }
+    return out;
   }
 
   // ─── Parse Codex SSE → OpenAI SSE format ───────────────────
@@ -324,6 +373,12 @@ export class CodexAdapter implements AIProviderAdapter {
     const decoder = new TextDecoder();
     let buffer = "";
     const completionId = `chatcmpl-cx-${randomUUID().slice(0, 8)}`;
+    /**
+     * Maps a Codex output_item index → OpenAI tool_calls index. Codex emits
+     * function calls as separate output items; OpenAI streams them in
+     * `choices[0].delta.tool_calls[<idx>]`. We assign indices in arrival order.
+     */
+    const toolCallIndex = new Map<number, number>();
 
     try {
       while (true) {
@@ -346,19 +401,49 @@ export class CodexAdapter implements AIProviderAdapter {
 
           try {
             const event = JSON.parse(jsonStr);
-            const delta = this.extractDeltaFromCodexEvent(event);
-            if (!delta) continue;
+            const evt = extractCodexEvent(event, toolCallIndex);
+            if (!evt) continue;
+
+            const delta: Record<string, unknown> = {};
+            if (evt.kind === "text") delta.content = evt.text;
+            else if (evt.kind === "tool_call_start") {
+              delta.tool_calls = [
+                {
+                  index: evt.index,
+                  id: evt.id,
+                  type: "function",
+                  function: { name: evt.name, arguments: "" }
+                }
+              ];
+            } else if (evt.kind === "tool_call_delta") {
+              delta.tool_calls = [
+                {
+                  index: evt.index,
+                  function: { arguments: evt.partial }
+                }
+              ];
+            }
+
+            const finishReason: string | null = evt.kind === "done"
+              ? evt.tool_calls
+                ? "tool_calls"
+                : "stop"
+              : null;
+
+            if (Object.keys(delta).length === 0 && finishReason === null) continue;
 
             const openaiChunk = {
               id: completionId,
               object: "chat.completion.chunk",
               created: Math.floor(Date.now() / 1000),
               model,
-              choices: [{
-                index: 0,
-                delta: delta.content ? { content: delta.content } : {},
-                finish_reason: delta.done ? "stop" : null
-              }]
+              choices: [
+                {
+                  index: 0,
+                  delta,
+                  finish_reason: finishReason
+                }
+              ]
             };
 
             yield `data: ${JSON.stringify(openaiChunk)}\n\n`;
@@ -382,6 +467,8 @@ export class CodexAdapter implements AIProviderAdapter {
     const decoder = new TextDecoder();
     let buffer = "";
     let fullContent = "";
+    const toolCallIndex = new Map<number, number>();
+    const toolCalls: Array<{ id: string; name: string; argsBuf: string }> = [];
 
     try {
       while (true) {
@@ -400,9 +487,16 @@ export class CodexAdapter implements AIProviderAdapter {
 
           try {
             const event = JSON.parse(jsonStr);
-            const delta = this.extractDeltaFromCodexEvent(event);
-            if (delta?.content) {
-              fullContent += delta.content;
+            const evt = extractCodexEvent(event, toolCallIndex);
+            if (!evt) continue;
+            if (evt.kind === "text") {
+              fullContent += evt.text;
+            } else if (evt.kind === "tool_call_start") {
+              toolCalls[evt.index] = { id: evt.id, name: evt.name, argsBuf: "" };
+            } else if (evt.kind === "tool_call_delta") {
+              if (toolCalls[evt.index]) {
+                toolCalls[evt.index].argsBuf += evt.partial;
+              }
             }
           } catch {
             // Skip
@@ -413,46 +507,35 @@ export class CodexAdapter implements AIProviderAdapter {
       reader.releaseLock();
     }
 
+    const message: NormalizedOpenAIResponse["choices"][number]["message"] = {
+      role: "assistant",
+      content: fullContent
+    };
+    const finishedToolCalls = toolCalls.filter(Boolean);
+    if (finishedToolCalls.length > 0) {
+      message.tool_calls = finishedToolCalls.map((tc) => ({
+        id: tc.id,
+        type: "function",
+        function: {
+          name: tc.name,
+          arguments: tc.argsBuf
+        }
+      }));
+    }
+
     return {
       id: `chatcmpl-cx-${randomUUID().slice(0, 8)}`,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
       model,
-      choices: [{
-        index: 0,
-        message: { role: "assistant", content: fullContent },
-        finish_reason: "stop"
-      }]
+      choices: [
+        {
+          index: 0,
+          message,
+          finish_reason: finishedToolCalls.length > 0 ? "tool_calls" : "stop"
+        }
+      ]
     };
-  }
-
-  // ─── Extract text delta from Codex SSE event ───────────────
-
-  private extractDeltaFromCodexEvent(event: Record<string, unknown>): { content?: string; done?: boolean } | null {
-    // Codex Responses API events:
-    // response.output_text.delta → { type: "response.output_text.delta", delta: "text" }
-    // response.completed → done
-    const type = event.type as string;
-
-    if (type === "response.output_text.delta") {
-      return { content: event.delta as string };
-    }
-
-    if (type === "response.output_text.done") {
-      return { done: true };
-    }
-
-    if (type === "response.completed" || type === "response.done") {
-      return { done: true };
-    }
-
-    // Also handle output_item content parts
-    if (type === "response.content_part.delta") {
-      const delta = event.delta as Record<string, unknown> | undefined;
-      if (delta?.text) return { content: delta.text as string };
-    }
-
-    return null;
   }
 
   // ─── Error classification ──────────────────────────────────
@@ -481,4 +564,87 @@ export class CodexAdapter implements AIProviderAdapter {
     }
     return new ProviderUnavailableError(this.type, status);
   }
+}
+
+/**
+ * Translate an OpenAI-shape tool definition into Codex Responses API shape.
+ * OpenAI: `{ type: "function", function: { name, description, parameters } }`.
+ * Codex Responses API: `{ type: "function", name, description, parameters }`
+ * (the function fields are flat, not nested).
+ */
+function translateOpenAIToolToCodex(tool: Record<string, unknown>): Record<string, unknown> {
+  if (tool.type === "function" && tool.function && typeof tool.function === "object") {
+    const fn = tool.function as Record<string, unknown>;
+    return {
+      type: "function",
+      name: typeof fn.name === "string" ? fn.name : "",
+      description: typeof fn.description === "string" ? fn.description : "",
+      parameters:
+        fn.parameters && typeof fn.parameters === "object"
+          ? (fn.parameters as Record<string, unknown>)
+          : { type: "object", properties: {} }
+    };
+  }
+  return tool;
+}
+
+type CodexEvent =
+  | { kind: "text"; text: string }
+  | { kind: "tool_call_start"; index: number; id: string; name: string }
+  | { kind: "tool_call_delta"; index: number; partial: string }
+  | { kind: "done"; tool_calls: boolean };
+
+/**
+ * Translate a single Codex Responses API SSE event into the gateway's
+ * uniform stream-event shape. Returns null for events we don't surface
+ * (e.g. reasoning summaries, status pings).
+ */
+function extractCodexEvent(
+  event: Record<string, unknown>,
+  toolCallIndex: Map<number, number>
+): CodexEvent | null {
+  const type = event.type as string | undefined;
+  if (!type) return null;
+
+  if (type === "response.output_text.delta") {
+    return { kind: "text", text: typeof event.delta === "string" ? event.delta : "" };
+  }
+  if (type === "response.content_part.delta") {
+    const delta = event.delta as Record<string, unknown> | undefined;
+    if (typeof delta?.text === "string") return { kind: "text", text: delta.text };
+  }
+
+  if (type === "response.output_item.added") {
+    const item = event.item as Record<string, unknown> | undefined;
+    if (item && item.type === "function_call") {
+      const outputIndex =
+        typeof event.output_index === "number" ? event.output_index : 0;
+      const idx = toolCallIndex.size;
+      toolCallIndex.set(outputIndex, idx);
+      return {
+        kind: "tool_call_start",
+        index: idx,
+        id: typeof item.call_id === "string" ? item.call_id : "",
+        name: typeof item.name === "string" ? item.name : ""
+      };
+    }
+  }
+
+  if (type === "response.function_call_arguments.delta") {
+    const outputIndex =
+      typeof event.output_index === "number" ? event.output_index : 0;
+    const idx = toolCallIndex.get(outputIndex);
+    if (idx === undefined) return null;
+    return {
+      kind: "tool_call_delta",
+      index: idx,
+      partial: typeof event.delta === "string" ? event.delta : ""
+    };
+  }
+
+  if (type === "response.completed" || type === "response.done") {
+    return { kind: "done", tool_calls: toolCallIndex.size > 0 };
+  }
+
+  return null;
 }

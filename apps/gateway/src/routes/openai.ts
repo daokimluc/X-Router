@@ -73,7 +73,8 @@ export async function registerOpenAIRoutes(
         temperature: body.temperature ?? null,
         top_p: (body as { top_p?: number }).top_p ?? null,
         top_k: (body as { top_k?: number }).top_k ?? null,
-        isStream: body.stream === true
+        isStream: body.stream === true,
+        hasTools: Array.isArray((body as { tools?: unknown[] }).tools) && ((body as { tools: unknown[] }).tools.length > 0)
       });
       const cacheKey = cacheMode !== "skip" ? buildCacheKey({
         model: body.model,

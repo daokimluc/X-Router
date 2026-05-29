@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ProviderError } from "../../base/ProviderErrors.js";
-import type { ProviderStream } from "../../base/types.js";
+import type { ProviderStream, ProviderStreamEvent } from "../../base/types.js";
 import type { ProviderInstance } from "../../base/ProviderInstance.js";
 import { applyChannelOverrides, interpretStatusCode } from "../../../utils/channelOverride.js";
 import type { ProxyFetchOptions } from "../../../proxy/types.js";
 import { proxyAwareFetch } from "../../../proxy/ProxyAwareFetch.js";
-import type { KiroChatRequest, KiroChatResponse, KiroCredentialPayload, KiroProviderConfig } from "./kiroTypes.js";
+import type { KiroChatRequest, KiroChatResponse, KiroCredentialPayload, KiroMessage, KiroProviderConfig, KiroToolDef, KiroToolResult, KiroToolUseEntry } from "./kiroTypes.js";
 
 export type KiroClientFetch = typeof fetch;
 
@@ -232,39 +232,31 @@ function kiroEventStream(
   onDone: () => void
 ): ProviderStream {
   let captured: { inputTokens: number; outputTokens: number } | null = null;
+  let consumed = false;
 
-  async function* iter(): AsyncGenerator<string> {
+  // Shared frame iterator that both wrappers (text and events) drain — but
+  // only one wrapper may be consumed per stream (the source can't be teed
+  // safely without buffering arbitrary data). Routes are expected to pick one.
+  async function* frames(): AsyncGenerator<{ eventType: string; payload: unknown }> {
+    if (consumed) {
+      throw new Error("ProviderStream already consumed");
+    }
+    consumed = true;
     const reader = stream.getReader();
     let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
-
     try {
       while (true) {
         const result = await reader.read();
-
-        if (result.done) {
-          break;
-        }
-
+        if (result.done) break;
         buffer = appendBytes(buffer, result.value);
-
         for (const event of readCompleteEvents(buffer)) {
           buffer = event.remaining;
           const frame = parseEventFrame(event.frame);
-          if (!frame) {
-            continue;
-          }
-
+          if (!frame) continue;
           const eventType = frame.headers[":event-type"] ?? "";
-          const content = getKiroEventContent(eventType, frame.payload);
-
           const eventUsage = extractKiroUsage(eventType, frame.payload);
-          if (eventUsage) {
-            captured = eventUsage;
-          }
-
-          if (content) {
-            yield content;
-          }
+          if (eventUsage) captured = eventUsage;
+          yield { eventType, payload: frame.payload };
         }
       }
     } finally {
@@ -273,8 +265,72 @@ function kiroEventStream(
     }
   }
 
+  async function* textIter(): AsyncGenerator<string> {
+    for await (const f of frames()) {
+      const content = getKiroEventContent(f.eventType, f.payload);
+      if (content) yield content;
+    }
+  }
+
+  async function* eventIter(): AsyncGenerator<ProviderStreamEvent> {
+    /**
+     * Tracks the in-flight tool_use block so we can emit a single
+     * tool_use_start (on first frame for that toolUseId) followed by
+     * tool_use_delta frames carrying partial JSON, then a tool_use_stop
+     * when `stop:true` arrives or a different tool_use begins.
+     */
+    let activeToolUseId: string | null = null;
+    let stopReason: "end_turn" | "max_tokens" | "stop_sequence" | "tool_use" = "end_turn";
+
+    function closeActiveTool(): ProviderStreamEvent | null {
+      if (activeToolUseId === null) return null;
+      const id = activeToolUseId;
+      activeToolUseId = null;
+      return { type: "tool_use_stop", id };
+    }
+
+    for await (const f of frames()) {
+      if (f.eventType === "assistantResponseEvent" || f.eventType === "codeEvent") {
+        const close = closeActiveTool();
+        if (close) yield close;
+        const text = getKiroEventContent(f.eventType, f.payload);
+        if (text) yield { type: "text_delta", text };
+        continue;
+      }
+      if (f.eventType === "toolUseEvent" && f.payload && typeof f.payload === "object") {
+        const p = f.payload as { name?: string; toolUseId?: string; input?: string; stop?: boolean };
+        const id = typeof p.toolUseId === "string" ? p.toolUseId : "";
+        const name = typeof p.name === "string" ? p.name : "";
+        if (!id) continue;
+
+        if (activeToolUseId !== null && activeToolUseId !== id) {
+          const close = closeActiveTool();
+          if (close) yield close;
+        }
+        if (activeToolUseId === null) {
+          activeToolUseId = id;
+          yield { type: "tool_use_start", id, name };
+          stopReason = "tool_use";
+        }
+        if (typeof p.input === "string" && p.input.length > 0) {
+          yield { type: "tool_use_delta", id, partial_json: p.input };
+        }
+        if (p.stop === true) {
+          const close = closeActiveTool();
+          if (close) yield close;
+        }
+        continue;
+      }
+      // contextUsageEvent and others: capture usage already handled in frames(); ignore here
+    }
+
+    const close = closeActiveTool();
+    if (close) yield close;
+    yield { type: "message_stop", stop_reason: stopReason };
+  }
+
   return {
-    [Symbol.asyncIterator]: () => iter(),
+    [Symbol.asyncIterator]: () => textIter(),
     usage: () => {
       if (!captured) return undefined;
       return {
@@ -282,7 +338,10 @@ function kiroEventStream(
         completion_tokens: captured.outputTokens,
         total_tokens: captured.inputTokens + captured.outputTokens
       };
-    }
+    },
+    events: () => ({
+      [Symbol.asyncIterator]: () => eventIter()
+    })
   };
 }
 
@@ -368,17 +427,40 @@ export function detectKiroSuspension(
 function buildKiroPayload(request: KiroChatRequest, credential: KiroCredentialPayload): Record<string, unknown> {
   const { history, currentMessage } = convertMessages(request.messages, request.model);
   const finalContent = `[Context: Current time is ${new Date().toISOString()}]\n\n${currentMessage.content}`;
+
+  const userInputMessageContext: Record<string, unknown> = {};
+  if (request.tools && request.tools.length > 0) {
+    userInputMessageContext.tools = request.tools.map((tool) => ({
+      toolSpecification: {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: { json: tool.inputSchema }
+      }
+    }));
+  }
+  if (currentMessage.toolResults && currentMessage.toolResults.length > 0) {
+    userInputMessageContext.toolResults = currentMessage.toolResults.map((r) => ({
+      toolUseId: r.toolUseId,
+      content: [{ text: r.content }],
+      status: r.isError ? "error" : "success",
+      ...(r.isError ? { isError: true } : {})
+    }));
+  }
+
+  const userInputMessage: Record<string, unknown> = {
+    content: finalContent,
+    modelId: request.model,
+    origin: "AI_EDITOR"
+  };
+  if (Object.keys(userInputMessageContext).length > 0) {
+    userInputMessage.userInputMessageContext = userInputMessageContext;
+  }
+
   const payload: Record<string, unknown> = {
     conversationState: {
       chatTriggerType: "MANUAL",
       conversationId: randomUUID(),
-      currentMessage: {
-        userInputMessage: {
-          content: finalContent,
-          modelId: request.model,
-          origin: "AI_EDITOR"
-        }
-      },
+      currentMessage: { userInputMessage },
       history
     },
     inferenceConfig: {
@@ -402,45 +484,70 @@ function buildKiroPayload(request: KiroChatRequest, credential: KiroCredentialPa
   return payload;
 }
 
+type ConvertedCurrent = {
+  content: string;
+  toolResults?: KiroToolResult[];
+};
+
 function convertMessages(
-  messages: KiroChatRequest["messages"],
+  messages: KiroMessage[],
   model: string
 ): {
   history: Array<Record<string, unknown>>;
-  currentMessage: { content: string };
+  currentMessage: ConvertedCurrent;
 } {
   const history: Array<Record<string, unknown>> = [];
-  let currentMessage: { content: string } | undefined;
+  let currentMessage: ConvertedCurrent | undefined;
 
   for (const message of messages) {
-    const content = stringifyMessageContent(message.content);
-
-    if (!content) {
-      continue;
-    }
-
     if (message.role === "assistant") {
-      history.push({
-        assistantResponseMessage: {
-          content
-        }
-      });
+      const content = stringifyMessageContent(message.content);
+      const tool_uses = message.toolUses;
+      const assistantResponseMessage: Record<string, unknown> = {
+        content
+      };
+      if (tool_uses && tool_uses.length > 0) {
+        assistantResponseMessage.toolUses = tool_uses.map((t) => ({
+          toolUseId: t.toolUseId,
+          name: t.name,
+          input: t.input ?? {}
+        }));
+      }
+      history.push({ assistantResponseMessage });
       continue;
     }
 
-    const userMessage = {
-      userInputMessage: {
-        content: message.role === "system" ? `System: ${content}` : content,
-        modelId: model
-      }
+    // user / system / tool — always pushed as userInputMessage in history
+    const isSystem = message.role === "system";
+    const rawContent = stringifyMessageContent(message.content);
+    const content = isSystem ? `System: ${rawContent}` : rawContent;
+    const userMsg: Record<string, unknown> = {
+      content,
+      modelId: model
     };
-    history.push(userMessage);
-    currentMessage = { content: userMessage.userInputMessage.content };
+
+    if (message.toolResults && message.toolResults.length > 0) {
+      userMsg.userInputMessageContext = {
+        toolResults: message.toolResults.map((r) => ({
+          toolUseId: r.toolUseId,
+          content: [{ text: r.content }],
+          status: r.isError ? "error" : "success",
+          ...(r.isError ? { isError: true } : {})
+        }))
+      };
+    }
+
+    history.push({ userInputMessage: userMsg });
+    currentMessage = {
+      content,
+      toolResults: message.toolResults
+    };
   }
 
   if (!currentMessage) {
     currentMessage = { content: "continue" };
   } else {
+    // Promote the last user/system entry out of history into currentMessage
     for (let index = history.length - 1; index >= 0; index -= 1) {
       if ("userInputMessage" in history[index]) {
         history.splice(index, 1);
@@ -789,6 +896,14 @@ function parseKiroResponseFromBuffer(buffer: Buffer, model: string): KiroChatRes
   let offset = 0;
   let content = "";
   let usage: { inputTokens: number; outputTokens: number } | null = null;
+  /**
+   * Tool-use accumulator. Kiro emits one or more `toolUseEvent` frames per
+   * tool call: a sequence of partial-JSON chunks terminated by `stop:true`
+   * (or by the start of a different toolUseId). We concatenate `input`
+   * fragments per id, then JSON.parse once at the end.
+   */
+  const toolBuffers = new Map<string, { name: string; input: string }>();
+  const toolOrder: string[] = [];
 
   while (offset + 16 <= bytes.length) {
     const view = new DataView(bytes.buffer, bytes.byteOffset + offset, bytes.byteLength - offset);
@@ -812,9 +927,36 @@ function parseKiroResponseFromBuffer(buffer: Buffer, model: string): KiroChatRes
     if (eventUsage) {
       usage = eventUsage;
     }
+
+    if (eventType === "toolUseEvent" && frame.payload && typeof frame.payload === "object") {
+      const p = frame.payload as { name?: string; toolUseId?: string; input?: string };
+      const id = typeof p.toolUseId === "string" ? p.toolUseId : "";
+      if (id) {
+        let slot = toolBuffers.get(id);
+        if (!slot) {
+          slot = { name: typeof p.name === "string" ? p.name : "", input: "" };
+          toolBuffers.set(id, slot);
+          toolOrder.push(id);
+        }
+        if (typeof p.input === "string") slot.input += p.input;
+      }
+    }
   }
 
-  if (!content) {
+  const toolUses: KiroToolUseEntry[] = toolOrder.map((id) => {
+    const slot = toolBuffers.get(id)!;
+    let input: unknown = {};
+    if (slot.input.trim().length > 0) {
+      try {
+        input = JSON.parse(slot.input);
+      } catch {
+        input = { _raw: slot.input };
+      }
+    }
+    return { toolUseId: id, name: slot.name, input };
+  });
+
+  if (!content && toolUses.length === 0) {
     throw new ProviderError({
       code: "provider_bad_response",
       message: "Kiro returned an empty assistant response",
@@ -830,11 +972,12 @@ function parseKiroResponseFromBuffer(buffer: Buffer, model: string): KiroChatRes
     id: `chatcmpl_kiro_${Date.now()}`,
     model,
     content,
+    toolUses: toolUses.length > 0 ? toolUses : undefined,
     choices: [
       {
         index: 0,
         message: { role: "assistant", content },
-        finish_reason: "stop"
+        finish_reason: toolUses.length > 0 ? "tool_calls" : "stop"
       }
     ],
     usage: {

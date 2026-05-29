@@ -220,4 +220,61 @@ describe("POST /v1/chat/completions", () => {
 
     await app.close();
   });
+
+  it("accepts a multi-turn tool-calling history (assistant content:null + tool role)", async () => {
+    const fetchImpl = async () =>
+      new Response(JSON.stringify({ content: "ok" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    const providerRegistry = new ProviderAdapterRegistry();
+    providerRegistry.register(
+      kiroProviderDefinition,
+      new KiroProviderAdapter(new KiroClient(fetchImpl))
+    );
+    const accountPool = new AccountPool([makeAccount("kiro-1")]);
+    const encryptionService = new LocalEncryptionService("test-key");
+    const secretService = new SecretService(encryptionService);
+    secretService.addSecret({
+      id: "secret_kiro_1",
+      accountId: "kiro-1",
+      credentialType: "refresh_token",
+      encryptedPayload: encryptionService.encryptJson({ accessToken: "access-token" }),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z")
+    });
+    const app = await buildApp(testConfig({ requestBodyLimit: "16kb" }), {
+      providerRegistry,
+      providerRuntimeRegistry: new ProviderRuntimeRegistry(
+        [providerInstance],
+        [{ providerInstanceId: "provider_kiro_main", accountPool }]
+      ),
+      secretService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: "Bearer dev-key-1" },
+      payload: {
+        model: "kiro-sonnet",
+        messages: [
+          { role: "user", content: "what files are here?" },
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              { id: "call_1", type: "function", function: { name: "ls", arguments: "{}" } }
+            ]
+          },
+          { role: "tool", content: "a.txt", tool_call_id: "call_1" }
+        ],
+        tools: [{ type: "function", function: { name: "ls", parameters: {} } }]
+      }
+    });
+
+    // The key assertion: schema validation accepts content:null and does not 400.
+    expect(response.statusCode).toBe(200);
+
+    await app.close();
+  });
 });
