@@ -1332,6 +1332,51 @@ td code {
   word-break: break-word;
 }
 
+/* Phase 32 — VersionBadge in sidebar brand ─────────────────── */
+.brandText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brandSubtitleStack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.brandSubtitle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+}
+
+.brandUpdateBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--color-primary) 25%, transparent),
+    color-mix(in srgb, #f59e0b 25%, transparent));
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.brandUpdateBadge:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
 /* Phase 32 — ApiInfoPanel ─────────────────────────────────── */
 .apiInfoPanel {
   background: var(--color-surface);

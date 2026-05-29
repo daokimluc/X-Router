@@ -80,6 +80,7 @@ import { FaqPanel } from "./components/FaqPanel";
 import { LatencyPanel } from "./components/LatencyPanel";
 import { CachePanel } from "./components/CachePanel";
 import { SpendBadge } from "./components/SpendBadge";
+import { VersionBadge } from "./components/VersionBadge";
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -702,9 +703,9 @@ export function App() {
           <div className="appMark">
             <Shield size={20} />
           </div>
-          <div>
-            <h1>Internal AI Gateway</h1>
-            <span>Control Plane v0.1</span>
+          <div className="brandText">
+            <h1>X-Router</h1>
+            <VersionBadge api={api} />
           </div>
         </div>
 

@@ -319,6 +319,67 @@ export async function registerAdminRoutes(
 ): Promise<void> {
   const adminAuth = createAdminAuthMiddleware(config);
 
+  // Phase 32 — version check. Reads current version from package.json
+  // (resolved at process start) and queries npm for the latest published
+  // version. Cached for 1 hour to avoid hammering the registry.
+  let versionCache: { current: string; latest: string | null; hasUpdate: boolean; checkedAt: number } | null = null;
+  const VERSION_CACHE_MS = 60 * 60 * 1000;
+  app.get(
+    "/admin/v1/version",
+    { preHandler: adminAuth },
+    async () => {
+      const now = Date.now();
+      if (versionCache && now - versionCache.checkedAt < VERSION_CACHE_MS) {
+        return versionCache;
+      }
+      // Read version from package.json
+      let current = "unknown";
+      try {
+        const { readFileSync } = await import("node:fs");
+        const { fileURLToPath } = await import("node:url");
+        const path = await import("node:path");
+        const __dirname = path.dirname(fileURLToPath(import.meta.url));
+        // dist/routes/admin.js → ../../package.json (when published) or
+        // apps/gateway/src/routes/admin.ts → ../../../package.json (in dev/tests)
+        const candidates = [
+          path.resolve(__dirname, "..", "..", "package.json"),
+          path.resolve(__dirname, "..", "..", "..", "package.json"),
+          path.resolve(__dirname, "..", "..", "..", "..", "package.json"),
+        ];
+        for (const p of candidates) {
+          try {
+            const pkg = JSON.parse(readFileSync(p, "utf8"));
+            if (pkg.name === "@daokimluc/x-router" || pkg.name === "ai-gateway") {
+              current = pkg.version;
+              break;
+            }
+          } catch {}
+        }
+      } catch {}
+
+      // Fetch latest from npm
+      let latest: string | null = null;
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5000);
+        const res = await fetch("https://registry.npmjs.org/@daokimluc/x-router/latest", {
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json() as { version?: string };
+          if (typeof data.version === "string") latest = data.version;
+        }
+      } catch {
+        // network / timeout — leave latest null
+      }
+
+      const hasUpdate = !!(latest && current !== "unknown" && compareSemver(latest, current) > 0);
+      versionCache = { current, latest, hasUpdate, checkedAt: now };
+      return versionCache;
+    }
+  );
+
   app.get(
     "/admin/v1/oauth/pkce/start",
     {
@@ -4235,4 +4296,27 @@ async function findCodexLocalCredential(): Promise<
   }
 
   return undefined;
+}
+
+/**
+ * Lightweight semver comparator: returns >0 if a > b, <0 if a < b, 0 if equal.
+ * Handles "1.2.3", "1.2.3-rc.1", "v1.2.3" prefixes. Pre-release tags lose to
+ * the same major.minor.patch without a tag (1.2.3 > 1.2.3-rc.1).
+ */
+function compareSemver(a: string, b: string): number {
+  const stripV = (v: string) => v.replace(/^v/, "");
+  const parse = (v: string) => {
+    const [core, pre] = stripV(v).split("-");
+    const [maj, min, pat] = core.split(".").map((p) => parseInt(p, 10) || 0);
+    return { maj, min, pat, pre: pre ?? "" };
+  };
+  const A = parse(a);
+  const B = parse(b);
+  if (A.maj !== B.maj) return A.maj - B.maj;
+  if (A.min !== B.min) return A.min - B.min;
+  if (A.pat !== B.pat) return A.pat - B.pat;
+  // Same core: pre-release < release
+  if (A.pre === "" && B.pre !== "") return 1;
+  if (A.pre !== "" && B.pre === "") return -1;
+  return A.pre.localeCompare(B.pre);
 }

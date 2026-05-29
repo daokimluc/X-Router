@@ -79,12 +79,13 @@ function ensureConfig() {
   if (existsSync(CONFIG_PATH)) {
     try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch {}
   }
-  let changed = false;
+  // Default admin key is literally "admin" — simple to remember on first run.
+  // Admins can rotate it via the dashboard; the new value is read from
+  // ADMIN_API_KEYS env on each launch (or kept here if persisted).
   if (!cfg.adminApiKeys) {
-    cfg.adminApiKeys = `xra_${randomBytes(16).toString('hex')}`;
-    changed = true;
+    cfg.adminApiKeys = "admin";
+    writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
   }
-  if (changed) writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
   return cfg;
 }
 
@@ -93,8 +94,6 @@ const adminKeys = process.env.ADMIN_API_KEYS || cfg.adminApiKeys;
 
 if (printKeysOnly) {
   console.log(`ADMIN_API_KEYS=${adminKeys}`);
-  console.log('');
-  console.log('Default client API key (rotate via dashboard): admin');
   process.exit(0);
 }
 
@@ -151,8 +150,7 @@ if (noMenu) {
   }
 
   console.log(`✓ Server ready at ${url}`);
-  console.log(`  Admin login key: ${adminKeys}`);
-  console.log(`  Default client key: admin  (rotate in dashboard → Endpoint & Keys)`);
+  console.log(`  Admin login key: ${adminKeys}  (rotate via dashboard → Settings)`);
   console.log(`  Logs: ${LOG_PATH}`);
 
   // Auto-open browser on first launch
@@ -169,8 +167,13 @@ if (noMenu) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  await showMenu(child);
-  shutdown();
+  const result = await showMenu(child);
+  if (result === 'exit') {
+    shutdown();
+  } else if (result === 'hide') {
+    // Detach: don't kill child. Exit launcher; child node keeps running.
+    process.exit(0);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -230,7 +233,8 @@ function showMenu(child) {
     const items = [
       { label: 'Open Web UI in browser', action: 'open' },
       { label: 'Show server logs (last 30 lines)', action: 'logs' },
-      { label: 'Print API keys', action: 'keys' },
+      { label: 'Print admin key', action: 'keys' },
+      { label: 'Hide to background (server keeps running)', action: 'hide' },
       { label: 'Stop server and exit', action: 'exit' },
     ];
 
@@ -240,7 +244,7 @@ function showMenu(child) {
       console.log('');
       items.forEach((it, i) => console.log(`  ${i + 1}. ${it.label}`));
       console.log('');
-      rl.question('Choose [1-4]: ', (answer) => {
+      rl.question(`Choose [1-${items.length}]: `, (answer) => {
         const idx = Number(answer.trim()) - 1;
         const item = items[idx];
         if (!item) {
@@ -255,13 +259,22 @@ function showMenu(child) {
           tailLog(30);
           ask();
         } else if (item.action === 'keys') {
-          console.log(`\n  ADMIN_API_KEYS    = ${adminKeys}`);
-          console.log(`  Default client key = admin  (rotate via dashboard → Endpoint & Keys)`);
-          console.log(`\n  (admin key saved at ${CONFIG_PATH})`);
+          console.log(`\n  Admin login key: ${adminKeys}`);
+          console.log(`\n  Rotate via dashboard → Settings, or edit ${CONFIG_PATH}`);
+          console.log(`  then restart x-router.`);
           ask();
+        } else if (item.action === 'hide') {
+          if (child.unref) child.unref();
+          console.log('');
+          console.log(`✓ Server keeps running in background at ${url}`);
+          console.log(`  Logs: ${LOG_PATH}`);
+          console.log(`  To stop: kill the node process on port ${portNum},`);
+          console.log(`  or run \`x-router\` again — it will detect & manage the existing instance.`);
+          rl.close();
+          resolve('hide');
         } else if (item.action === 'exit') {
           rl.close();
-          resolve();
+          resolve('exit');
         }
       });
     }

@@ -309,12 +309,6 @@ export async function buildApp(
       apiKeyService.addRecord(apiKey);
     }
   }
-  // First-run seed: ensure at least one client API key exists so the
-  // dashboard / SDK clients have something to authenticate with. The seeded
-  // key is `admin`; admins can rotate it via the dashboard.
-  if (apiKeyService.list().length === 0) {
-    apiKeyService.seedDefaultKey();
-  }
 
   if (persistedState && !dependencies.secretService) {
     for (const secret of persistedState.secrets) {
