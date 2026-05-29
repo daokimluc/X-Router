@@ -164,3 +164,32 @@ Test count: 371 → 382 pass (added Phase 31 multi-channel + post-audit tests).
 **Fix:** schema `content` now `z.union([string, array, z.null()]).optional()`. `OpenAIChatMessage.content` type widened to `content?: string | array | null` (+ already-added `tool_calls?`, `tool_call_id?`). Hardened the OpenAI→Anthropic `translateOpenAIToAnthropic` user/assistant fallthrough branches to coerce non-string/non-array content to `""` instead of casting null as array. Verified downstream readers (`stringifyMessageContent`, codex/gemini transforms, openai.ts token estimation with `?? ""`) are all null-safe.
 
 **Tests:** +2 — `openaiRoute` multi-turn (assistant content:null + tool role → 200, not 400); `anthropicAdapter` content:null → only tool_use block emitted (no spurious empty text). **Total: 460 pass + 7 skip.**
+
+## Releases shipped to npm (@daokimluc/x-router, public)
+
+- **0.3.0** — Phase 33 tool-calling sweep + dashboard clipboard fix. Committed in 3 commits (`5ac6e2f` clipboard, `e0f417b` tool calling, `63b4be3` notes) + `d3535e3` release. Tag v0.3.0.
+- **0.3.1** — admin password feature (below). Commit `e060b14`, tag v0.3.1.
+
+Both pushed to origin/main and published. Global install updated to 0.3.1.
+
+## Admin password feature (0.3.1)
+
+**Why:** User found login broke — `admin123`/`admin` both rejected. Root cause was twofold: (1) the user's `~/.x-router/config.json` held an old random key `xra_de53...` that overrode the `"admin"` default (bin only sets default when `!cfg.adminApiKeys`); (2) the gateway snapshotted `config.adminApiKeys` into `new Set()` at startup in each auth middleware, so "Change Password" could never actually change the live key — it only validated and told users to edit .env + restart. Also the login page's "Default password:" hint rendered with no value after it.
+
+**What shipped:**
+- `services/AdminKeyService.ts` — single source of truth for admin key(s). Mutates `config.adminApiKeys` **in place** (same array ref middleware reads → runtime change, no restart). Persists to `~/.x-router/config.json` as comma-separated string (CLI-readable). API: `isValid`/`isDefault`/`list`/`setKey`(min 4 chars)/`reset`(→"admin"). Exports `DEFAULT_ADMIN_KEY = "admin"`. Constructor takes `{ persistPath }` for test injection.
+- Decorated `app.adminKeyService` in app.ts (injectable via deps for tests). Wraps `config.adminApiKeys`.
+- `middleware/adminAuth.ts` + `readyz.ts` + `metrics.ts` — read `config.adminApiKeys.includes(token)` live per-request instead of `new Set()` snapshot. (internalApiKeys still snapshotted — those don't change at runtime.)
+- `routes/admin.ts` — `POST /admin/v1/settings/change-password` now persists via `adminKeyService.setKey()` (was a validate-only stub); new `POST /admin/v1/settings/reset-password` → resets to "admin".
+- `routes/public.ts` — `GET /v1/public/auth-info` (unauthenticated) returns `{ isDefaultPassword, defaultPassword }` so the login page shows the hint only on first run.
+- Dashboard `LoginScreen` — fetches auth-info on mount, shows `Default password: <code>admin</code>` only when still default. Settings — new "Reset Password" button + handler. EN/VI i18n keys `settings.resetPassword*`.
+- `bin/x-router.js` — `--reset-admin-key` flag (lockout recovery): rewrites config.json adminApiKeys → "admin" and exits. Added to --help.
+
+**Gotcha fixed:** `await reply.code(400)` in a Fastify handler HUNG the response (unsettled). Use `reply.code(400)` without await, then `return payload`. The success (200) path was fine; only the error path hung — that's why the first endpoint test timed out at 5s.
+
+**Tests:** +9 in `test/adminPassword.test.ts` (AdminKeyService unit w/ temp persistPath + change/reset/auth-info endpoints w/ injected service). **Total: 469 pass + 7 skip.** Gateway+dashboard tsc clean, build clean. CLI flag verified manually with temp HOME.
+
+**User's machine note:** their `~/.x-router/config.json` was manually set to `adminApiKeys: "admin"` earlier this session, so they log in with `admin`.
+
+**Still deferred:** title still says "Internal AI Gateway" (old branding in `apps/dashboard/index.html`, present in 0.3.1) — user aware, not yet changed. npm tarball still bundles `dist/test/**` (~335 files) — should add to .npmignore eventually.
+
