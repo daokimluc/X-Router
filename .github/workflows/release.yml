@@ -15,35 +15,13 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: bun-linux-x64
-            label: linux-x64
-            artifact: ai-gateway-linux-x64
-          - os: macos-latest
-            target: bun-darwin-x64
-            label: macos-x64
-            artifact: ai-gateway-macos-x64
-          - os: macos-latest
-            target: bun-darwin-arm64
-            label: macos-arm64
-            artifact: ai-gateway-macos-arm64
-          - os: windows-latest
-            target: bun-windows-x64
-            label: windows-x64
-            artifact: ai-gateway-windows-x64.exe
-
+    name: Build all binaries (cross-compile from Linux)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Determine version
         id: ver
-        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
@@ -73,33 +51,50 @@ jobs:
       - name: Build dashboard (production assets)
         run: bun run build:dashboard
 
-      - name: Compile binary with Bun
-        shell: bash
+      - name: Compile binaries for all targets
         run: |
-          mkdir -p release
-          BIN_NAME="ai-gateway"
-          if [ "${{ matrix.label }}" = "windows-x64" ]; then
-            BIN_NAME="ai-gateway.exe"
-          fi
+          mkdir -p build
+
+          echo "→ Linux x64"
           bun build scripts/bun-entry.ts \
             --compile \
-            --target=${{ matrix.target }} \
-            --outfile=release/$BIN_NAME
+            --target=bun-linux-x64 \
+            --outfile=build/ai-gateway-linux-x64
 
-      - name: Stage release bundle
-        shell: bash
+          echo "→ macOS x64 (Intel)"
+          bun build scripts/bun-entry.ts \
+            --compile \
+            --target=bun-darwin-x64 \
+            --outfile=build/ai-gateway-macos-x64
+
+          echo "→ macOS arm64 (Apple Silicon)"
+          bun build scripts/bun-entry.ts \
+            --compile \
+            --target=bun-darwin-arm64 \
+            --outfile=build/ai-gateway-macos-arm64
+
+          echo "→ Windows x64"
+          bun build scripts/bun-entry.ts \
+            --compile \
+            --target=bun-windows-x64 \
+            --outfile=build/ai-gateway-windows-x64.exe
+
+          ls -la build/
+
+      - name: Stage release bundles
         run: |
-          STAGE="release/${{ matrix.artifact }}-${{ steps.ver.outputs.version }}"
-          mkdir -p "$STAGE"
-          if [ "${{ matrix.label }}" = "windows-x64" ]; then
-            mv release/ai-gateway.exe "$STAGE/"
-          else
-            mv release/ai-gateway "$STAGE/"
-            chmod +x "$STAGE/ai-gateway"
-          fi
-          cp -r dashboard-dist "$STAGE/"
-          cp README.md "$STAGE/" 2>/dev/null || true
-          cat > "$STAGE/RUN.md" <<'EOF'
+          VERSION="${{ steps.ver.outputs.version }}"
+
+          stage() {
+            local label="$1"
+            local bin_src="$2"
+            local bin_name="$3"
+            local stage_dir="release/ai-gateway-${label}-${VERSION}"
+            mkdir -p "$stage_dir"
+            cp "$bin_src" "$stage_dir/$bin_name"
+            chmod +x "$stage_dir/$bin_name"
+            cp -r dashboard-dist "$stage_dir/"
+            cat > "$stage_dir/RUN.md" <<'EOF'
           # AI Gateway — Quick start
 
           ## 1. Set required environment variables
@@ -132,57 +127,43 @@ jobs:
 
           http://localhost:3100/
 
-          Use any of your `ADMIN_API_KEYS` to log in.
+          ---
+
+          ## macOS first-run note
+
+          The binary is not code-signed. On first run macOS may show a security
+          warning. Allow it via System Settings → Privacy & Security, or run:
+
+          ```bash
+          xattr -d com.apple.quarantine ai-gateway
+          ```
           EOF
-          ls -la "$STAGE/"
+          }
 
-      - name: Create archive
-        shell: bash
+          stage linux-x64    build/ai-gateway-linux-x64        ai-gateway
+          stage macos-x64    build/ai-gateway-macos-x64        ai-gateway
+          stage macos-arm64  build/ai-gateway-macos-arm64      ai-gateway
+          stage windows-x64  build/ai-gateway-windows-x64.exe  ai-gateway.exe
+
+          ls -la release/
+
+      - name: Create archives
         run: |
-          STAGE="${{ matrix.artifact }}-${{ steps.ver.outputs.version }}"
+          VERSION="${{ steps.ver.outputs.version }}"
           cd release
-          if [ "${{ matrix.label }}" = "windows-x64" ]; then
-            7z a -tzip "${STAGE}.zip" "$STAGE/"
-          else
-            tar -czf "${STAGE}.tar.gz" "$STAGE/"
-          fi
+          for label in linux-x64 macos-x64 macos-arm64; do
+            tar -czf "ai-gateway-${label}-${VERSION}.tar.gz" "ai-gateway-${label}-${VERSION}/"
+          done
+          # Windows → zip
+          sudo apt-get update && sudo apt-get install -y zip
+          zip -r "ai-gateway-windows-x64-${VERSION}.zip" "ai-gateway-windows-x64-${VERSION}/"
+
           ls -la
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}-${{ steps.ver.outputs.version }}
-          path: |
-            release/*.zip
-            release/*.tar.gz
-
-  release:
-    name: Publish GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Determine version
-        id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release/
-          merge-multiple: true
 
       - name: Generate checksums
         run: |
           cd release
-          ls -la
-          sha256sum *.zip *.tar.gz > checksums.txt 2>/dev/null || true
+          sha256sum *.tar.gz *.zip > checksums.txt
           cat checksums.txt
 
       - name: Create GitHub Release
@@ -198,7 +179,7 @@ jobs:
           body: |
             ## AI Gateway ${{ steps.ver.outputs.version }}
 
-            Single-file binary built with Bun. Each archive contains:
+            Single-file binaries cross-compiled from Linux with Bun. Each archive contains:
             - The `ai-gateway` (or `.exe`) binary
             - `dashboard-dist/` static assets the binary serves
             - `RUN.md` quick-start guide
@@ -221,6 +202,14 @@ jobs:
             ```
 
             Open `http://localhost:3100/` for the admin dashboard.
+
+            ### macOS users
+
+            The binary is not code-signed. On first run, macOS may block it. Either
+            allow it via System Settings → Privacy & Security, or run:
+            ```bash
+            xattr -d com.apple.quarantine ai-gateway
+            ```
 
             ### Verify integrity
 
