@@ -13,6 +13,32 @@
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { InternalApiKeyRecord } from "./ApiKeyService.js";
+import type { ResolvedModelCandidate } from "../router/ModelResolver.js";
+
+/**
+ * Reorders the resolved candidates for a pooled model. The marketplace fills
+ * this with cheapest-seller-first ranking (lowest-cost-routing-wiring). The
+ * engine calls it right after model resolution, before the failover loop, so a
+ * pooled request tries the cheapest seller first and fails over to the next
+ * cheapest. Identity (unchanged order) when the marketplace is off. Takes/returns
+ * the engine's own candidate type — no marketplace coupling.
+ */
+export type CandidateRanker = (
+  model: string,
+  candidates: ResolvedModelCandidate[]
+) => ResolvedModelCandidate[];
+
+/**
+ * Capture the routed settlement context onto the request from the account the
+ * engine actually leased (lowest-cost-routing-wiring). The marketplace resolves
+ * the leased account's listing cost + sell rates and stashes `request.routed`.
+ * No-op when the marketplace is off or the account has no listing cost.
+ */
+export type RoutedCapture = (
+  request: FastifyRequest,
+  model: string,
+  accountId: string
+) => void;
 
 /**
  * A policy check run during `enforceKeyPolicy`, after the engine's own gates.
@@ -74,6 +100,8 @@ export class MarketplaceSeam {
   readonly keyPolicyChecks: KeyPolicyCheck[] = [];
   readonly persistenceContributors: PersistenceContributor[] = [];
   readonly settlementHooks: SettlementHook[] = [];
+  private candidateRanker: CandidateRanker | null = null;
+  private routedCapture: RoutedCapture | null = null;
 
   addKeyPolicyCheck(check: KeyPolicyCheck): void {
     this.keyPolicyChecks.push(check);
@@ -85,6 +113,39 @@ export class MarketplaceSeam {
 
   addSettlementHook(hook: SettlementHook): void {
     this.settlementHooks.push(hook);
+  }
+
+  /** Register the cheapest-first candidate ranker (lowest-cost-routing-wiring). */
+  setCandidateRanker(fn: CandidateRanker): void {
+    this.candidateRanker = fn;
+  }
+
+  /** Register the routed-context capture run after a lease is acquired. */
+  setRoutedCapture(fn: RoutedCapture): void {
+    this.routedCapture = fn;
+  }
+
+  /** Capture routed settlement context from the leased account. No-op when unset. */
+  captureRouted(request: FastifyRequest, model: string, accountId: string): void {
+    if (!this.routedCapture) return;
+    try {
+      this.routedCapture(request, model, accountId);
+    } catch {
+      // never break the request path on a capture failure
+    }
+  }
+
+  /**
+   * Reorder candidates via the registered ranker. Identity when none is set
+   * (marketplace off). Errors are swallowed → fall back to engine order.
+   */
+  rankCandidates<T extends ResolvedModelCandidate>(model: string, candidates: T[]): T[] {
+    if (!this.candidateRanker) return candidates;
+    try {
+      return this.candidateRanker(model, candidates) as T[];
+    } catch {
+      return candidates;
+    }
   }
 
   /** Run all settlement hooks (success or failure). Errors are swallowed per-hook. */

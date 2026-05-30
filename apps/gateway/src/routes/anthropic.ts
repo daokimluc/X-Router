@@ -124,6 +124,10 @@ export async function registerAnthropicRoutes(
         })());
         let lastError: unknown;
 
+        // lowest-cost-routing-wiring — reorder pooled candidates cheapest-seller-
+        // first (no-op when marketplace is off); failover loop tries next cheapest.
+        route.candidates = app.marketplaceSeam.rankCandidates(body.model, route.candidates);
+
         // Phase 20c — group routing may filter out all candidates without
         // crossGroupRetry. Return a clear 404 instead of falling through to
         // the generic "no available account" error.
@@ -191,6 +195,8 @@ export async function registerAnthropicRoutes(
               lease = accountPool.acquire({
                 model: candidate.publicModel
               });
+              // lowest-cost-routing-wiring — capture routed context from the lease.
+              app.marketplaceSeam.captureRouted(request, candidate.publicModel, lease.account.id);
               const secret = app.secretService.getSecretForAccount(lease.account.id);
               const credentialPayload = secret
                 ? app.secretService.decryptSecretPayload(secret)

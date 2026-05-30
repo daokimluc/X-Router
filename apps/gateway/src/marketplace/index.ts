@@ -22,7 +22,7 @@ import { type PaygDecision } from "./services/PaygDecision.js";
 import { RealPaygDecision } from "./services/RealPaygDecision.js";
 import { createMarketplacePolicyCheck } from "./policy/marketplacePolicyCheck.js";
 import { createSettlementHook } from "./policy/settlementHook.js";
-import { routedContextForCheapest } from "./policy/marketplaceRouting.js";
+import { createCandidateRanker, routedContextFor } from "./policy/marketplaceRouting.js";
 import { syncAllListings } from "./policy/sellerRegistry.js";
 import { registerWalletAdminRoutes } from "./routes/walletAdmin.js";
 import { registerPlanAdminRoutes } from "./routes/planAdmin.js";
@@ -159,13 +159,18 @@ export function registerMarketplace(
       modelPricingService: app.modelPricingService,
       paygDecision,
       getBody: (req) => req.body as { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined,
-      captureRouted: (req, model) => {
-        const ctxRouted = routedContextForCheapest(sellerService, marketPricingService, model);
-        if (ctxRouted) req.routed = ctxRouted;
-      },
       webhookService: app.webhookService
     })
   );
+
+  // lowest-cost-routing-wiring — rank pooled candidates cheapest-seller-first.
+  // The engine calls this after model resolution; request.routed is captured at
+  // the route from the account actually leased (not a pre-routing guess).
+  app.marketplaceSeam.setCandidateRanker(createCandidateRanker(sellerService));
+  app.marketplaceSeam.setRoutedCapture((req, model, accountId) => {
+    const ctxRouted = routedContextFor(sellerService, marketPricingService, model, accountId);
+    if (ctxRouted) req.routed = ctxRouted;
+  });
 
   // ── two-sided-settlement (#6) ─────────────────────────────────────────────
   const sellerEarningsLedger = new SellerEarningsLedger();

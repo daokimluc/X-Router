@@ -62,26 +62,39 @@ export function routedContextFor(
   };
 }
 
+/** Minimal candidate shape the ranker needs (matches ResolvedModelCandidate). */
+type RankableCandidate = { providerInstanceId: string };
+
 /**
- * Routed context for the CHEAPEST listing of a base model — the candidate
- * lowest-cost routing will pick. Used to capture settlement cost data at
- * policy-check time (before pool acquire). Returns null if no listings exist.
+ * lowest-cost-routing-wiring — cheapest-seller-first candidate ranker.
+ *
+ * Each pooled candidate corresponds to one seller (distinct providerInstanceId).
+ * Rank by the listing cost scalar (inputPerM + outputPerM) for the candidate's
+ * instance; candidates with no listing cost keep their relative order and are
+ * appended after all costed ones. Stable sort. House (true wholesale) naturally
+ * sorts at or below any third-party, so it bounds the ceiling with no special case.
  */
-export function routedContextForCheapest(
-  sellerService: SellerService,
-  marketPricing: MarketPricingService,
-  baseModel: string
-): { baseModel: string; sellerId: string; accountId: string; costPrice: CostPrice; sellRates: CostPrice } | null {
-  const candidates = sellerService.listingCostFor(baseModel);
-  if (candidates.length === 0) return null;
-  const cheapest = candidates.reduce((min, c) =>
-    (c.costPrice.inputPerM + c.costPrice.outputPerM) < (min.costPrice.inputPerM + min.costPrice.outputPerM) ? c : min
-  );
-  return {
-    baseModel,
-    sellerId: cheapest.sellerId,
-    accountId: cheapest.accountId,
-    costPrice: cheapest.costPrice,
-    sellRates: marketPricing.sellPriceFor(baseModel, cheapest.costPrice)
+export function createCandidateRanker(
+  sellerService: SellerService
+): <T extends RankableCandidate>(model: string, candidates: T[]) => T[] {
+  return function rank<T extends RankableCandidate>(model: string, candidates: T[]): T[] {
+    if (candidates.length < 2) return candidates;
+    // instanceId → cost scalar, from the model's enabled listings.
+    const scalar = new Map<string, number>();
+    for (const c of sellerService.listingCostFor(model)) {
+      scalar.set(c.providerInstanceId, c.costPrice.inputPerM + c.costPrice.outputPerM);
+    }
+    // Stable sort: decorate with original index; costed (asc) before uncosted.
+    return candidates
+      .map((c, i) => ({ c, i, s: scalar.get(c.providerInstanceId) }))
+      .sort((a, b) => {
+        const aHas = a.s !== undefined;
+        const bHas = b.s !== undefined;
+        if (aHas && bHas) return a.s! - b.s! || a.i - b.i;
+        if (aHas) return -1; // costed before uncosted
+        if (bHas) return 1;
+        return a.i - b.i; // both uncosted → stable
+      })
+      .map((x) => x.c);
   };
 }

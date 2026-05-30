@@ -153,17 +153,19 @@ function verify(rawBody, signatureHeader, secret) {
 - Month budget exhausted + overage on → PAYG (wallet) at the sell price, guarded
   by the user-set `paygDailyLimitUsd`. Overage off → blocked.
 - Two-tier model names: pooled `gpt-5.5` (platform routes the cheapest seller incl.
-  house) vs direct `hoang/gpt-5.5` (pins that seller).
+  house) vs direct `hoang/gpt-5.5` (pins that seller). A pooled request ranks
+  candidates **cheapest-seller-first** and fails over to the next cheapest when one
+  is unavailable; house (true wholesale) is the ceiling. The seller actually leased
+  is the one credited in settlement (and reported in `usage.recorded`).
 
 ---
 
 ## 6. Known gaps (not blocking integration)
 
-- All 5 business events are now emitted. `grant.exhausted` and
-  `supply.unhealthy` fire on the transition edge (once per episode);
-  `supply.unhealthy` currently triggers on a terminal request failure to a
-  non-house seller (a periodic health-monitor source can be added later).
-- `request.routed` uses a cheapest-listing approximation for cost attribution
-  (exact when house-only or cheapest wins).
+- `GET /provision/usage` is reconciliation-grade (tokens/model/cost/timestamps),
+  not a settlement-payload replay (no per-record sellerCredit/platformMargin).
+- `ProviderHealthMonitor` is not yet run in production, so `supply.unhealthy`
+  currently fires on a terminal request failure to a non-house seller, not from a
+  periodic health probe.
 - Admin dashboard UIs for plans/sellers/earnings are website-driven by design;
   the `/admin/*` endpoints exist as a fallback.

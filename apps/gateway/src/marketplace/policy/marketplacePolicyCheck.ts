@@ -49,8 +49,6 @@ export type MarketplacePolicyDeps = {
   modelPricingService: ModelPricingService;
   paygDecision: PaygDecision;
   getBody: (req: FastifyRequest) => { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined;
-  /** Set request.routed from the cheapest listing for the model (for settlement #6). */
-  captureRouted?: (req: FastifyRequest, model: string) => void;
   /** provision-webhook (#7) — emit quota.blocked on a hard rejection. Optional. */
   webhookService?: WebhookService;
 };
@@ -101,8 +99,6 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
 
     const scope = `key:${keyId}:grp:${group}`;
     const estimateUsd = estimateUpperBoundCost(model, deps.getBody(ctx.request), deps.modelPricingService);
-    // Capture routed cost data for settlement (#6) — cheapest listing for the model.
-    deps.captureRouted?.(ctx.request, model);
     const reserve = deps.spendLedgerService.reserve({
       scope,
       estimateUsd,

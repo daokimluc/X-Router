@@ -130,6 +130,11 @@ export async function registerOpenAIRoutes(
       })());
       let lastError: unknown;
 
+      // lowest-cost-routing-wiring — reorder pooled candidates cheapest-seller-
+      // first (no-op when marketplace is off). The failover loop below then tries
+      // the cheapest and falls over to the next cheapest automatically.
+      route.candidates = app.marketplaceSeam.rankCandidates(body.model, route.candidates);
+
       // Phase 20c — group routing may filter out all candidates without
       // crossGroupRetry. Return a clear 404 instead of falling through to
       // the generic "no available account" error.
@@ -199,6 +204,9 @@ export async function registerOpenAIRoutes(
             lease = accountPool.acquire({
               model: candidate.publicModel
             });
+            // lowest-cost-routing-wiring — capture routed settlement context from
+            // the account actually leased (marketplace fills request.routed).
+            app.marketplaceSeam.captureRouted(request, candidate.publicModel, lease.account.id);
             const secret = app.secretService.getSecretForAccount(lease.account.id);
             const credentialPayload = secret
               ? app.secretService.decryptSecretPayload(secret)
