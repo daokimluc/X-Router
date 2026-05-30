@@ -39,6 +39,7 @@ import {
   Send,
   Settings,
   Shield,
+  Store,
   Sun,
   Terminal,
   Timer,
@@ -51,7 +52,7 @@ import {
   Zap,
   Copy
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UsagePage } from "./UsagePage";
 import { ProvidersPage } from "./ProvidersPage";
 import { TeamsPage } from "./TeamsPage";
@@ -82,6 +83,10 @@ import { LatencyPanel } from "./components/LatencyPanel";
 import { CachePanel } from "./components/CachePanel";
 import { SpendBadge } from "./components/SpendBadge";
 import { VersionBadge } from "./components/VersionBadge";
+
+// admin-marketplace-ui (#4) — lazy chunk, only loaded when the marketplace flag
+// is on. Kept out of the community (flag-off) entry bundle.
+const MarketplacePage = lazy(() => import("./MarketplacePage"));
 
 // Provider metadata for detail page (website, API key URL, deprecation status)
 const PROVIDER_META: Record<string, { website?: string; apiKeyUrl?: string; deprecated?: boolean }> = {
@@ -171,6 +176,7 @@ type PageId =
   | "audit"
   | "teams"
   | "proxyPools"
+  | "marketplace"
   | "mediaProviders"
   | "mediaEmbedding"
   | "mediaImage"
@@ -440,6 +446,7 @@ const pages: Array<{
   { id: "audit", label: "Audit Logs", icon: ListChecks, description: "Admin control-plane activity" },
   { id: "teams", label: "Teams", icon: Users, description: "Team quotas and access control" },
   { id: "proxyPools", label: "Proxy Pools", icon: Shield, description: "HTTP proxy pools for provider connections" },
+  { id: "marketplace", label: "Marketplace", icon: Store, description: "P2P marketplace — plans, sellers, listings, earnings, wallets, markup" },
   { id: "mediaProviders", label: "Media Providers", icon: FolderOpen, description: "Non-LLM AI service providers overview" },
   { id: "mediaEmbedding", label: "Embedding", icon: Brackets, description: "Embedding provider configuration" },
   { id: "mediaImage", label: "Text to Image", icon: Brush, description: "Image generation and understanding providers" },
@@ -468,7 +475,7 @@ const navGroups: Array<NavGroup> = [
     ids: ["mediaEmbedding", "mediaImage", "mediaTTS", "mediaSTT", "mediaWeb"],
   },
   { label: "Monitor", ids: ["requests", "audit", "playground"] },
-  { label: "Admin", ids: ["teams", "settings", "docs"] }
+  { label: "Admin", ids: ["teams", "marketplace", "settings", "docs"] }
 ];
 
 const initialData: DashboardData = {
@@ -596,9 +603,32 @@ export function App() {
   const [lastRefresh, setLastRefresh] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // admin-marketplace-ui (#4) — gate the Marketplace section on the gateway flag.
+  const [marketplaceEnabled, setMarketplaceEnabled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/v1/public/auth-info")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { marketplaceEnabled?: boolean } | null) => {
+        if (active && d?.marketplaceEnabled) setMarketplaceEnabled(true);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const { t, lang, setLang } = useLang();
   const api = useMemo(() => createApiClient(adminKey), [adminKey]);
+
+  // Hide marketplace nav entry unless the gateway has the flag on.
+  const visibleNavGroups = useMemo(
+    () =>
+      navGroups.map((g) => ({
+        ...g,
+        ids: marketplaceEnabled ? g.ids : g.ids.filter((id) => id !== "marketplace")
+      })),
+    [marketplaceEnabled]
+  );
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -730,7 +760,7 @@ export function App() {
         </div>
 
         <nav className="navList" aria-label="Dashboard">
-          {navGroups.map((group) => {
+          {visibleNavGroups.map((group) => {
             // Collapsible group: has a `parent` page that acts as both the
             // section header AND a clickable nav item. Children are shown
             // when the parent is active OR when one of the children is active.
@@ -1026,6 +1056,12 @@ function PageContent(props: {
       return <TeamsPage api={props.api} refresh={props.refresh} />;
     case "proxyPools":
       return <ProxyPoolsPage api={props.api} refresh={props.refresh} />;
+    case "marketplace":
+      return (
+        <Suspense fallback={<div style={{ padding: 16, textAlign: "center", color: "var(--color-text-muted)" }}>Loading…</div>}>
+          <MarketplacePage api={props.api} />
+        </Suspense>
+      );
     case "mediaProviders":
       return <MediaProvidersPage api={props.api} refresh={props.refresh} />;
     case "mediaEmbedding":

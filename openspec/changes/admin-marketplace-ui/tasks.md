@@ -1,50 +1,52 @@
 ## 1. Section scaffold + gating
 
-- [ ] 1.1 Surface `marketplaceEnabled` to the dashboard via an existing boot/health/auth-info read (no admin-key guess). 
-- [ ] 1.2 Add a lazy-loaded `MarketplacePage` + a "Marketplace" console nav entry, rendered only when `marketplaceEnabled`.
-- [ ] 1.3 Confirm the section is a separate build chunk (not in the main entry bundle).
+- [x] 1.1 `marketplaceEnabled` surfaced via `/v1/public/auth-info` (extended `registerPublicRoutes(app, config)`); App.tsx reads it on boot.
+- [x] 1.2 Lazy-loaded `MarketplacePage` (default export) + a "Marketplace" nav entry in the Admin group, rendered only when `marketplaceEnabled` (visibleNavGroups filters it out otherwise).
+- [x] 1.3 Confirmed separate chunk: `MarketplacePage-*.js` (28.77 kB) is built distinct from the main `index-*.js` entry.
 
-## 2. Plans panel (unblocks the original question)
+## 2. Plans panel
 
-- [ ] 2.1 List plans (`GET /admin/v1/plans`); create (`POST`), edit (`PATCH`), delete (`DELETE`) via a modal — fields: name, priceUsd, modelGroups, buckets {hourUsd,dayUsd,monthUsd}, overageEnabled, paygDailyLimitUsd.
-- [ ] 2.2 Validation + result toast; refresh after action.
-- [ ] 2.3 EN/VI i18n keys.
+- [x] 2.1 List/create/edit/delete plans via a modal — name, priceUsd, modelGroups (csv), buckets {hourUsd,dayUsd,monthUsd}, overageEnabled, paygDailyLimitUsd, optional id.
+- [x] 2.2 Validation (name required) + inline flash + refresh after action.
+- [x] 2.3 EN/VI i18n keys (mkt.plans.*).
 
 ## 3. Sellers panel
 
-- [ ] 3.1 Approval queue: list `GET /admin/v1/sellers?status=pending`; approve/reject; suspend/reactivate.
-- [ ] 3.2 Edit seller terms (commissionPct, payoutRef) via `PATCH /admin/v1/sellers/:id`.
-- [ ] 3.3 Show per-seller earnings snapshot inline (`GET /admin/v1/earnings/seller/:id`).
-- [ ] 3.4 i18n.
+- [x] 3.1 Approval queue: list sellers; approve/reject (pending), suspend (approved), reactivate (suspended).
+- [x] 3.2 Edit terms (commissionPct, payoutRef) via PATCH /admin/v1/sellers/:id; house has no actions.
+- [x] 3.3 Per-seller earnings unpaid shown inline (GET /admin/v1/earnings/seller/:id).
+- [x] 3.4 i18n (mkt.sellers.*).
 
 ## 4. Listings panel
 
-- [ ] 4.1 List `GET /admin/v1/listings` (optionally filter by baseModel); show seller + providerAccount + cost.
-- [ ] 4.2 Enable/disable, delete, and re-price (`PATCH /admin/v1/listings/:id` with costPrice).
-- [ ] 4.3 i18n.
+- [x] 4.1 List listings; show namespacedModel + seller + provider account + cost.
+- [x] 4.2 Enable/disable, delete, re-price (PATCH costPrice) via a modal.
+- [x] 4.3 i18n (mkt.listings.*).
 
 ## 5. Earnings & payouts panel
 
-- [ ] 5.1 Per-seller day/month/lifetime/unpaid; platform margin total (`GET /admin/v1/earnings/platform`).
-- [ ] 5.2 Mark-paid (with payoutRef) → `POST /admin/v1/earnings/seller/:id/mark-paid`; reverse payout / settlement → the `marketplace-lifecycle` admin routes. Confirm + reason required; distinct destructive styling.
-- [ ] 5.3 i18n.
+- [x] 5.1 Per-seller day/month/lifetime/unpaid lookup; platform margin total.
+- [x] 5.2 Mark-paid (with payoutRef), reverse payout, reverse settlement (by logId) — amount + reason, dangerButton styling on reversals, confirm on settlement reversal.
+- [x] 5.3 i18n (mkt.earnings.*).
 
 ## 6. Wallets panel
 
-- [ ] 6.1 Lookup a key's wallet (`GET /admin/v1/api-keys/:id/wallet`); topup; refund; debit — each with amount + reason, confirm step, show resulting balance.
-- [ ] 6.2 Optional: read-only buyer-key lookup + admin disable/delete (operator support).
-- [ ] 6.3 i18n.
+- [x] 6.1 Lookup a key's wallet; topup / refund / debit each with amount (+ reason for refund/debit), confirm modal, resulting balance shown after.
+- [ ] 6.2 Buyer-key disable/delete from the operator UI → DEFERRED. The provision/admin key-lifecycle endpoints exist (marketplace-lifecycle), but the operator path is the website's job per design; wallets panel covers the money side. Can add later if operators ask.
+- [x] 6.3 i18n (mkt.wallets.*).
 
 ## 7. Markup, Canonical models, Webhook panels
 
-- [ ] 7.1 Markup: show default + per-model; set default; add/edit/remove per-model override (`PUT /admin/v1/markup`).
-- [ ] 7.2 Canonical models: list/add/remove (`/admin/v1/canonical-models`).
-- [ ] 7.3 Business webhook: show enabled/url/events + secretSet (masked); set url/secret/events (`PUT /admin/v1/business-webhook`). Secret only sent on explicit change.
-- [ ] 7.4 i18n.
+- [x] 7.1 Markup: show default + per-model; set default; add/remove per-model override (null deletes).
+- [x] 7.2 Canonical models: list/add/remove (remove surfaces the 409-in-use error via flash).
+- [x] 7.3 Business webhook: enabled/url/events + secretSet (masked); secret sent only on explicit change (empty field = unchanged).
+- [x] 7.4 i18n (mkt.markup.* / mkt.canonical.* / mkt.webhook.*).
 
 ## 8. Verification
 
-- [ ] 8.1 Dashboard `tsc` clean; build clean; Marketplace section is a separate chunk.
-- [ ] 8.2 With marketplace flag OFF: no Marketplace nav/section renders.
-- [ ] 8.3 Manual (flag ON, x-router local): create a plan; approve a seller + edit commission; re-price a listing; mark a payout paid + reverse it; refund a wallet; set markup; add a canonical model; configure the webhook (secret masked).
-- [ ] 8.4 `openspec validate admin-marketplace-ui --strict` passes.
+- [x] 8.1 Dashboard tsc clean; build clean; MarketplacePage is a separate 28.77 kB chunk.
+- [x] 8.2 Flag OFF → no Marketplace nav (visibleNavGroups filters; page only in lazy chunk, never imported when nav hidden). Gateway 614 pass + 7 skip; auth-info marketplaceEnabled:false in test.
+- [ ] 8.3 Manual flag-on click-through (user).
+- [x] 8.4 `openspec validate admin-marketplace-ui --strict` passes.
+
+Note: the "books health" reconciliation panel (reconcilePlatform/reconcileSeller, also money-correctness #2 task 4.3) was NOT added as a distinct panel — the Earnings panel surfaces platform margin; a dedicated reconciliation read-panel is a small follow-up. Tracked, not blocking.

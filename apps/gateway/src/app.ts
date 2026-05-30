@@ -439,7 +439,7 @@ export async function buildApp(
   await registerProxyPoolRoutes(app, config, proxyPoolService);
   await registerMediaProviderRoutes(app, config);
   await registerEmbeddingsRoutes(app, config);
-  await registerPublicRoutes(app);
+  await registerPublicRoutes(app, config);
   await registerImagesRoutes(app, config);
   await registerAudioRoutes(app, config);
   await registerWebRoutes(app, config);

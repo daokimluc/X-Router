@@ -8413,3 +8413,13 @@ tbody tr {
 tbody tr:hover td {
   background: color-mix(in srgb, var(--color-primary) 3%, transparent);
 }
+
+/* admin-marketplace-ui (#4) — marketplace operator tables. Fewer columns than
+   the data-heavy tables, so relax the global 800px min-width. */
+.mktTable {
+  min-width: 0;
+}
+.mktTable input {
+  font-size: 13px;
+  padding: 4px 8px;
+}

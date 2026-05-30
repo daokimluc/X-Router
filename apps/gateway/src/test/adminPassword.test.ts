@@ -158,11 +158,11 @@ describe("admin password endpoints", () => {
     const app = await buildApp(config, { adminKeyService: svc });
 
     const before = await app.inject({ method: "GET", url: "/v1/public/auth-info" });
-    expect(before.json()).toEqual({ isDefaultPassword: true, defaultPassword: "admin" });
+    expect(before.json()).toEqual({ isDefaultPassword: true, defaultPassword: "admin", marketplaceEnabled: false });
 
     svc.setKey("nolongerdefault");
     const after = await app.inject({ method: "GET", url: "/v1/public/auth-info" });
-    expect(after.json()).toEqual({ isDefaultPassword: false, defaultPassword: null });
+    expect(after.json()).toEqual({ isDefaultPassword: false, defaultPassword: null, marketplaceEnabled: false });
     await app.close();
   });
 });
