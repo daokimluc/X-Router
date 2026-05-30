@@ -23,7 +23,10 @@ declare module "fastify" {
   interface FastifyRequest {
     /** Settlement result, produced here and emitted by provision-webhook (#7). */
     settlement?: {
+      /** Buyer's API key id (the website's buyer handle). */
       buyerKeyId: string;
+      /** Buyer's API key hash (audit/correlation). */
+      buyerKeyHash: string;
       baseModel: string;
       sellerId: string;
       promptTokens: number;
@@ -127,7 +130,8 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
     deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
 
     request.settlement = {
-      buyerKeyId: request.auth?.apiKeyHash ?? "",
+      buyerKeyId: request.buyerKeyId ?? "",
+      buyerKeyHash: request.auth?.apiKeyHash ?? "",
       baseModel: routed?.baseModel ?? ctx.model,
       sellerId,
       promptTokens: ctx.promptTokens,

@@ -163,7 +163,12 @@ describe("settlement hook (two-sided)", () => {
     expect(low).toBeDefined();
     expect(low!.data.keyId).toBe("k1");
     expect(low!.data.thresholdUsd).toBe(1.0);
-    // usage.recorded also emitted
-    expect(events.some((e) => e.event === "usage.recorded")).toBe(true);
+    // usage.recorded also emitted, carrying the real buyer key id + correlation hash
+    const usage = events.find((e) => e.event === "usage.recorded");
+    expect(usage).toBeDefined();
+    expect(usage!.data.buyerKeyId).toBe("k1");
+    expect(usage!.data.buyerKeyHash).toBe("h1");
+    expect(usage!.data.baseModel).toBe("gpt-5.5");
+    expect(usage!.data.sellerId).toBe(hoang.id);
   });
 });
