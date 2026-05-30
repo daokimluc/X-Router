@@ -4,7 +4,7 @@
  * PATCH /admin/v1/api-keys/:id
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, KeyRound, Gauge, Shield } from "lucide-react";
 import { useLang } from "../i18n";
 import { IpAllowlistInput } from "./IpAllowlistInput";
@@ -12,6 +12,7 @@ import { ModelMultiSelect } from "./ModelMultiSelect";
 
 type ApiClient = {
   getList: <T>(path: string) => Promise<T[]>;
+  get: <T>(path: string) => Promise<T>;
   patch: <T>(path: string, body: unknown) => Promise<T>;
 };
 
@@ -19,7 +20,8 @@ export type ApiKeyForEdit = {
   id: string;
   owner?: string;
   enabled: boolean;
-  balance?: number;
+  /** usd-wallet (#1) — prepaid balance in micro-USD; undefined = no wallet. */
+  walletMicroUsd?: number;
   rpmLimit?: number;
   dailyLimit?: number;
   dailyTokenLimit?: number;
@@ -34,7 +36,13 @@ export type ApiKeyForEdit = {
   monthlySpendLimitUsd?: number;
   /** Phase 32 — semantic-response-cache mode */
   cacheMode?: "client_choice" | "force_use" | "force_skip";
+  /** marketplace-plans (#3) */
+  planId?: string;
+  overageEnabled?: boolean;
+  paygDailyLimitUsd?: number;
 };
+
+type Plan = { id: string; name: string; modelGroups: string[]; buckets: { hourUsd: number; dayUsd: number; monthUsd: number } };
 
 type Team = { id: string; name: string };
 
@@ -90,8 +98,20 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
   const [dailySpendLimitUsd, setDailySpendLimitUsd] = useState(apiKey.dailySpendLimitUsd ? String(apiKey.dailySpendLimitUsd) : "");
   const [monthlySpendLimitUsd, setMonthlySpendLimitUsd] = useState(apiKey.monthlySpendLimitUsd ? String(apiKey.monthlySpendLimitUsd) : "");
   const [cacheMode, setCacheMode] = useState<"client_choice" | "force_use" | "force_skip">(apiKey.cacheMode ?? "client_choice");
+  // marketplace-plans (#3)
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [planId, setPlanId] = useState(apiKey.planId ?? "");
+  const [overageEnabled, setOverageEnabled] = useState(apiKey.overageEnabled ?? false);
+  const [paygDailyLimitUsd, setPaygDailyLimitUsd] = useState(apiKey.paygDailyLimitUsd !== undefined ? String(apiKey.paygDailyLimitUsd) : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Plans only exist when the marketplace layer is enabled; ignore failure.
+    api.get<{ plans: Plan[] }>("/admin/v1/plans")
+      .then((r) => setPlans(r.plans ?? []))
+      .catch(() => setPlans([]));
+  }, [api]);
 
   function applyPreset(preset: typeof EXPIRE_PRESETS[number]) {
     if (preset.ms === null) {
@@ -124,6 +144,15 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
         cacheMode,
       };
       await api.patch(`/admin/v1/api-keys/${apiKey.id}`, body);
+      // marketplace-plans (#3): plan binding goes through a dedicated endpoint.
+      // Only call it when the marketplace layer is present (plans loaded).
+      if (plans.length > 0) {
+        await api.patch(`/admin/v1/keys/${apiKey.id}/plan`, {
+          planId: planId || null,
+          overageEnabled,
+          paygDailyLimitUsd: paygDailyLimitUsd ? Number.parseFloat(paygDailyLimitUsd) : null
+        });
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -216,6 +245,30 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
 
           {tab === "limits" && (
             <>
+              {plans.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 12px", border: "1px solid var(--color-border)", borderRadius: 8 }}>
+                  <strong style={{ fontSize: 12 }}>{t("apikey.plan.section")}</strong>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                    {t("apikey.plan.label")}
+                    <select value={planId} onChange={(e) => setPlanId(e.target.value)}>
+                      <option value="">{t("apikey.plan.none")}</option>
+                      {plans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.modelGroups.join(", ")}) — ${p.buckets.monthUsd}/mo
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                    <input type="checkbox" checked={overageEnabled} onChange={(e) => setOverageEnabled(e.target.checked)} />
+                    {t("apikey.plan.overage")}
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                    {t("apikey.plan.paygDailyLimit")}
+                    <input type="number" min="0" step="0.01" value={paygDailyLimitUsd} onChange={(e) => setPaygDailyLimitUsd(e.target.value)} placeholder="—" />
+                  </label>
+                </div>
+              )}
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
                 Requests per minute (0 = no limit)
                 <input
@@ -275,7 +328,7 @@ export function ApiKeyEditModal({ apiKey, api, teams, onClose, onSaved }: Props)
                 <small style={{ color: "var(--color-text-muted)", fontSize: 10 }}>{t("apikey.cacheMode.hint")}</small>
               </label>
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                Balance: {apiKey.balance === undefined ? "∞ unlimited" : `$${apiKey.balance.toFixed(2)}`}
+                Balance: {apiKey.walletMicroUsd === undefined ? t("apikey.noWallet") : `$${(apiKey.walletMicroUsd / 1_000_000).toFixed(4)}`}
                 <br />
                 <small>Use the Top up button on the row to add credit.</small>
               </div>

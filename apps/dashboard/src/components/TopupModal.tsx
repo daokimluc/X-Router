@@ -1,6 +1,6 @@
 /**
- * TopupModal — add credit to an API key's balance.
- * POST /admin/v1/api-keys/:id/topup body { amount }
+ * TopupModal — add USD credit to an API key's wallet.
+ * POST /admin/v1/api-keys/:id/topup body { amountUsd } → { id, walletUsd, addedUsd }
  */
 
 import { useState } from "react";
@@ -14,6 +14,7 @@ type ApiClient = {
 type Props = {
   apiKeyId: string;
   ownerLabel: string;
+  /** Current wallet balance in USD, or undefined when no wallet is provisioned. */
   currentBalance: number | undefined;
   api: ApiClient;
   onClose: () => void;
@@ -28,7 +29,8 @@ export function TopupModal({ apiKeyId, ownerLabel, currentBalance, api, onClose,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isUnlimited = currentBalance === undefined;
+  // undefined balance now means "no wallet provisioned yet" (a top-up will open one).
+  const noWallet = currentBalance === undefined;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,11 +43,11 @@ export function TopupModal({ apiKeyId, ownerLabel, currentBalance, api, onClose,
     setBusy(true);
     setError(null);
     try {
-      const result = await api.post<{ id: string; balance: number; added: number }>(
+      const result = await api.post<{ id: string; walletUsd: number; addedUsd: number }>(
         `/admin/v1/api-keys/${apiKeyId}/topup`,
-        { amount: parsed }
+        { amountUsd: parsed }
       );
-      onSuccess(result.balance, result.added);
+      onSuccess(result.walletUsd, result.addedUsd);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Top-up failed");
     } finally {
@@ -90,11 +92,11 @@ export function TopupModal({ apiKeyId, ownerLabel, currentBalance, api, onClose,
             </div>
             <div>
               {t("apikey.topupCurrent")}:{" "}
-              {isUnlimited ? "∞" : `$${(currentBalance ?? 0).toFixed(2)}`}
+              {noWallet ? t("apikey.noWallet") : `$${(currentBalance ?? 0).toFixed(4)}`}
             </div>
           </div>
 
-          {isUnlimited && (
+          {noWallet && (
             <div
               style={{
                 fontSize: 12,
@@ -105,7 +107,7 @@ export function TopupModal({ apiKeyId, ownerLabel, currentBalance, api, onClose,
                 color: "#d97706",
               }}
             >
-              ⚠ {t("apikey.topupSwitchWarning")}
+              ⚠ {t("apikey.topupOpensWallet")}
             </div>
           )}
 

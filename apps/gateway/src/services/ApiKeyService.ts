@@ -10,8 +10,13 @@ export type InternalApiKeyRecord = {
   rpmLimit?: number;
   dailyLimit?: number;
   dailyTokenLimit?: number;
-  /** Token balance (credits). Infinity = unlimited. Deducted per request. */
-  balance?: number;
+  /**
+   * usd-wallet (#1) — prepaid USD balance in integer micro-USD, managed by the
+   * marketplace WalletService. The field is persisted on the key record but the
+   * authoritative live value lives in WalletService keyed by key id. Absent =
+   * no wallet provisioned. Replaces the legacy token `balance` field.
+   */
+  walletMicroUsd?: number;
   /** Expiry timestamp. undefined = never expires. */
   expiresAt?: Date;
   /** Public model whitelist. undefined or empty = all models allowed. */
@@ -28,6 +33,14 @@ export type InternalApiKeyRecord = {
   monthlySpendLimitUsd?: number;
   /** Phase 32 — semantic-response-cache mode. undefined → "client_choice". */
   cacheMode?: "client_choice" | "force_use" | "force_skip";
+  /** marketplace-plans (#3) — bound plan preset id. undefined = no plan (legacy enforcement). */
+  planId?: string;
+  /** marketplace-plans (#3) — per-key override of the plan's overage flag. */
+  overageEnabled?: boolean;
+  /** marketplace-plans (#3) — user-set PAYG wallet daily limit (USD). */
+  paygDailyLimitUsd?: number;
+  /** two-sided-settlement (#6) — opt in to boost (PAYG past a speed-limit). */
+  boostEnabled?: boolean;
   createdAt: Date;
 };
 
@@ -65,6 +78,23 @@ export class ApiKeyService {
   /** Find key record by hash (for team lookup). */
   findByHash(keyHash: string): (InternalApiKeyRecord & { key: string }) | undefined {
     return Array.from(this.keys.values()).find((r) => r.keyHash === keyHash);
+  }
+
+  /** Find key record by id. */
+  findById(id: string): (InternalApiKeyRecord & { key: string }) | undefined {
+    return Array.from(this.keys.values()).find((r) => r.id === id);
+  }
+
+  /**
+   * Sync a key record's persisted wallet snapshot (micro-USD). The live
+   * authority is the marketplace WalletService; this keeps `list()` coherent so
+   * the dashboard reflects balances without reaching into WalletService.
+   * Pass undefined to mark the key as having no wallet.
+   */
+  setWalletMicroUsd(id: string, micro: number | undefined): void {
+    const record = Array.from(this.keys.values()).find((r) => r.id === id);
+    if (!record) return;
+    record.walletMicroUsd = micro;
   }
 
   list(): InternalApiKeyRecord[] {
@@ -120,6 +150,10 @@ export class ApiKeyService {
     dailySpendLimitUsd?: number | null;
     monthlySpendLimitUsd?: number | null;
     cacheMode?: "client_choice" | "force_use" | "force_skip";
+    planId?: string | null;
+    overageEnabled?: boolean | null;
+    paygDailyLimitUsd?: number | null;
+    boostEnabled?: boolean | null;
   }): InternalApiKeyRecord | null {
     const record = Array.from(this.keys.values()).find((r) => r.id === id);
     if (!record) return null;
@@ -137,6 +171,10 @@ export class ApiKeyService {
     if (patch.dailySpendLimitUsd !== undefined) record.dailySpendLimitUsd = (patch.dailySpendLimitUsd ?? 0) > 0 ? (patch.dailySpendLimitUsd as number) : undefined;
     if (patch.monthlySpendLimitUsd !== undefined) record.monthlySpendLimitUsd = (patch.monthlySpendLimitUsd ?? 0) > 0 ? (patch.monthlySpendLimitUsd as number) : undefined;
     if (patch.cacheMode !== undefined) record.cacheMode = patch.cacheMode;
+    if (patch.planId !== undefined) record.planId = patch.planId || undefined;
+    if (patch.overageEnabled !== undefined) record.overageEnabled = patch.overageEnabled ?? undefined;
+    if (patch.paygDailyLimitUsd !== undefined) record.paygDailyLimitUsd = (patch.paygDailyLimitUsd ?? -1) >= 0 ? (patch.paygDailyLimitUsd as number) : undefined;
+    if (patch.boostEnabled !== undefined) record.boostEnabled = patch.boostEnabled ?? undefined;
     const { key: _key, ...safeRecord } = record;
     return structuredClone(safeRecord);
   }
@@ -161,6 +199,9 @@ export class ApiKeyService {
     dailySpendLimitUsd?: number;
     monthlySpendLimitUsd?: number;
     cacheMode?: "client_choice" | "force_use" | "force_skip";
+    planId?: string;
+    overageEnabled?: boolean;
+    paygDailyLimitUsd?: number;
   } = {}): CreatedInternalApiKey {
     const key = `igw_${randomBytes(24).toString("hex")}`;
     const record = {
@@ -181,6 +222,9 @@ export class ApiKeyService {
       dailySpendLimitUsd: input.dailySpendLimitUsd && input.dailySpendLimitUsd > 0 ? input.dailySpendLimitUsd : undefined,
       monthlySpendLimitUsd: input.monthlySpendLimitUsd && input.monthlySpendLimitUsd > 0 ? input.monthlySpendLimitUsd : undefined,
       cacheMode: input.cacheMode,
+      planId: input.planId,
+      overageEnabled: input.overageEnabled,
+      paygDailyLimitUsd: input.paygDailyLimitUsd !== undefined && input.paygDailyLimitUsd >= 0 ? input.paygDailyLimitUsd : undefined,
       createdAt: new Date()
     };
 
@@ -194,36 +238,6 @@ export class ApiKeyService {
       ...structuredClone(record),
       key: rawKey
     });
-  }
-
-  /** Check if key has sufficient balance. Returns true if unlimited or balance > 0. */
-  hasBalance(keyHash: string): boolean {
-    const record = this.findByHash(keyHash);
-    if (!record) return false;
-    if (record.balance === undefined) return true; // unlimited
-    return record.balance > 0;
-  }
-
-  /** Deduct tokens from key balance. No-op if balance is undefined (unlimited). */
-  deductBalance(keyHash: string, tokens: number): void {
-    const record = this.findByHash(keyHash);
-    if (!record || record.balance === undefined) return;
-    record.balance = Math.max(0, record.balance - tokens);
-  }
-
-  /** Add tokens to key balance (top-up). */
-  topup(id: string, amount: number): InternalApiKeyRecord | null {
-    const record = Array.from(this.keys.values()).find((r) => r.id === id);
-    if (!record) return null;
-    record.balance = (record.balance ?? 0) + amount;
-    const { key: _key, ...safeRecord } = record;
-    return structuredClone(safeRecord);
-  }
-
-  /** Get balance for a key. Returns undefined if unlimited. */
-  getBalance(id: string): number | undefined {
-    const record = Array.from(this.keys.values()).find((r) => r.id === id);
-    return record?.balance;
   }
 
   /** Returns true if the key has expired (expiresAt set and in the past). */

@@ -63,6 +63,7 @@ import { SpendLedgerService } from "./services/SpendLedgerService.js";
 import { ResponseCacheService } from "./services/ResponseCacheService.js";
 import { RateLimitService } from "./services/RateLimitService.js";
 import { WebhookService } from "./services/WebhookService.js";
+import { MarketplaceSeam } from "./services/MarketplaceSeam.js";
 import {
   PersistenceService,
   type PersistedGatewayState
@@ -353,6 +354,19 @@ export async function buildApp(
   });
   app.decorate("spendLedgerService", spendLedgerService);
 
+  // Open-core seam — marketplace extension points (empty unless the marketplace
+  // layer registers into them). Decorated unconditionally so engine code
+  // (enforceKeyPolicy, persistence) can reference it without importing the
+  // marketplace. See services/MarketplaceSeam.ts and marketplace/README.md.
+  app.decorate("marketplaceSeam", new MarketplaceSeam());
+  // Shared persist trigger so marketplace services can request a save without
+  // reaching into createPersistedState directly.
+  app.decorate("persistState", () => {
+    if (persistenceEnabled) {
+      void app.persistenceService.save(createPersistedState(app));
+    }
+  });
+
   // Phase 32 — semantic-response-cache
   const responseCacheService = new ResponseCacheService();
   if (config.nodeEnv !== "test") {
@@ -410,6 +424,15 @@ export async function buildApp(
   await registerImagesRoutes(app, config);
   await registerAudioRoutes(app, config);
   await registerWebRoutes(app, config);
+
+  // Commercial marketplace layer (open-core seam). Only loaded when the flag is
+  // on; the engine never imports marketplace code otherwise. This is the single
+  // call site — to build a clean core, remove this block and the marketplace/
+  // directory. See marketplace/README.md.
+  if (config.marketplaceEnabled) {
+    const { registerMarketplace } = await import("./marketplace/index.js");
+    registerMarketplace(app, { config, persistedState });
+  }
 
   // Register dashboard static serving AFTER all API routes to ensure API priority
   await registerDashboardPlugin(app);
@@ -482,6 +505,7 @@ function createPersistedState(app: FastifyInstance): PersistedGatewayState {
     proxyPools: app.proxyPoolService.listAll(),
     rateLimitCounters: app.rateLimitService.exportState(),
     modelPricing: app.modelPricingService.export(),
-    spendLedger: app.spendLedgerService.toPersisted()
+    spendLedger: app.spendLedgerService.toPersisted(),
+    marketplace: app.marketplaceSeam.collectPersisted()
   };
 }

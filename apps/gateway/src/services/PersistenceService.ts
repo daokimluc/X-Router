@@ -31,7 +31,14 @@ const persistedStateSchema = z.object({
   requestLogs: z.array(z.any()).optional(),
   proxyPools: z.array(z.any()).default([]),
   rateLimitCounters: z.array(z.any()).optional(),
-  modelPricing: z.array(z.any()).optional()
+  modelPricing: z.array(z.any()).optional(),
+  spendLedger: z.any().optional(),
+  /**
+   * Open-core marketplace state slice. A free-form record keyed by contributor
+   * name (e.g. "wallet"), populated by the marketplace layer via the seam. The
+   * engine persists and restores it opaquely without importing marketplace types.
+   */
+  marketplace: z.record(z.unknown()).optional()
 });
 
 export type PersistedGatewayState = {
@@ -85,6 +92,8 @@ export type PersistedGatewayState = {
       lastBlocked: string | null;
     }>;
   };
+  /** Open-core marketplace state slice (opaque to the engine). */
+  marketplace?: Record<string, unknown>;
 };
 
 export class PersistenceService {
@@ -97,7 +106,7 @@ export class PersistenceService {
 
       return {
         providerInstances: parsed.providerInstances.map(reviveDates),
-        accounts: parsed.accounts.map(reviveDates),
+        accounts: parsed.accounts.map(reviveDates).map(migrateAccountSellerId),
         modelMappings: parsed.modelMappings,
         routingProfiles: parsed.routingProfiles,
         apiKeys: parsed.apiKeys.map(reviveDates),
@@ -112,7 +121,9 @@ export class PersistenceService {
         requestLogs: parsed.requestLogs,
         proxyPools: parsed.proxyPools.map(reviveDates),
         rateLimitCounters: parsed.rateLimitCounters,
-        modelPricing: parsed.modelPricing?.map(reviveDates)
+        modelPricing: parsed.modelPricing?.map(reviveDates),
+        spendLedger: parsed.spendLedger,
+        marketplace: parsed.marketplace
       } as PersistedGatewayState;
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -156,4 +167,16 @@ function reviveDates<T>(value: T): T {
   }
 
   return clone as T;
+}
+
+/**
+ * seller-supply (#4) — an account with no sellerId (legacy `owner` only, or
+ * neither) is migrated to the reserved "house" seller so single-tenant
+ * deployments become "all house supply" with unchanged behavior.
+ */
+function migrateAccountSellerId(account: ProviderAccount): ProviderAccount {
+  if (!account.sellerId) {
+    account.sellerId = "house";
+  }
+  return account;
 }

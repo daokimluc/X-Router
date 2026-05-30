@@ -4,12 +4,14 @@
  *   2. IP allowlist (403 ip_not_allowed)
  *   3. Key-level model whitelist (403 model_not_allowed_for_key)
  *   4. Team-level model whitelist (403 team_model_not_allowed)
- *   5. Balance exhaustion (402 balance_exhausted)
- *   6. Spend cap (Phase 32) — daily/monthly USD cap, per-key with team fallback (429 spend_limit_exceeded)
+ *   5. Spend cap (Phase 32) — daily/monthly USD cap, per-key with team fallback (429 spend_limit_exceeded)
+ *   6. Marketplace policy checks (open-core seam) — wallet funds, plan buckets,
+ *      PAYG decision. Registered by the marketplace layer; empty when disabled.
  *
  * Routes that pass `getModel` get model checks; routes without a body model
  * skip step 3 and 4 entirely. Routes that pass `getBody` and `modelPricingService`
- * get step 6.
+ * get step 5. The legacy token-balance gate was removed in usd-wallet (#1); the
+ * USD wallet gate is now a marketplace policy check (step 6).
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -47,16 +49,29 @@ function estimateUpperBoundCost(
   return pricing.calculateCost(model, inputTokens, outputTokens).totalCost;
 }
 
-function secondsUntilNextDayUTC(): number {
+export function secondsUntilNextHourUTC(): number {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours() + 1));
+  return Math.ceil((next.getTime() - now.getTime()) / 1000);
+}
+
+export function secondsUntilNextDayUTC(): number {
   const now = new Date();
   const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
   return Math.ceil((tomorrow.getTime() - now.getTime()) / 1000);
 }
 
-function secondsUntilNextMonthUTC(): number {
+export function secondsUntilNextMonthUTC(): number {
   const now = new Date();
   const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   return Math.ceil((next.getTime() - now.getTime()) / 1000);
+}
+
+/** Map a spend-cap rejection reason to the seconds-until-reset Retry-After value. */
+function retryAfterForReason(reason: "hour_cap_exceeded" | "day_cap_exceeded" | "month_cap_exceeded"): number {
+  if (reason === "hour_cap_exceeded") return secondsUntilNextHourUTC();
+  if (reason === "day_cap_exceeded") return secondsUntilNextDayUTC();
+  return secondsUntilNextMonthUTC();
 }
 
 export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
@@ -129,19 +144,7 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
       }
     }
 
-    // 5. Balance
-    if (!deps.apiKeyService.hasBalance(apiKeyHash)) {
-      await reply.code(402).send({
-        error: {
-          type: "insufficient_balance",
-          message: "API key token balance exhausted. Contact admin for top-up.",
-          code: "balance_exhausted"
-        }
-      });
-      return;
-    }
-
-    // 6. Spend caps (Phase 32)
+    // 5. Spend caps (Phase 32)
     if (
       model &&
       deps.modelPricingService &&
@@ -166,9 +169,7 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
         });
 
         if (!keyResult.ok) {
-          const retryAfter = keyResult.reason === "day_cap_exceeded"
-            ? secondsUntilNextDayUTC()
-            : secondsUntilNextMonthUTC();
+          const retryAfter = retryAfterForReason(keyResult.reason);
           reply.header("Retry-After", String(retryAfter));
           await reply.code(429).send({
             error: {
@@ -194,9 +195,7 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
           if (!teamResult.ok) {
             // Roll back key reservation
             deps.spendLedgerService.release(keyResult.reservationId);
-            const retryAfter = teamResult.reason === "day_cap_exceeded"
-              ? secondsUntilNextDayUTC()
-              : secondsUntilNextMonthUTC();
+            const retryAfter = retryAfterForReason(teamResult.reason);
             reply.header("Retry-After", String(retryAfter));
             await reply.code(429).send({
               error: {
@@ -212,6 +211,31 @@ export function createKeyPolicyEnforcer(deps: KeyPolicyDeps) {
           request.spendReservation = { id: `${keyResult.reservationId}|${teamResult.reservationId}`, scopes };
         } else {
           request.spendReservation = { id: keyResult.reservationId, scopes };
+        }
+      }
+    }
+
+    // 6. Marketplace policy checks (open-core seam). Empty when the marketplace
+    // layer is disabled. Each check may reject (wallet funds, plan buckets,
+    // PAYG); the first rejection wins. Checks run last so they can build on the
+    // engine gates above. On rejection, roll back any spend reservation made in
+    // step 5 (the request will not proceed to settle it).
+    const seam = request.server?.marketplaceSeam;
+    if (seam && seam.keyPolicyChecks.length > 0) {
+      for (const check of seam.keyPolicyChecks) {
+        const rejection = await check({ request, reply, apiKeyHash, keyId: record.id, model, record });
+        if (rejection) {
+          if (request.spendReservation && deps.spendLedgerService) {
+            for (const id of request.spendReservation.id.split("|")) {
+              deps.spendLedgerService.release(id);
+            }
+            request.spendReservation = undefined;
+          }
+          if (rejection.headers) {
+            for (const [k, v] of Object.entries(rejection.headers)) reply.header(k, v);
+          }
+          await reply.code(rejection.httpStatus).send(rejection.body);
+          return;
         }
       }
     }

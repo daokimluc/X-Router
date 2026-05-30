@@ -6,6 +6,7 @@ export type AccountSelectionStrategy =
   | "least_busy"
   | "lowest_error_rate"
   | "lowest_latency"
+  | "lowest_cost"
   | "priority";
 
 export type ProviderCircuitBreakerConfig = {

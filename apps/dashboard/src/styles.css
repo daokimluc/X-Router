@@ -7893,9 +7893,10 @@ code.ovInfoValue {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.4);
 }
-.balanceBadge[data-tone="unlimited"] {
-  color: #10b981;
-  border-color: rgba(16, 185, 129, 0.4);
+.balanceBadge[data-tone="none"] {
+  color: var(--color-text-muted, #9ca3af);
+  border-color: var(--color-border, #374151);
+  opacity: 0.7;
 }
 
 /* ═══════════════════════════════════════════════════════════

@@ -268,10 +268,6 @@ export async function registerOpenAIRoutes(
                     request.auth.apiKeyHash,
                     promptTokens + completionTokens
                   );
-                  app.apiKeyService.deductBalance(
-                    request.auth.apiKeyHash,
-                    promptTokens + completionTokens
-                  );
                 }
                 app.accountQuotaService.recordUsage(
                   lease.account.id,
@@ -285,6 +281,11 @@ export async function registerOpenAIRoutes(
                     app.spendLedgerService.settle(id, settleCost);
                   }
                 }
+                // two-sided-settlement (#6) — marketplace settlement (plan bucket
+                // or wallet) + seller credit. No-op when marketplace is off.
+                app.marketplaceSeam.runSettlement({
+                  request, outcome: "success", model: body.model, promptTokens, completionTokens
+                });
               } catch (streamError) {
                 lease.releaseFailure(
                   streamError instanceof Error ? streamError.message : "stream failed"
@@ -358,10 +359,6 @@ export async function registerOpenAIRoutes(
                 request.auth.apiKeyHash,
                 promptTokens + completionTokens
               );
-              app.apiKeyService.deductBalance(
-                request.auth.apiKeyHash,
-                promptTokens + completionTokens
-              );
             }
             app.accountQuotaService.recordUsage(
               lease.account.id,
@@ -375,6 +372,10 @@ export async function registerOpenAIRoutes(
                 app.spendLedgerService.settle(id, settleCost);
               }
             }
+            // two-sided-settlement (#6) — marketplace settlement + seller credit.
+            app.marketplaceSeam.runSettlement({
+              request, outcome: "success", model: body.model, promptTokens, completionTokens
+            });
             // Phase 32 — semantic-response-cache write (non-stream, no tool_calls)
             const respMessage = response.choices?.[0]?.message as Record<string, unknown> | undefined;
             const hasToolCalls = Array.isArray(respMessage?.tool_calls) && (respMessage!.tool_calls as unknown[]).length > 0;
@@ -446,6 +447,11 @@ export async function registerOpenAIRoutes(
                 }
                 request.spendReservation = undefined;
               }
+              // two-sided-settlement (#6) — release marketplace reservations
+              // (plan bucket / wallet / payg-daily); no seller credit.
+              app.marketplaceSeam.runSettlement({
+                request, outcome: "failure", model: body.model, promptTokens: 0, completionTokens: 0
+              });
               throw error;
             }
           }

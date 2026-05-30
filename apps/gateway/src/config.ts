@@ -6,6 +6,12 @@ export type AppConfig = {
   host: string;
   internalApiKeys: string[];
   adminApiKeys: string[];
+  /**
+   * provision-webhook (#7) — website-facing automation keys for the /provision/*
+   * command surface. A third auth dimension, separate from admin + internal
+   * keys. Snapshot at startup (not runtime-mutable like the admin password).
+   */
+  provisionApiKeys: string[];
   requestBodyLimit: string;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   dataFile: string;
@@ -13,6 +19,13 @@ export type AppConfig = {
   internalDailyRequestQuota: number;
   internalDailyTokenQuota: number;
   addAccountRateLimitPerMinute: number;
+  /**
+   * Commercial marketplace layer (wallet, plans, sellers, settlement, provision).
+   * Off by default → the gateway runs as the plain self-host engine. When false,
+   * no marketplace code is loaded (see app.ts dynamic import). This is the single
+   * flag that separates the open-core engine from the proprietary marketplace.
+   */
+  marketplaceEnabled: boolean;
 };
 
 const envSchema = z.object({
@@ -22,12 +35,16 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3100),
   HOST: z.string().min(1).default("0.0.0.0"),
   ADMIN_API_KEYS: z.string().default(""),
+  PROVISION_API_KEYS: z.string().default(""),
   REQUEST_BODY_LIMIT: z.string().min(1).default("1mb"),
   DATA_FILE: z.string().min(1).default("data/gateway-state.json"),
   INTERNAL_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(0),
   INTERNAL_DAILY_REQUEST_QUOTA: z.coerce.number().int().min(0).default(0),
   INTERNAL_DAILY_TOKEN_QUOTA: z.coerce.number().int().min(0).default(0),
   ADD_ACCOUNT_RATE_LIMIT_PER_MIN: z.string().optional(),
+  MARKETPLACE_ENABLED: z
+    .enum(["true", "false"])
+    .default("false"),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info")
@@ -77,12 +94,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       adminApiKeys.length > 0 || parsed.NODE_ENV === "production"
         ? adminApiKeys
         : ["admin-key-1"],
+    provisionApiKeys: parseCsv(parsed.PROVISION_API_KEYS),
     requestBodyLimit: parsed.REQUEST_BODY_LIMIT,
     logLevel: parsed.LOG_LEVEL,
     dataFile: parsed.DATA_FILE,
     internalRateLimitPerMinute: parsed.INTERNAL_RATE_LIMIT_PER_MINUTE,
     internalDailyRequestQuota: parsed.INTERNAL_DAILY_REQUEST_QUOTA,
     internalDailyTokenQuota: parsed.INTERNAL_DAILY_TOKEN_QUOTA,
-    addAccountRateLimitPerMinute: parseAddAccountRateLimit(parsed.ADD_ACCOUNT_RATE_LIMIT_PER_MIN)
+    addAccountRateLimitPerMinute: parseAddAccountRateLimit(parsed.ADD_ACCOUNT_RATE_LIMIT_PER_MIN),
+    marketplaceEnabled: parsed.MARKETPLACE_ENABLED === "true"
   };
 }

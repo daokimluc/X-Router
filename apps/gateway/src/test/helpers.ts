@@ -7,6 +7,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     host: "127.0.0.1",
     internalApiKeys: ["dev-key-1", "dev-key-2"],
     adminApiKeys: ["admin-key-1"],
+    provisionApiKeys: [],
     requestBodyLimit: "64b",
     dataFile: "data/test-gateway-state.json",
     internalRateLimitPerMinute: 0,
@@ -14,6 +15,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     internalDailyTokenQuota: 0,
     addAccountRateLimitPerMinute: 10,
     logLevel: "silent",
+    marketplaceEnabled: false,
     ...overrides
   };
 }

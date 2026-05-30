@@ -1,7 +1,14 @@
 /**
  * WebhookService — sends notifications to configured webhook URLs (Discord/Slack)
  * when important events occur (circuit breaker trip, account cooldown, etc.)
+ *
+ * provision-webhook (#7) adds a SECOND, separate channel for marketplace
+ * BUSINESS events: machine-parseable JSON POSTed to a dedicated target and
+ * HMAC-signed so the website can verify authenticity. Kept distinct from the
+ * Discord/Slack ops channel above.
  */
+
+import { createHmac } from "node:crypto";
 
 export type WebhookConfig = {
   enabled: boolean;
@@ -15,7 +22,21 @@ export type WebhookEvent =
   | "account.cooldown"
   | "account.disabled"
   | "rate_limit.exceeded"
-  | "provider.error";
+  | "provider.error"
+  // provision-webhook (#7) — marketplace business events
+  | "usage.recorded"
+  | "grant.exhausted"
+  | "wallet.low"
+  | "quota.blocked"
+  | "supply.unhealthy";
+
+/** Business webhook target — separate from the ops (Discord/Slack) config. */
+export type BusinessWebhookConfig = {
+  enabled: boolean;
+  url: string;
+  secret: string;
+  events: WebhookEvent[];
+};
 
 export type WebhookPayload = {
   event: WebhookEvent;
@@ -30,6 +51,13 @@ export class WebhookService {
     events: []
   };
 
+  private businessConfig: BusinessWebhookConfig = {
+    enabled: false,
+    url: "",
+    secret: "",
+    events: []
+  };
+
   getConfig(): WebhookConfig {
     return { ...this.config };
   }
@@ -37,6 +65,44 @@ export class WebhookService {
   updateConfig(partial: Partial<WebhookConfig>): WebhookConfig {
     this.config = { ...this.config, ...partial };
     return this.getConfig();
+  }
+
+  getBusinessConfig(): BusinessWebhookConfig {
+    return { ...this.businessConfig };
+  }
+
+  updateBusinessConfig(partial: Partial<BusinessWebhookConfig>): BusinessWebhookConfig {
+    this.businessConfig = { ...this.businessConfig, ...partial };
+    return this.getBusinessConfig();
+  }
+
+  /**
+   * Emit a marketplace business event: raw JSON envelope POSTed to the business
+   * target with an HMAC-SHA256 signature over the exact body. Best-effort —
+   * failures are swallowed and never block the originating request.
+   */
+  async notifyBusiness(event: WebhookEvent, data: Record<string, unknown>): Promise<void> {
+    const cfg = this.businessConfig;
+    if (!cfg.enabled || !cfg.url) return;
+    if (cfg.events.length > 0 && !cfg.events.includes(event)) return;
+
+    const payload: WebhookPayload = { event, timestamp: new Date().toISOString(), data };
+    const body = JSON.stringify(payload);
+    const signature = createHmac("sha256", cfg.secret).update(body).digest("hex");
+
+    try {
+      await fetch(cfg.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Provision-Signature": `sha256=${signature}`
+        },
+        body,
+        signal: AbortSignal.timeout(5000)
+      });
+    } catch {
+      // Best-effort — never block the main flow.
+    }
   }
 
   async notify(event: WebhookEvent, data: Record<string, unknown>): Promise<void> {

@@ -3042,50 +3042,11 @@ export async function registerAdminRoutes(
   );
 
   // ─── API Key Balance / Top-up ───────────────────────────────
-
-  app.get(
-    "/admin/v1/api-keys/:id/balance",
-    { preHandler: adminAuth },
-    async (request, reply) => {
-      const params = z.object({ id: z.string().min(1) }).parse(request.params);
-      const balance = app.apiKeyService.getBalance(params.id);
-      if (balance === undefined) {
-        return { id: params.id, balance: null, unlimited: true };
-      }
-      return { id: params.id, balance, unlimited: false };
-    }
-  );
-
-  app.post(
-    "/admin/v1/api-keys/:id/topup",
-    { preHandler: adminAuth },
-    async (request, reply) => {
-      const params = z.object({ id: z.string().min(1) }).parse(request.params);
-      const body = request.body as { amount?: number };
-
-      if (typeof body.amount !== "number" || body.amount <= 0) {
-        return reply.code(400).send({
-          error: { message: "amount must be a positive number", code: "validation_error" }
-        });
-      }
-
-      const updated = app.apiKeyService.topup(params.id, body.amount);
-      if (!updated) {
-        return reply.code(404).send({
-          error: { message: `API key "${params.id}" not found`, code: "not_found" }
-        });
-      }
-
-      app.adminAuditService.record({
-        action: "api_key.topup",
-        actorKeyHash: request.adminAuth?.apiKeyHash,
-        targetType: "api_key",
-        targetId: params.id,
-      });
-
-      return { id: params.id, balance: updated.balance, added: body.amount };
-    }
-  );
+  // Moved to the marketplace layer (usd-wallet #1). The USD wallet is a
+  // commercial-marketplace concern; its admin endpoints
+  // (GET /admin/v1/api-keys/:id/wallet, POST /admin/v1/api-keys/:id/topup) are
+  // registered by registerMarketplace() only when MARKETPLACE_ENABLED. The
+  // community engine build ships no wallet/top-up endpoints.
 
   // ─── API Key Batch Operations ───────────────────────────────
 
@@ -3131,7 +3092,7 @@ export async function registerAdminRoutes(
       if (query.format === "csv") {
         const header = [
           "id", "owner", "teamId", "keyHash", "enabled", "createdAt",
-          "expiresAt", "balance", "rpmLimit", "dailyLimit", "dailyTokenLimit",
+          "expiresAt", "walletUsd", "rpmLimit", "dailyLimit", "dailyTokenLimit",
           "allowedModels", "allowedIps", "groupName"
         ].join(",");
 
@@ -3146,7 +3107,8 @@ export async function registerAdminRoutes(
           k.id, k.owner, k.teamId, k.keyHash, k.enabled,
           k.createdAt instanceof Date ? k.createdAt.toISOString() : k.createdAt,
           k.expiresAt instanceof Date ? k.expiresAt.toISOString() : k.expiresAt,
-          k.balance, k.rpmLimit, k.dailyLimit, k.dailyTokenLimit,
+          k.walletMicroUsd === undefined ? "" : (k.walletMicroUsd / 1_000_000).toFixed(6),
+          k.rpmLimit, k.dailyLimit, k.dailyTokenLimit,
           k.allowedModels, k.allowedIps, k.groupName
         ].map(escape).join(","));
 
@@ -3592,6 +3554,7 @@ export async function registerAdminRoutes(
       return {
         scope: "key" as const,
         id: key.id,
+        hour: snap.hour,
         day: snap.day,
         month: snap.month,
         lastBlocked: snap.lastBlocked
@@ -3620,6 +3583,7 @@ export async function registerAdminRoutes(
       return {
         scope: "team" as const,
         id: team.id,
+        hour: snap.hour,
         day: snap.day,
         month: snap.month,
         lastBlocked: snap.lastBlocked

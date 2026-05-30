@@ -280,7 +280,8 @@ type ApiKey = {
   keyHash: string;
   enabled: boolean;
   owner?: string;
-  balance?: number; // undefined = unlimited (no balance tracking)
+  /** usd-wallet (#1) — prepaid balance in micro-USD; undefined = no wallet. */
+  walletMicroUsd?: number;
   expiresAt?: string;
   allowedModels?: string[];
   allowedIps?: string[];
@@ -5221,11 +5222,13 @@ function TokenSaverSection(props: {
   );
 }
 
-function formatBalance(balance: number | undefined): { text: string; tone: "ok" | "low" | "unlimited" } {
-  if (balance === undefined) return { text: "∞", tone: "unlimited" };
-  if (balance === 0) return { text: "$0.00", tone: "low" };
-  if (balance < 1) return { text: `$${balance.toFixed(4)}`, tone: balance < 0.1 ? "low" : "ok" };
-  return { text: `$${balance.toFixed(2)}`, tone: "ok" };
+function formatBalance(walletMicroUsd: number | undefined): { text: string; tone: "ok" | "low" | "none" } {
+  // usd-wallet (#1): undefined = no wallet provisioned. Value is micro-USD.
+  if (walletMicroUsd === undefined) return { text: "—", tone: "none" };
+  const usd = walletMicroUsd / 1_000_000;
+  if (usd === 0) return { text: "$0.0000", tone: "low" };
+  if (usd < 1) return { text: `$${usd.toFixed(4)}`, tone: usd < 0.1 ? "low" : "ok" };
+  return { text: `$${usd.toFixed(2)}`, tone: "ok" };
 }
 
 function ApiKeysSection(props: {
@@ -5681,12 +5684,12 @@ function ApiKeysSection(props: {
                         </span>
                       )}
                       {(() => {
-                        const b = formatBalance(key.balance);
+                        const b = formatBalance(key.walletMicroUsd);
                         return (
                           <span
                             className="balanceBadge"
                             data-tone={b.tone}
-                            title={b.tone === "unlimited" ? t("apikey.unlimited") : t("apikey.balance")}
+                            title={b.tone === "none" ? t("apikey.noWallet") : t("apikey.balance")}
                           >
                             {b.text}
                           </span>
@@ -5840,7 +5843,7 @@ function ApiKeysSection(props: {
         <TopupModal
           apiKeyId={topupTarget.id}
           ownerLabel={topupTarget.owner ?? topupTarget.id}
-          currentBalance={topupTarget.balance}
+          currentBalance={topupTarget.walletMicroUsd === undefined ? undefined : topupTarget.walletMicroUsd / 1_000_000}
           api={props.api}
           onClose={() => setTopupTarget(null)}
           onSuccess={async (newBalance, added) => {

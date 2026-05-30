@@ -25,7 +25,14 @@ export type ProviderAccount = {
   proxyPoolId?: string;
   allowedModels?: string[];
   tags?: string[];
+  /** Human-facing owner label (e.g. team or user). Distinct from sellerId. */
   owner?: string;
+  /**
+   * seller-supply (#4) — marketplace seller that owns this account's supply.
+   * Defaults to "house" (platform's own supply) for accounts with no explicit
+   * seller, so single-tenant deployments are "all house". Set on load migration.
+   */
+  sellerId?: string;
   runtime: ProviderAccountRuntime;
   metadata?: Record<string, unknown>;
   createdAt: Date;

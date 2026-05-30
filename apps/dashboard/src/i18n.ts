@@ -464,6 +464,12 @@ const translations: Record<Lang, Record<string, string>> = {
     // Phase 19 — API key balance / topup
     "apikey.balance": "Balance",
     "apikey.unlimited": "Unlimited (no balance tracking)",
+    "apikey.noWallet": "No wallet provisioned",
+    "apikey.plan.section": "Marketplace plan",
+    "apikey.plan.label": "Plan",
+    "apikey.plan.none": "No plan (legacy limits)",
+    "apikey.plan.overage": "Allow overage (pay-as-you-go past month budget)",
+    "apikey.plan.paygDailyLimit": "PAYG daily limit (USD, blank = none)",
     "apikey.topup": "Top up",
     "apikey.topupTitle": "Top up API key",
     "apikey.topupCurrent": "Current balance",
@@ -471,6 +477,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "apikey.topupAdd": "Top up",
     "apikey.topupQuick": "Quick:",
     "apikey.topupSwitchWarning": "This key is currently unlimited. Topping up will switch it to balance-tracked mode.",
+    "apikey.topupOpensWallet": "This key has no wallet yet. Topping up will open a USD wallet for it.",
     "apikey.topupSuccess": "Added ${amount}. New balance: ${balance}",
 
     // Phase 20a — Token hardening + batch
@@ -989,6 +996,12 @@ const translations: Record<Lang, Record<string, string>> = {
     // Phase 19 — API key balance / topup
     "apikey.balance": "Số dư",
     "apikey.unlimited": "Không giới hạn (không theo dõi số dư)",
+    "apikey.noWallet": "Chưa có ví",
+    "apikey.plan.section": "Gói marketplace",
+    "apikey.plan.label": "Gói",
+    "apikey.plan.none": "Không có gói (giới hạn cũ)",
+    "apikey.plan.overage": "Cho phép vượt mức (trả theo dùng khi hết ngân sách tháng)",
+    "apikey.plan.paygDailyLimit": "Giới hạn PAYG mỗi ngày (USD, để trống = không)",
     "apikey.topup": "Nạp thêm",
     "apikey.topupTitle": "Nạp thêm cho API key",
     "apikey.topupCurrent": "Số dư hiện tại",
@@ -996,6 +1009,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "apikey.topupAdd": "Nạp",
     "apikey.topupQuick": "Nhanh:",
     "apikey.topupSwitchWarning": "Key này đang không giới hạn. Nạp sẽ chuyển sang chế độ theo dõi số dư.",
+    "apikey.topupOpensWallet": "Key này chưa có ví. Nạp tiền sẽ mở một ví USD cho key.",
     "apikey.topupSuccess": "Đã nạp ${amount}. Số dư mới: ${balance}",
 
     // Phase 20a — Token hardening + batch

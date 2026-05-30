@@ -166,16 +166,35 @@ describe("enforceKeyPolicy", () => {
     expect((sent.payload as { error: { code: string } }).error.code).toBe("team_model_not_allowed");
   });
 
-  it("rejects with 402 when balance is exhausted", async () => {
-    const id = apiKeyService.list()[0].id;
-    apiKeyService.topup(id, 10); // sets balance to 10
-    apiKeyService.deductBalance(testKeyHash, 999_999); // brings to 0
-
+  it("rejects with 402 when a marketplace policy check returns a rejection", async () => {
+    // usd-wallet (#1) moved the balance gate to the marketplace seam. Simulate
+    // a provisioned-but-empty wallet by registering a rejecting policy check.
+    const seam = {
+      keyPolicyChecks: [
+        () => ({
+          httpStatus: 402,
+          body: { error: { type: "insufficient_balance", code: "balance_exhausted" } }
+        })
+      ]
+    };
     const enforcer = createKeyPolicyEnforcer({ apiKeyService, teamService });
     const { reply, sent } = makeReply();
-    await enforcer(makeRequest({ auth: { apiKeyHash: testKeyHash } }), reply);
+    const req = makeRequest({ auth: { apiKeyHash: testKeyHash } });
+    (req as unknown as { server: unknown }).server = { marketplaceSeam: seam };
+
+    await enforcer(req, reply);
     expect(sent.code).toBe(402);
     expect((sent.payload as { error: { code: string } }).error.code).toBe("balance_exhausted");
+  });
+
+  it("allows the request when no marketplace checks are registered", async () => {
+    const enforcer = createKeyPolicyEnforcer({ apiKeyService, teamService });
+    const { reply, sent } = makeReply();
+    const req = makeRequest({ auth: { apiKeyHash: testKeyHash } });
+    (req as unknown as { server: unknown }).server = { marketplaceSeam: { keyPolicyChecks: [] } };
+
+    await enforcer(req, reply);
+    expect(sent.code).toBeUndefined();
   });
 
   it("skips model check when getModel is not provided", async () => {
