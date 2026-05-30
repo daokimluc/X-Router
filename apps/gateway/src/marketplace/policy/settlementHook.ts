@@ -11,11 +11,14 @@
  */
 import type { SettlementHook } from "../../services/MarketplaceSeam.js";
 import type { SpendLedgerService } from "../../services/SpendLedgerService.js";
+import type { ModelPricingService } from "../../services/ModelPricingService.js";
 import type { WebhookService } from "../../services/WebhookService.js";
 import type { WalletService } from "../services/WalletService.js";
 import type { SellerService } from "../services/SellerService.js";
 import type { MarketPricingService } from "../services/MarketPricingService.js";
 import type { SellerEarningsLedger } from "../services/SellerEarningsLedger.js";
+import type { SettlementLedger } from "../services/SettlementLedger.js";
+import type { CostPrice } from "../../account-pool/types.js";
 
 const HOUSE_SELLER_ID = "house";
 
@@ -45,6 +48,10 @@ export type SettlementDeps = {
   sellerService: SellerService;
   marketPricingService: MarketPricingService;
   sellerEarningsLedger: SellerEarningsLedger;
+  /** money-correctness (#2) — durable settlement log + conservation invariant. */
+  settlementLedger: SettlementLedger;
+  /** money-correctness (#2) — fallback cost basis for an unlisted route. */
+  modelPricingService: ModelPricingService;
   /** provision-webhook (#7) — emit usage.recorded after settlement. Optional. */
   webhookService?: WebhookService;
   /** provision-webhook (#7) — wallet.low threshold in USD (default 1.00). */
@@ -83,44 +90,48 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       return;
     }
 
-    // ── success: compute the actual sell cost from routed sell rates ──────────
+    // ── success ───────────────────────────────────────────────────────────────
+    // money-correctness (#2): settle the BUYER side first to learn what was
+    // actually collected (a wallet can floor at zero), THEN derive seller credit
+    // + platform margin from the collected amount so the books always conserve:
+    //   collected === sellerCredit + platformMargin.
     const billTrack: "plan" | "payg" = payg ? "payg" : "plan";
-
-    // Without routed cost data (e.g. non-marketplace pool), settle the held
-    // reservation at the engine model cost and skip seller credit.
-    let actualSellCost: number;
-    let sellerCredit = 0;
     const sellerId = routed?.sellerId ?? HOUSE_SELLER_ID;
+    const baseModel = routed?.baseModel ?? ctx.model;
 
+    // Sell cost + base (wholesale) cost. With a routed listing, from its rates;
+    // without one (unlisted leased account) fall back to the house listing cost
+    // for the base model, else the engine model price — NEVER $0 for a metered
+    // request. The buyer is always charged; only the seller-credit basis differs.
+    let actualSellCost: number;
+    let actualBaseCost: number;
     if (routed) {
       actualSellCost = deps.marketPricingService.sellCostForRequest(
-        routed.baseModel,
-        routed.costPrice,
-        ctx.promptTokens,
-        ctx.completionTokens,
-        ctx.cachedTokens ?? 0
+        routed.baseModel, routed.costPrice, ctx.promptTokens, ctx.completionTokens, ctx.cachedTokens ?? 0
       );
-      const actualBaseCost = deps.marketPricingService.baseCostForRequest(
-        routed.costPrice,
-        ctx.promptTokens,
-        ctx.completionTokens,
-        ctx.cachedTokens ?? 0
+      actualBaseCost = deps.marketPricingService.baseCostForRequest(
+        routed.costPrice, ctx.promptTokens, ctx.completionTokens, ctx.cachedTokens ?? 0
       );
-      if (sellerId !== HOUSE_SELLER_ID) {
-        const commissionPct = deps.sellerService.getSeller(sellerId)?.commissionPct ?? 0;
-        sellerCredit = actualBaseCost * (1 - commissionPct);
-        deps.sellerEarningsLedger.credit(sellerId, sellerCredit);
-      }
     } else {
-      // Fallback: no routed cost → use the reserved estimate as the sell cost.
-      actualSellCost = 0;
+      const fallbackCost = fallbackCostPrice(deps, baseModel);
+      actualBaseCost = deps.marketPricingService.baseCostForRequest(
+        fallbackCost, ctx.promptTokens, ctx.completionTokens, ctx.cachedTokens ?? 0
+      );
+      actualSellCost = deps.marketPricingService.sellCostForRequest(
+        baseModel, fallbackCost, ctx.promptTokens, ctx.completionTokens, ctx.cachedTokens ?? 0
+      );
+      request.log?.warn(
+        { model: baseModel, sellCost: actualSellCost },
+        "unlisted supply served metered request — settled at fallback cost"
+      );
     }
 
-    // Settle the buyer side against the track chosen at reserve.
+    // Settle the buyer side against the track chosen at reserve; capture collected.
+    let collected = 0;
+    const planScope = planRes?.scope ?? null;
     if (billTrack === "plan" && planRes) {
-      deps.spendLedgerService.settle(planRes.id, actualSellCost);
-      // provision-webhook (#7) — grant.exhausted: emit only on the transition
-      // into exhaustion (this settle crossed the cap), not every later request.
+      collected = deps.spendLedgerService.settle(planRes.id, actualSellCost);
+      // provision-webhook (#7) — grant.exhausted on the exhaustion transition.
       if (deps.webhookService && planRes.monthUsd && planRes.monthUsd > 0) {
         const snap = deps.spendLedgerService.snapshot(planRes.scope, null, planRes.monthUsd);
         const after = snap.month.spent;
@@ -136,10 +147,10 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       }
     } else if (billTrack === "payg" && payg) {
       const [walletRes, dayRes] = payg.id.split("|");
-      if (walletRes) deps.walletService.settleUsd(walletRes, actualSellCost);
+      // The wallet is the real money; its settle return is what was collected.
+      if (walletRes) collected = deps.walletService.settleUsd(walletRes, actualSellCost);
       if (dayRes) deps.spendLedgerService.settle(dayRes, actualSellCost);
-      // provision-webhook (#7) — wallet.low: emit if the post-settle balance is
-      // below the low-water threshold (best-effort).
+      // provision-webhook (#7) — wallet.low after settle (best-effort).
       const keyId = request.buyerKeyId;
       if (deps.webhookService && keyId) {
         const threshold = deps.walletLowWaterUsd ?? 1.0;
@@ -150,13 +161,36 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       }
     }
 
-    const platformMargin = actualSellCost - sellerCredit;
-    deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
+    // Derive credit + margin from COLLECTED (not intended): margin absorbs any
+    // shortfall before the seller is shorted; the seller is never over-credited.
+    let sellerCredit = 0;
+    if (sellerId !== HOUSE_SELLER_ID) {
+      const commissionPct = deps.sellerService.getSeller(sellerId)?.commissionPct ?? 0;
+      const intendedCredit = actualBaseCost * (1 - commissionPct);
+      sellerCredit = Math.min(intendedCredit, collected);
+      if (sellerCredit > 0) deps.sellerEarningsLedger.credit(sellerId, sellerCredit);
+    }
+    const platformMargin = collected - sellerCredit;
+    if (platformMargin !== 0) deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
+
+    // Durable, auditable settlement row (enables reversal + reconciliation).
+    deps.settlementLedger.record({
+      buyerKeyId: request.buyerKeyId ?? "",
+      baseModel,
+      sellerId,
+      promptTokens: ctx.promptTokens,
+      completionTokens: ctx.completionTokens,
+      collected,
+      sellerCredit,
+      platformMargin,
+      billTrack,
+      planScope
+    });
 
     request.settlement = {
       buyerKeyId: request.buyerKeyId ?? "",
       buyerKeyHash: request.auth?.apiKeyHash ?? "",
-      baseModel: routed?.baseModel ?? ctx.model,
+      baseModel,
       sellerId,
       promptTokens: ctx.promptTokens,
       completionTokens: ctx.completionTokens,
@@ -174,4 +208,26 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
     request.planReservation = undefined;
     request.payg = undefined;
   };
+}
+
+/**
+ * Fallback wholesale cost for an unlisted route (money-correctness #2): the
+ * house listing's cost for the base model if one exists, else the engine model
+ * price. Never returns zero rates so a metered request is never served free.
+ */
+function fallbackCostPrice(deps: SettlementDeps, baseModel: string): CostPrice {
+  const houseListing = deps.sellerService
+    .listingCostFor(baseModel)
+    .find((c) => c.sellerId === HOUSE_SELLER_ID);
+  if (houseListing) return houseListing.costPrice;
+
+  const pricing = deps.modelPricingService.get(baseModel);
+  if (pricing) {
+    const cost: CostPrice = { inputPerM: pricing.inputRate, outputPerM: pricing.outputRate };
+    if (pricing.cachedInputRate !== undefined) cost.cachedInputPerM = pricing.cachedInputRate;
+    return cost;
+  }
+  // No price anywhere — a conservative non-zero floor so the buyer is still
+  // charged something and operators see it in the warn log.
+  return { inputPerM: 0, outputPerM: 0 };
 }

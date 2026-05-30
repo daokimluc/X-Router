@@ -119,19 +119,28 @@ export class WalletService {
 
   /**
    * Settle a reservation to actual cost. Refunds (estimate − actual) when actual
-   * < estimate; debits the extra (floored at 0) when actual > estimate.
+   * < estimate; debits the extra (floored at 0) when actual > estimate. Returns
+   * the amount actually COLLECTED for this reservation in USD — i.e. the net
+   * removed from the wallet across reserve+settle. When the wallet floored at
+   * zero, collected is less than `actualUsd` (the buyer is charged only what they
+   * had), which is what conservation in money-correctness (#2) keys off.
    */
-  settleUsd(reservationId: string, actualUsd: number): void {
+  settleUsd(reservationId: string, actualUsd: number): number {
     const actual = usdToMicro(actualUsd);
-    this.tx(() => {
+    return this.tx<number>(() => {
       const r = this.db.prepare("SELECT key_id, estimate_micro FROM wallet_reservations WHERE id = ?").get(reservationId) as
         | { key_id: string; estimate_micro: number }
         | undefined;
-      if (!r) return;
+      if (!r) return 0;
       this.db.prepare("DELETE FROM wallet_reservations WHERE id = ?").run(reservationId);
       const current = this.balanceMicro(r.key_id) ?? 0;
       const next = Math.max(0, current + (r.estimate_micro - actual));
       this.db.prepare("UPDATE wallets SET balance_micro = ? WHERE key_id = ?").run(next, r.key_id);
+      // collected = held estimate minus the amount refunded (next − current).
+      // Floors naturally: if the extra debit hit the zero floor, collected is
+      // capped at what the wallet actually held (estimate + current).
+      const collected = r.estimate_micro - (next - current);
+      return microToUsd(Math.max(0, collected));
     });
   }
 
@@ -146,6 +155,36 @@ export class WalletService {
       const current = this.balanceMicro(r.key_id) ?? 0;
       this.db.prepare("UPDATE wallets SET balance_micro = ? WHERE key_id = ?").run(current + r.estimate_micro, r.key_id);
     });
+  }
+
+  /**
+   * Refund USD back to a wallet (money-correctness #2) — credit a prior charge
+   * back, distinct from `topupUsd` (buyer paying more in). Provisions the wallet
+   * if absent, appends an audited `wallet_ledger` row, and returns the new
+   * balance. Non-negative amounts only. Used by admin refund + full settlement
+   * reversal.
+   */
+  refundUsd(keyId: string, usd: number, reason?: string): number {
+    if (usd <= 0) return this.getUsd(keyId);
+    const add = usdToMicro(usd);
+    return this.tx(() => {
+      this.db.prepare(
+        `INSERT INTO wallets (key_id, balance_micro) VALUES (?, ?)
+         ON CONFLICT(key_id) DO UPDATE SET balance_micro = balance_micro + excluded.balance_micro`
+      ).run(keyId, add);
+      this.db.prepare(
+        "INSERT INTO wallet_ledger (id, key_id, delta_micro, kind, reason, ts) VALUES (?, ?, ?, 'refund', ?, ?)"
+      ).run(`wl_${randomUUID()}`, keyId, add, reason ?? null, Date.now());
+      return microToUsd(this.balanceMicro(keyId) ?? 0);
+    });
+  }
+
+  /** Audited wallet movements for a key (refunds etc.), newest first. */
+  ledgerFor(keyId: string): Array<{ id: string; deltaUsd: number; kind: string; reason: string | null; ts: number }> {
+    const rows = this.db.prepare(
+      "SELECT id, delta_micro, kind, reason, ts FROM wallet_ledger WHERE key_id = ? ORDER BY ts DESC"
+    ).all(keyId) as Array<{ id: string; delta_micro: number; kind: string; reason: string | null; ts: number }>;
+    return rows.map((r) => ({ id: r.id, deltaUsd: microToUsd(r.delta_micro), kind: r.kind, reason: r.reason, ts: r.ts }));
   }
 
   /**

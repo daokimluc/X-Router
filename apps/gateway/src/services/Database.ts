@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -91,11 +91,42 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       );
       CREATE INDEX IF NOT EXISTS idx_payouts_seller ON payouts (seller_id);
     `);
+  },
+  // v2 — money-correctness: a buyer wallet audit log for refunds, a seller-credit
+  // reversal log so reconciliation can net reversals against credits, and the
+  // plan-bucket scope on each settlement so a plan-track reversal can credit the
+  // bucket back (not just refund a wallet).
+  (db) => {
+    db.exec(`
+      ALTER TABLE settlement_log ADD COLUMN plan_scope TEXT;
+      ALTER TABLE settlement_log ADD COLUMN collected_micro INTEGER NOT NULL DEFAULT 0;
+      CREATE TABLE IF NOT EXISTS wallet_ledger (
+        id TEXT PRIMARY KEY,
+        key_id TEXT NOT NULL,
+        delta_micro INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        reason TEXT,
+        ts INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_wallet_ledger_key ON wallet_ledger (key_id);
+      CREATE TABLE IF NOT EXISTS earnings_reversals (
+        id TEXT PRIMARY KEY,
+        seller_id TEXT NOT NULL,
+        usd_micro INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        reason TEXT,
+        settlement_id TEXT,
+        ts INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_earnings_reversals_seller ON earnings_reversals (seller_id);
+    `);
   }
 ];
 
 export class Database {
   readonly db: DatabaseSync;
+  /** Reentrancy depth so nested transaction() calls join the outer transaction. */
+  private txDepth = 0;
 
   constructor(path = ":memory:") {
     this.db = new DatabaseSync(path);
@@ -125,9 +156,26 @@ export class Database {
     }
   }
 
-  /** Run fn inside a transaction; commit on success, rollback on throw. */
+  /**
+   * Run fn inside a transaction; commit on success, rollback on throw.
+   *
+   * Reentrant: a nested call (a money service that itself wraps a transaction,
+   * invoked from inside another service's transaction — e.g. reverseSettlement →
+   * refundUsd) joins the outer transaction instead of issuing a second BEGIN
+   * (node:sqlite has no nested transactions). The outermost call owns
+   * BEGIN/COMMIT/ROLLBACK, so a throw anywhere still rolls back the whole unit.
+   */
   transaction<T>(fn: () => T): T {
+    if (this.txDepth > 0) {
+      this.txDepth++;
+      try {
+        return fn();
+      } finally {
+        this.txDepth--;
+      }
+    }
     this.db.exec("BEGIN");
+    this.txDepth = 1;
     try {
       const result = fn();
       this.db.exec("COMMIT");
@@ -139,6 +187,8 @@ export class Database {
         // ignore rollback failure
       }
       throw err;
+    } finally {
+      this.txDepth = 0;
     }
   }
 

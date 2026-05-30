@@ -6,6 +6,8 @@ import { WalletService } from "../marketplace/services/WalletService.js";
 import { SellerService, HOUSE_SELLER_ID } from "../marketplace/services/SellerService.js";
 import { MarketPricingService } from "../marketplace/services/MarketPricingService.js";
 import { SellerEarningsLedger } from "../marketplace/services/SellerEarningsLedger.js";
+import { SettlementLedger } from "../marketplace/services/SettlementLedger.js";
+import { ModelPricingService } from "../services/ModelPricingService.js";
 import { SpendLedgerService } from "../services/SpendLedgerService.js";
 import { makeTestDb } from "./helpers.js";
 
@@ -61,21 +63,34 @@ describe("settlement hook (two-sided)", () => {
   let pricing: MarketPricingService;
   let earnings: SellerEarningsLedger;
   let ledger: SpendLedgerService;
+  let settlementLedger: SettlementLedger;
+  let modelPricing: ModelPricingService;
   let hook: ReturnType<typeof createSettlementHook>;
 
-  beforeEach(() => {
-    wallet = new WalletService(makeTestDb());
-    sellers = new SellerService();
-    pricing = new MarketPricingService(); // markup 0.15
-    earnings = new SellerEarningsLedger(makeTestDb());
-    ledger = new SpendLedgerService();
-    hook = createSettlementHook({
+  // wallet + earnings + settlement log must share ONE db so they reconcile.
+  function baseDeps(extra?: Partial<Parameters<typeof createSettlementHook>[0]>) {
+    return {
       spendLedgerService: ledger,
       walletService: wallet,
       sellerService: sellers,
       marketPricingService: pricing,
-      sellerEarningsLedger: earnings
-    });
+      sellerEarningsLedger: earnings,
+      settlementLedger,
+      modelPricingService: modelPricing,
+      ...extra
+    };
+  }
+
+  beforeEach(() => {
+    const db = makeTestDb();
+    wallet = new WalletService(db);
+    sellers = new SellerService();
+    pricing = new MarketPricingService(); // markup 0.15
+    earnings = new SellerEarningsLedger(db);
+    ledger = new SpendLedgerService();
+    settlementLedger = new SettlementLedger(db, wallet, earnings, ledger);
+    modelPricing = new ModelPricingService();
+    hook = createSettlementHook(baseDeps());
   });
 
   function reqWith(routed: unknown, planReservation?: unknown, payg?: unknown): FastifyRequest {
@@ -146,11 +161,9 @@ describe("settlement hook (two-sided)", () => {
   it("emits wallet.low after a payg settle when balance drops below threshold", () => {
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
     const fakeWebhook = { notifyBusiness: async (event: string, data: Record<string, unknown>) => { events.push({ event, data }); } };
-    const hook2 = createSettlementHook({
-      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
-      marketPricingService: pricing, sellerEarningsLedger: earnings,
+    const hook2 = createSettlementHook(baseDeps({
       webhookService: fakeWebhook as never, walletLowWaterUsd: 1.0
-    });
+    }));
     const hoang = sellers.register({ displayName: "hoang", commissionPct: 0 });
     sellers.approve(hoang.id);
     wallet.topupUsd("k1", 0.5); // already below the $1 threshold
@@ -176,10 +189,7 @@ describe("settlement hook (two-sided)", () => {
   it("emits grant.exhausted once when a plan-bucket settle crosses the month cap", () => {
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
     const fakeWebhook = { notifyBusiness: async (event: string, data: Record<string, unknown>) => { events.push({ event, data }); } };
-    const hook2 = createSettlementHook({
-      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
-      marketPricingService: pricing, sellerEarningsLedger: earnings, webhookService: fakeWebhook as never
-    });
+    const hook2 = createSettlementHook(baseDeps({ webhookService: fakeWebhook as never }));
     const scope = "key:k1:grp:claude";
     // Pre-spend under the $5 cap, reserve within budget, then settle with an
     // ACTUAL cost (tokens) larger than the reserved estimate so it crosses $5.
@@ -198,10 +208,7 @@ describe("settlement hook (two-sided)", () => {
   it("emits supply.unhealthy when a non-house routed request fails", () => {
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
     const fakeWebhook = { notifyBusiness: async (event: string, data: Record<string, unknown>) => { events.push({ event, data }); } };
-    const hook2 = createSettlementHook({
-      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
-      marketPricingService: pricing, sellerEarningsLedger: earnings, webhookService: fakeWebhook as never
-    });
+    const hook2 = createSettlementHook(baseDeps({ webhookService: fakeWebhook as never }));
     const hoang = sellers.register({ displayName: "hoang" });
     sellers.approve(hoang.id);
     const planRes = ledger.reserve({ scope: "key:k1:grp:codex", estimateUsd: 0.02, monthCap: 100 });
@@ -216,10 +223,7 @@ describe("settlement hook (two-sided)", () => {
   it("does NOT emit supply.unhealthy for a house request failure", () => {
     const events: Array<{ event: string }> = [];
     const fakeWebhook = { notifyBusiness: async (event: string) => { events.push({ event }); } };
-    const hook2 = createSettlementHook({
-      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
-      marketPricingService: pricing, sellerEarningsLedger: earnings, webhookService: fakeWebhook as never
-    });
+    const hook2 = createSettlementHook(baseDeps({ webhookService: fakeWebhook as never }));
     const planRes = ledger.reserve({ scope: "key:k1:grp:codex", estimateUsd: 0.02, monthCap: 100 });
     const routed = { baseModel: "gpt-5.5", sellerId: "house", accountId: "ah", costPrice: { inputPerM: 2, outputPerM: 6 }, sellRates: { inputPerM: 1, outputPerM: 1 } };
     const req = { routed, planReservation: planRes.ok ? { id: planRes.reservationId, scope: "s" } : undefined, auth: { apiKeyHash: "h1" }, headers: {} } as unknown as FastifyRequest;

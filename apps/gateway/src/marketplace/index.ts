@@ -19,6 +19,7 @@ import { PlanService, type PersistedPlans } from "./services/PlanService.js";
 import { SellerService, type PersistedSellers } from "./services/SellerService.js";
 import { MarketPricingService, type PersistedMarketPricing } from "./services/MarketPricingService.js";
 import { SellerEarningsLedger, type PersistedSellerEarnings } from "./services/SellerEarningsLedger.js";
+import { SettlementLedger } from "./services/SettlementLedger.js";
 import { type PaygDecision } from "./services/PaygDecision.js";
 import { RealPaygDecision } from "./services/RealPaygDecision.js";
 import { createMarketplacePolicyCheck } from "./policy/marketplacePolicyCheck.js";
@@ -48,6 +49,7 @@ declare module "fastify" {
     sellerService: SellerService;
     marketPricingService: MarketPricingService;
     sellerEarningsLedger: SellerEarningsLedger;
+    settlementLedger: SettlementLedger;
     paygDecision: PaygDecision;
   }
 }
@@ -183,6 +185,16 @@ export function registerMarketplace(
   app.decorate("sellerEarningsLedger", sellerEarningsLedger);
   registerEarningsAdminRoutes(app, deps.config, sellerEarningsLedger);
 
+  // money-correctness (#2): durable settlement log + conservation invariant +
+  // full settlement reversal. SQLite-backed.
+  const settlementLedger = new SettlementLedger(
+    deps.database,
+    walletService,
+    sellerEarningsLedger,
+    app.spendLedgerService
+  );
+  app.decorate("settlementLedger", settlementLedger);
+
   // Settlement hook: charges the buyer (plan bucket or wallet) + credits the
   // seller after each billable request. Runs on the engine's settlement seam.
   app.marketplaceSeam.addSettlementHook(
@@ -192,6 +204,8 @@ export function registerMarketplace(
       sellerService,
       marketPricingService,
       sellerEarningsLedger,
+      settlementLedger,
+      modelPricingService: app.modelPricingService,
       webhookService: app.webhookService
     })
   );

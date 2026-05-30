@@ -174,10 +174,14 @@ export class SpendLedgerService {
   /**
    * Post-completion adjust. Replace the estimate amount with the actual cost.
    * If actual < estimate, refund difference. If actual > estimate, debit extra.
+   * Returns the amount COLLECTED for this reservation (the actual cost recorded,
+   * floored at 0). A plan bucket is a usage counter, not real money, so nothing
+   * floors the collected amount down — money-correctness (#2) keys conservation
+   * off this return.
    */
-  settle(reservationId: string, actualUsd: number): void {
+  settle(reservationId: string, actualUsd: number): number {
     const r = this.reservations.get(reservationId);
-    if (!r) return;
+    if (!r) return 0;
     this.reservations.delete(reservationId);
     const entry = this.getOrInit(r.scope);
     rollover(entry);
@@ -189,6 +193,7 @@ export class SpendLedgerService {
     if (entry.day < 0) entry.day = 0;
     if (entry.month < 0) entry.month = 0;
     this.scheduleSave();
+    return Math.max(0, actualUsd);
   }
 
   /**
@@ -206,6 +211,22 @@ export class SpendLedgerService {
     if (entry.hour < 0) entry.hour = 0;
     if (entry.day < 0) entry.day = 0;
     if (entry.month < 0) entry.month = 0;
+    this.scheduleSave();
+  }
+
+  /**
+   * Credit (give back) spend on a scope without a reservation — used to refund a
+   * plan bucket when a settled request is reversed (money-correctness #2). The
+   * plan bucket is a usage counter, not real money; this decrements current
+   * usage, floored at 0.
+   */
+  credit(scope: ScopeKey, usd: number): void {
+    if (usd <= 0) return;
+    const entry = this.getOrInit(scope);
+    rollover(entry);
+    entry.hour = Math.max(0, entry.hour - usd);
+    entry.day = Math.max(0, entry.day - usd);
+    entry.month = Math.max(0, entry.month - usd);
     this.scheduleSave();
   }
 

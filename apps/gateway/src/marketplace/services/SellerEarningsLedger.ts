@@ -11,6 +11,7 @@
  * payout reconstruction land in money-correctness (#2).
  */
 
+import { randomUUID } from "node:crypto";
 import type { Database, SqliteDatabase } from "../../services/Database.js";
 import { microToUsd, usdToMicro } from "../utils/money.js";
 
@@ -108,14 +109,70 @@ export class SellerEarningsLedger {
     return microToUsd(row?.margin_micro ?? 0);
   }
 
-  /** Reduce unpaid after an off-platform payout. Floored at 0. */
-  markPaid(sellerId: string, usd: number): SellerEarningsSnapshot {
+  /** Reduce unpaid after an off-platform payout. Floored at 0. Logs a payout row. */
+  markPaid(sellerId: string, usd: number, payoutRef?: string): SellerEarningsSnapshot {
     const sub = usdToMicro(usd);
     this.tx(() => {
       const r = this.rolled(sellerId);
+      this.db.prepare(
+        "INSERT INTO payouts (id, seller_id, usd_micro, ts, payout_ref, kind) VALUES (?, ?, ?, ?, ?, 'paid')"
+      ).run(`po_${randomUUID()}`, sellerId, sub, Date.now(), payoutRef ?? null);
       if (!r) return;
       const next = Math.max(0, r.unpaid_micro - sub);
       this.db.prepare("UPDATE seller_earnings SET unpaid_micro = ? WHERE seller_id = ?").run(next, sellerId);
+    });
+    return this.snapshot(sellerId);
+  }
+
+  /**
+   * Reverse accrued seller credit (money-correctness #2) — a clawback / failed
+   * payout / erroneous credit. Increases `unpaid` back and logs an
+   * `earnings_reversals` row so reconciliation nets it against credits. House is
+   * never reversed (it is never credited). `settlementId` ties a reversal to the
+   * settlement it unwinds (full settlement reversal); null for a standalone
+   * adjustment.
+   */
+  reverse(sellerId: string, usd: number, reason?: string, settlementId?: string): SellerEarningsSnapshot {
+    if (sellerId === HOUSE_SELLER_ID || usd <= 0) return this.snapshot(sellerId);
+    const add = usdToMicro(usd);
+    this.tx(() => {
+      const r = this.rolled(sellerId);
+      if (!r) return;
+      // Undo the credit: lifetime + unpaid go back down (the credit never should
+      // have stood); but a clawback after payout can only restore unpaid. We
+      // reduce lifetime and unpaid, flooring both at 0, and log the reversal.
+      const nextLifetime = Math.max(0, r.lifetime_micro - add);
+      const nextUnpaid = Math.max(0, r.unpaid_micro - add);
+      this.db.prepare(
+        "UPDATE seller_earnings SET lifetime_micro = ?, unpaid_micro = ? WHERE seller_id = ?"
+      ).run(nextLifetime, nextUnpaid, sellerId);
+      this.db.prepare(
+        "INSERT INTO earnings_reversals (id, seller_id, usd_micro, kind, reason, settlement_id, ts) VALUES (?, ?, ?, 'reverse', ?, ?, ?)"
+      ).run(`er_${randomUUID()}`, sellerId, add, reason ?? null, settlementId ?? null, Date.now());
+    });
+    return this.snapshot(sellerId);
+  }
+
+  /**
+   * Restore unpaid after a payout reversal (e.g. the bank transfer failed): the
+   * money was never sent, so the debt comes back. Logged for audit. Does not
+   * touch lifetime (the credit was real).
+   */
+  reversePayout(sellerId: string, usd: number, reason?: string): SellerEarningsSnapshot {
+    if (sellerId === HOUSE_SELLER_ID || usd <= 0) return this.snapshot(sellerId);
+    const add = usdToMicro(usd);
+    this.tx(() => {
+      const r = this.rolled(sellerId);
+      this.db.prepare(
+        "INSERT INTO earnings_reversals (id, seller_id, usd_micro, kind, reason, settlement_id, ts) VALUES (?, ?, ?, 'payout_reversal', ?, NULL, ?)"
+      ).run(`er_${randomUUID()}`, sellerId, add, reason ?? null, Date.now());
+      if (!r) {
+        this.db.prepare(
+          "INSERT INTO seller_earnings (seller_id, day_key, month_key, day_micro, month_micro, lifetime_micro, unpaid_micro) VALUES (?, ?, ?, 0, 0, 0, ?)"
+        ).run(sellerId, dayKeyNow(), monthKeyNow(), add);
+      } else {
+        this.db.prepare("UPDATE seller_earnings SET unpaid_micro = unpaid_micro + ? WHERE seller_id = ?").run(add, sellerId);
+      }
     });
     return this.snapshot(sellerId);
   }
