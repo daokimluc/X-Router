@@ -45,6 +45,8 @@ export type HealthCheckFn = (
 
 export type AccountDisableFn = (accountId: string, reason: string) => void;
 export type AccountEnableFn = (accountId: string) => void;
+/** Fired once when a connection transitions into the unhealthy state. */
+export type UnhealthyFn = (providerInstanceId: string, accountId: string, reason: string) => void;
 
 export class ProviderHealthMonitor {
   private readonly config: HealthMonitorConfig;
@@ -53,6 +55,7 @@ export class ProviderHealthMonitor {
   private healthCheckFn: HealthCheckFn | null = null;
   private accountDisableFn: AccountDisableFn | null = null;
   private accountEnableFn: AccountEnableFn | null = null;
+  private unhealthyFn: UnhealthyFn | null = null;
 
   constructor(config: Partial<HealthMonitorConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -71,6 +74,11 @@ export class ProviderHealthMonitor {
   /** Register callback for re-enabling accounts after cooldown recovery. */
   setAccountEnableFn(fn: AccountEnableFn): void {
     this.accountEnableFn = fn;
+  }
+
+  /** Register callback fired once when a connection becomes unhealthy. */
+  setUnhealthyFn(fn: UnhealthyFn): void {
+    this.unhealthyFn = fn;
   }
 
   /** Register a connection to be monitored. */
@@ -173,6 +181,7 @@ export class ProviderHealthMonitor {
       conn.disabledAt = new Date();
       conn.cooldownUntil = new Date(Date.now() + this.config.cooldownMs);
       this.accountDisableFn?.(accountId, `Auto-disabled after ${conn.consecutiveFailures} consecutive failures: ${error}`);
+      this.unhealthyFn?.(providerInstanceId, accountId, error);
     }
   }
 
@@ -234,6 +243,7 @@ export class ProviderHealthMonitor {
             conn.accountId,
             `Auto-disabled after ${conn.consecutiveFailures} failures: ${conn.lastError}`
           );
+          this.unhealthyFn?.(conn.providerInstanceId, conn.accountId, conn.lastError ?? "health check failed");
         }
       }
     } catch (error) {

@@ -113,8 +113,8 @@ best-effort (5s timeout, failures swallowed — never blocks the buyer's request
 | `usage.recorded` | each billable request settles | `{ buyerKeyId, buyerKeyHash, baseModel, sellerId, promptTokens, completionTokens, actualSellCost, sellerCredit, platformMargin, billTrack }` |
 | `quota.blocked` | request rejected (429/402, no boost/overage escape) | `{ keyId, httpStatus, reason, model }` |
 | `wallet.low` | post-settle wallet balance below threshold | `{ keyId, balanceUsd, thresholdUsd }` |
-| `grant.exhausted` | _(declared; emit not yet wired)_ | `{ keyId, planId, group, monthUsd }` |
-| `supply.unhealthy` | _(declared; emit not yet wired)_ | `{ sellerId, providerAccountId, reason }` |
+| `grant.exhausted` | a settle crosses the plan group's `monthUsd` (once per exhaustion) | `{ keyId, planId, group, monthUsd }` |
+| `supply.unhealthy` | a request routed to a non-house seller fails terminally | `{ sellerId, providerAccountId, reason }` |
 
 `usage.recorded` is the high-volume event — it is what the website uses to bill
 the buyer and accrue seller payout. `billTrack` is `"plan"` (metered against the
@@ -159,8 +159,10 @@ function verify(rawBody, signatureHeader, secret) {
 
 ## 6. Known gaps (not blocking integration)
 
-- `grant.exhausted` and `supply.unhealthy` events are declared but not yet
-  emitted — subscribe now; they will arrive once wired, no website code change.
+- All 5 business events are now emitted. `grant.exhausted` and
+  `supply.unhealthy` fire on the transition edge (once per episode);
+  `supply.unhealthy` currently triggers on a terminal request failure to a
+  non-house seller (a periodic health-monitor source can be added later).
 - `request.routed` uses a cheapest-listing approximation for cost attribution
   (exact when house-only or cheapest wins).
 - Admin dashboard UIs for plans/sellers/earnings are website-driven by design;

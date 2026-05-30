@@ -69,6 +69,15 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
         if (walletRes) deps.walletService.releaseUsd(walletRes);
         if (dayRes) deps.spendLedgerService.release(dayRes);
       }
+      // provision-webhook (#7) — supply.unhealthy: a request routed to a
+      // non-house seller failed terminally. Best-effort signal to the website.
+      if (deps.webhookService && routed && routed.sellerId !== HOUSE_SELLER_ID) {
+        void deps.webhookService.notifyBusiness("supply.unhealthy", {
+          sellerId: routed.sellerId,
+          providerAccountId: routed.accountId,
+          reason: "request_failed"
+        });
+      }
       request.planReservation = undefined;
       request.payg = undefined;
       return;
@@ -110,6 +119,21 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
     // Settle the buyer side against the track chosen at reserve.
     if (billTrack === "plan" && planRes) {
       deps.spendLedgerService.settle(planRes.id, actualSellCost);
+      // provision-webhook (#7) — grant.exhausted: emit only on the transition
+      // into exhaustion (this settle crossed the cap), not every later request.
+      if (deps.webhookService && planRes.monthUsd && planRes.monthUsd > 0) {
+        const snap = deps.spendLedgerService.snapshot(planRes.scope, null, planRes.monthUsd);
+        const after = snap.month.spent;
+        const before = after - actualSellCost;
+        if (after >= planRes.monthUsd && before < planRes.monthUsd) {
+          void deps.webhookService.notifyBusiness("grant.exhausted", {
+            keyId: request.buyerKeyId ?? "",
+            planId: planRes.planId ?? null,
+            group: planRes.group ?? null,
+            monthUsd: planRes.monthUsd
+          });
+        }
+      }
     } else if (billTrack === "payg" && payg) {
       const [walletRes, dayRes] = payg.id.split("|");
       if (walletRes) deps.walletService.settleUsd(walletRes, actualSellCost);

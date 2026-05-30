@@ -32,7 +32,7 @@ declare module "fastify" {
     /** Buyer's API key id (marketplace), stashed at enforce for settlement use. */
     buyerKeyId?: string;
     /** Plan bucket reservation held in enforce, settled post-request. */
-    planReservation?: { id: string; scope: string };
+    planReservation?: { id: string; scope: string; planId?: string; group?: string; monthUsd?: number };
     /**
      * PAYG/boost reservation held in enforce when a request is charged to the
      * wallet instead of the plan bucket. `id` = "walletRes|paygDayRes". Settled
@@ -112,7 +112,7 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
     });
 
     if (reserve.ok) {
-      ctx.request.planReservation = { id: reserve.reservationId, scope };
+      ctx.request.planReservation = { id: reserve.reservationId, scope, planId, group, monthUsd: plan.buckets.monthUsd };
       return;
     }
 

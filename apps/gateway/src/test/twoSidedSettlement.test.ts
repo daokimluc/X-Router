@@ -171,4 +171,58 @@ describe("settlement hook (two-sided)", () => {
     expect(usage!.data.baseModel).toBe("gpt-5.5");
     expect(usage!.data.sellerId).toBe(hoang.id);
   });
+
+  it("emits grant.exhausted once when a plan-bucket settle crosses the month cap", () => {
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    const fakeWebhook = { notifyBusiness: async (event: string, data: Record<string, unknown>) => { events.push({ event, data }); } };
+    const hook2 = createSettlementHook({
+      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
+      marketPricingService: pricing, sellerEarningsLedger: earnings, webhookService: fakeWebhook as never
+    });
+    const scope = "key:k1:grp:claude";
+    // Pre-spend under the $5 cap, reserve within budget, then settle with an
+    // ACTUAL cost (tokens) larger than the reserved estimate so it crosses $5.
+    ledger.reserve({ scope, estimateUsd: 4.4, monthCap: 5 });
+    const r = ledger.reserve({ scope, estimateUsd: 0.5, monthCap: 5 });
+    expect(r.ok).toBe(true);
+    const routed = { baseModel: "claude-sonnet-4-6", sellerId: "house", accountId: "ah", costPrice: { inputPerM: 2, outputPerM: 6 }, sellRates: pricing.sellPriceFor("claude-sonnet-4-6", { inputPerM: 2, outputPerM: 6 }) };
+    const req = { routed, buyerKeyId: "k1", auth: { apiKeyHash: "h1" }, headers: {}, planReservation: { id: r.ok ? r.reservationId : "", scope, planId: "plan_claude", group: "claude", monthUsd: 5 } } as unknown as FastifyRequest;
+    // 150k in / 75k out → sell ≈ $0.8625, pushes month spend past $5
+    hook2({ request: req, outcome: "success", model: "claude-sonnet-4-6", promptTokens: 150000, completionTokens: 75000 });
+    const ex = events.find((e) => e.event === "grant.exhausted");
+    expect(ex).toBeDefined();
+    expect(ex!.data).toMatchObject({ keyId: "k1", planId: "plan_claude", group: "claude", monthUsd: 5 });
+  });
+
+  it("emits supply.unhealthy when a non-house routed request fails", () => {
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    const fakeWebhook = { notifyBusiness: async (event: string, data: Record<string, unknown>) => { events.push({ event, data }); } };
+    const hook2 = createSettlementHook({
+      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
+      marketPricingService: pricing, sellerEarningsLedger: earnings, webhookService: fakeWebhook as never
+    });
+    const hoang = sellers.register({ displayName: "hoang" });
+    sellers.approve(hoang.id);
+    const planRes = ledger.reserve({ scope: "key:k1:grp:codex", estimateUsd: 0.02, monthCap: 100 });
+    const routed = { baseModel: "gpt-5.5", sellerId: hoang.id, accountId: "a1", costPrice: { inputPerM: 2.1, outputPerM: 6.3 }, sellRates: { inputPerM: 1, outputPerM: 1 } };
+    const req = { routed, planReservation: planRes.ok ? { id: planRes.reservationId, scope: "s" } : undefined, auth: { apiKeyHash: "h1" }, headers: {} } as unknown as FastifyRequest;
+    hook2({ request: req, outcome: "failure", model: "gpt-5.5", promptTokens: 0, completionTokens: 0 });
+    const su = events.find((e) => e.event === "supply.unhealthy");
+    expect(su).toBeDefined();
+    expect(su!.data).toMatchObject({ sellerId: hoang.id, providerAccountId: "a1", reason: "request_failed" });
+  });
+
+  it("does NOT emit supply.unhealthy for a house request failure", () => {
+    const events: Array<{ event: string }> = [];
+    const fakeWebhook = { notifyBusiness: async (event: string) => { events.push({ event }); } };
+    const hook2 = createSettlementHook({
+      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
+      marketPricingService: pricing, sellerEarningsLedger: earnings, webhookService: fakeWebhook as never
+    });
+    const planRes = ledger.reserve({ scope: "key:k1:grp:codex", estimateUsd: 0.02, monthCap: 100 });
+    const routed = { baseModel: "gpt-5.5", sellerId: "house", accountId: "ah", costPrice: { inputPerM: 2, outputPerM: 6 }, sellRates: { inputPerM: 1, outputPerM: 1 } };
+    const req = { routed, planReservation: planRes.ok ? { id: planRes.reservationId, scope: "s" } : undefined, auth: { apiKeyHash: "h1" }, headers: {} } as unknown as FastifyRequest;
+    hook2({ request: req, outcome: "failure", model: "gpt-5.5", promptTokens: 0, completionTokens: 0 });
+    expect(events.find((e) => e.event === "supply.unhealthy")).toBeUndefined();
+  });
 });
