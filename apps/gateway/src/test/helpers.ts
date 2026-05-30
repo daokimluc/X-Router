@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config.js";
+import { Database } from "../services/Database.js";
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -19,3 +20,9 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     ...overrides
   };
 }
+
+/** In-memory SQLite for unit tests (money services need a Database). */
+export function makeTestDb(): Database {
+  return new Database(":memory:");
+}
+

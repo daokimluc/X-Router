@@ -8,6 +8,7 @@ import { RealPaygDecision } from "../marketplace/services/RealPaygDecision.js";
 import { SpendLedgerService } from "../services/SpendLedgerService.js";
 import { ModelPricingService } from "../services/ModelPricingService.js";
 import type { InternalApiKeyRecord } from "../services/ApiKeyService.js";
+import { makeTestDb } from "./helpers.js";
 
 function makeCtx(record: Partial<InternalApiKeyRecord>, model: string | undefined, body: unknown) {
   const request = { body } as unknown as FastifyRequest;
@@ -30,7 +31,7 @@ describe("marketplace plan enforcement", () => {
   let check: ReturnType<typeof createMarketplacePolicyCheck>;
 
   beforeEach(() => {
-    wallet = new WalletService();
+    wallet = new WalletService(makeTestDb());
     plans = new PlanService();
     ledger = new SpendLedgerService();
     pricing = new ModelPricingService();
@@ -108,7 +109,7 @@ describe("boost gating (two-sided-settlement #6)", () => {
   let check: ReturnType<typeof createMarketplacePolicyCheck>;
 
   beforeEach(() => {
-    wallet = new WalletService();
+    wallet = new WalletService(makeTestDb());
     plans = new PlanService();
     ledger = new SpendLedgerService();
     pricing = new ModelPricingService();

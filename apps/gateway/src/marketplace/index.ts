@@ -12,6 +12,7 @@
  */
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config.js";
+import type { Database } from "../services/Database.js";
 import type { PersistedGatewayState } from "../services/PersistenceService.js";
 import { WalletService, type PersistedWallet } from "./services/WalletService.js";
 import { PlanService, type PersistedPlans } from "./services/PlanService.js";
@@ -36,6 +37,8 @@ export type MarketplaceDeps = {
   config: AppConfig;
   /** Persisted gateway state loaded at boot, or null in test/no-persist mode. */
   persistedState: PersistedGatewayState | null;
+  /** SQLite store for transactional money state (wallet + seller earnings). */
+  database: Database;
 };
 
 declare module "fastify" {
@@ -60,13 +63,15 @@ export function registerMarketplace(
   app.log.info("Marketplace layer enabled");
 
   // ── usd-wallet (#1) ──────────────────────────────────────────────────────
-  const walletService = new WalletService();
+  // SQLite-backed (persistence-sqlite). Money state lives in the durable store,
+  // NOT the JSON slice, so there is no load()/persist-contributor here.
+  const walletService = new WalletService(deps.database);
 
-  // Restore persisted wallet balances from the opaque marketplace slice.
-  const walletSlice = deps.persistedState?.marketplace?.wallet as
-    | PersistedWallet
-    | undefined;
-  walletService.load(walletSlice ?? null);
+  // One-time import from the legacy JSON wallet slice (idempotent via INSERT OR
+  // IGNORE — safe to call every boot; a key already in SQLite is left alone).
+  walletService.importLegacy(
+    deps.persistedState?.marketplace?.wallet as PersistedWallet | undefined
+  );
 
   // Migrate legacy token balances: any key that still carries the legacy token
   // `balance` field (and has no USD wallet) gets a provisioned $0 wallet, and a
@@ -90,13 +95,9 @@ export function registerMarketplace(
     }
   }
 
-  // Persist wallet state through the engine's persist trigger + register the
-  // contributor so the wallet slice lands in the gateway state file.
-  walletService.setPersistCallback(() => app.persistState());
-  app.marketplaceSeam.addPersistenceContributor({
-    name: "wallet",
-    toPersisted: () => walletService.toPersisted()
-  });
+  // Boot sweep: release any reservation rows orphaned by a crash between
+  // reserve and settle/release, returning the held funds.
+  walletService.sweepReservations();
 
   app.decorate("walletService", walletService);
 
@@ -173,13 +174,12 @@ export function registerMarketplace(
   });
 
   // ── two-sided-settlement (#6) ─────────────────────────────────────────────
-  const sellerEarningsLedger = new SellerEarningsLedger();
-  sellerEarningsLedger.load(deps.persistedState?.marketplace?.sellerEarnings as PersistedSellerEarnings | undefined ?? null);
-  sellerEarningsLedger.setPersistCallback(() => app.persistState());
-  app.marketplaceSeam.addPersistenceContributor({
-    name: "sellerEarnings",
-    toPersisted: () => sellerEarningsLedger.toPersisted()
-  });
+  // SQLite-backed (persistence-sqlite) — durable seller credit + platform
+  // margin, no JSON slice / persist contributor.
+  const sellerEarningsLedger = new SellerEarningsLedger(deps.database);
+  sellerEarningsLedger.importLegacy(
+    deps.persistedState?.marketplace?.sellerEarnings as PersistedSellerEarnings | undefined
+  );
   app.decorate("sellerEarningsLedger", sellerEarningsLedger);
   registerEarningsAdminRoutes(app, deps.config, sellerEarningsLedger);
 

@@ -7,6 +7,7 @@ import { SellerService, HOUSE_SELLER_ID } from "../marketplace/services/SellerSe
 import { MarketPricingService } from "../marketplace/services/MarketPricingService.js";
 import { SellerEarningsLedger } from "../marketplace/services/SellerEarningsLedger.js";
 import { SpendLedgerService } from "../services/SpendLedgerService.js";
+import { makeTestDb } from "./helpers.js";
 
 describe("RealPaygDecision", () => {
   let wallet: WalletService;
@@ -14,7 +15,7 @@ describe("RealPaygDecision", () => {
   let payg: RealPaygDecision;
 
   beforeEach(() => {
-    wallet = new WalletService();
+    wallet = new WalletService(makeTestDb());
     ledger = new SpendLedgerService();
     payg = new RealPaygDecision(wallet, ledger);
   });
@@ -63,10 +64,10 @@ describe("settlement hook (two-sided)", () => {
   let hook: ReturnType<typeof createSettlementHook>;
 
   beforeEach(() => {
-    wallet = new WalletService();
+    wallet = new WalletService(makeTestDb());
     sellers = new SellerService();
     pricing = new MarketPricingService(); // markup 0.15
-    earnings = new SellerEarningsLedger();
+    earnings = new SellerEarningsLedger(makeTestDb());
     ledger = new SpendLedgerService();
     hook = createSettlementHook({
       spendLedgerService: ledger,

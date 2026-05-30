@@ -1,5 +1,6 @@
 import fastify, { type FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
 import type { AppConfig } from "./config.js";
 import { registerErrorHandler } from "./middleware/errorHandler.js";
 import { registerLogger } from "./middleware/logger.js";
@@ -64,6 +65,7 @@ import { ResponseCacheService } from "./services/ResponseCacheService.js";
 import { RateLimitService } from "./services/RateLimitService.js";
 import { WebhookService } from "./services/WebhookService.js";
 import { MarketplaceSeam } from "./services/MarketplaceSeam.js";
+import { Database } from "./services/Database.js";
 import {
   PersistenceService,
   type PersistedGatewayState
@@ -93,6 +95,7 @@ export type AppDependencies = {
   usageService?: UsageService;
   rateLimitService?: RateLimitService;
   persistenceService?: PersistenceService;
+  database?: Database;
 };
 
 declare module "fastify" {
@@ -114,6 +117,7 @@ declare module "fastify" {
     usageService: UsageService;
     rateLimitService: RateLimitService;
     persistenceService: PersistenceService;
+    database: Database;
     tokenSaverService: TokenSaverService;
     requestQueueService: RequestQueueService;
     teamService: TeamService;
@@ -171,6 +175,21 @@ export async function buildApp(
   const persistenceEnabled =
     config.nodeEnv !== "test" || Boolean(dependencies.persistenceService);
   const persistedState = persistenceEnabled ? await persistenceService.load() : null;
+
+  // persistence-sqlite — durable store for transactional money state (wallet +
+  // seller earnings). In test (no real persistence) use an in-memory DB; in
+  // production derive the file next to the JSON state file.
+  const sqliteDb =
+    dependencies.database ??
+    new Database(
+      persistenceEnabled ? deriveSqlitePath(config.dataFile) : ":memory:"
+    );
+  app.decorate("database", sqliteDb);
+  // Close the DB on app shutdown only when buildApp created it. An injected DB
+  // (dependencies.database) is owned by the caller — leave its lifecycle alone.
+  if (!dependencies.database) {
+    app.addHook("onClose", () => sqliteDb.close());
+  }
 
   const providerRegistry =
     dependencies.providerRegistry ??
@@ -431,7 +450,7 @@ export async function buildApp(
   // directory. See marketplace/README.md.
   if (config.marketplaceEnabled) {
     const { registerMarketplace } = await import("./marketplace/index.js");
-    registerMarketplace(app, { config, persistedState });
+    registerMarketplace(app, { config, persistedState, database: sqliteDb });
   }
 
   // Register dashboard static serving AFTER all API routes to ensure API priority
@@ -447,6 +466,11 @@ export async function buildApp(
   }
 
   return app;
+}
+
+/** Derive the SQLite money-store path from the JSON state file (sibling file). */
+function deriveSqlitePath(dataFile: string): string {
+  return join(dirname(dataFile), "gateway.sqlite");
 }
 
 function parseBodyLimit(value: string): number {
