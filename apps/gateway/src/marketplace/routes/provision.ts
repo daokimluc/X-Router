@@ -138,4 +138,84 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     audit("provision.earnings.mark_paid", request, sellerId, "seller");
     return snapshot;
   });
+
+  // ── Reads (provision-read-api) ────────────────────────────────────────────
+  // Thin wrappers so the website renders state on the provision key alone,
+  // without holding an admin key. No new logic — same data as the /admin reads.
+
+  app.get("/provision/wallet/:keyId", opts, async (request) => {
+    const { keyId } = z.object({ keyId: z.string().min(1) }).parse(request.params);
+    return {
+      keyId,
+      walletUsd: app.walletService.getUsd(keyId),
+      provisioned: app.walletService.isProvisioned(keyId)
+    };
+  });
+
+  app.get("/provision/earnings/platform", opts, async () => {
+    return { platformMarginUsd: app.sellerEarningsLedger.getPlatformMargin() };
+  });
+
+  app.get("/provision/earnings/:sellerId", opts, async (request) => {
+    const { sellerId } = z.object({ sellerId: z.string().min(1) }).parse(request.params);
+    return app.sellerEarningsLedger.snapshot(sellerId);
+  });
+
+  app.get("/provision/plans", opts, async () => {
+    return { plans: app.planService.list() };
+  });
+
+  app.get("/provision/sellers", opts, async (request) => {
+    const q = z.object({ status: z.enum(["pending", "approved", "suspended"]).optional() }).parse(request.query);
+    return { sellers: app.sellerService.listSellers(q.status) };
+  });
+
+  app.get("/provision/listings", opts, async (request) => {
+    const q = z.object({ baseModel: z.string().optional() }).parse(request.query);
+    return { listings: app.sellerService.listListings(q.baseModel) };
+  });
+
+  app.get("/provision/markup", opts, async () => {
+    return app.marketPricingService.listMarkups();
+  });
+
+  // Usage reconciliation: pull settled records since a timestamp / for one key,
+  // so the website can rebuild its ledger after missed webhooks. Reconciliation-
+  // grade (tokens/model/cost/timestamps), NOT a settlement-payload replay.
+  app.get("/provision/usage", opts, async (request) => {
+    const q = z.object({
+      since: z.string().datetime().optional(),
+      keyId: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(1000).optional()
+    }).parse(request.query);
+    const apiKeyHash = q.keyId ? app.apiKeyService.findById(q.keyId)?.keyHash : undefined;
+    // keyId given but unknown → no records (avoid leaking all-key usage).
+    if (q.keyId && !apiKeyHash) return { data: [], total: 0 };
+    return app.usageService.query({
+      ...(apiKeyHash ? { apiKeyHash } : {}),
+      ...(q.since ? { from: new Date(q.since) } : {}),
+      limit: q.limit ?? 100
+    });
+  });
+
+  // ── Self-service business webhook config (provision-read-api) ─────────────
+  const BUSINESS_EVENTS = ["usage.recorded", "grant.exhausted", "wallet.low", "quota.blocked", "supply.unhealthy"] as const;
+
+  app.get("/provision/webhook", opts, async () => {
+    const cfg = app.webhookService.getBusinessConfig();
+    return { enabled: cfg.enabled, url: cfg.url, events: cfg.events, secretSet: cfg.secret.length > 0, secret: cfg.secret ? "••••••••" : "" };
+  });
+
+  app.put("/provision/webhook", opts, async (request, reply) => {
+    const p = z.object({
+      enabled: z.boolean().optional(),
+      url: z.string().url().or(z.literal("")).optional(),
+      secret: z.string().optional(),
+      events: z.array(z.enum(BUSINESS_EVENTS)).optional()
+    }).safeParse(request.body);
+    if (!p.success) { reply.code(400); return { error: { message: "invalid webhook config", code: "validation_error" } }; }
+    const updated = app.webhookService.updateBusinessConfig(p.data);
+    audit("provision.webhook.update", request, "business", "webhook");
+    return { enabled: updated.enabled, url: updated.url, events: updated.events, secretSet: updated.secret.length > 0 };
+  });
 }
