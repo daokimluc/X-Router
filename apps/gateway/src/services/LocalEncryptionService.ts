@@ -62,5 +62,29 @@ export class LocalEncryptionService {
 
     return parsed as Record<string, unknown>;
   }
+
+  /**
+   * Encrypt a single string value (e.g. a webhook HMAC secret). Wraps it in a
+   * JSON envelope so the same AES-GCM path is reused. Returns the `v1.…`
+   * ciphertext format (distinguishable from any plaintext that isn't itself a
+   * `v1.iv.tag.data` 4-part token).
+   */
+  encryptString(value: string): string {
+    return this.encryptJson({ v: value });
+  }
+
+  /** Decrypt a value produced by encryptString. */
+  decryptString(ciphertext: string): string {
+    const parsed = this.decryptJson(ciphertext);
+    const v = parsed.v;
+    if (typeof v !== "string") throw new Error("Decrypted value is not a string");
+    return v;
+  }
+
+  /** True if `value` looks like our `v1.iv.tag.data` ciphertext (not plaintext). */
+  isCiphertext(value: string): boolean {
+    const parts = value.split(".");
+    return parts.length === 4 && parts[0] === "v1" && parts.every((p, i) => i === 0 || p.length > 0);
+  }
 }
 

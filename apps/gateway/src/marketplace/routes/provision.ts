@@ -5,15 +5,35 @@
  * delegates to exactly one marketplace/engine service — no new billing logic.
  * Authenticated by the dedicated provision key (NOT admin/client keys).
  */
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../../config.js";
 import { createProvisionAuthMiddleware } from "../../middleware/provisionAuth.js";
+import { RateLimitService } from "../../services/RateLimitService.js";
 import { registerListingMappings } from "../policy/sellerRegistry.js";
 
 export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig): void {
   const provisionAuth = createProvisionAuthMiddleware(config);
   const opts = { preHandler: provisionAuth };
+
+  // provision-hardening (#5): per-provision-key rate limit on the highest-
+  // privilege mutating routes (create-key, wallet/topup, grant, mark-paid). 0
+  // disables it (trusted single-tenant). Runs AFTER provisionAuth so it keys off
+  // the authenticated provision key hash.
+  const rpm = config.provisionRateLimitPerMinute;
+  const limiter = rpm > 0 ? new RateLimitService({ requestsPerMinute: rpm, dailyRequestQuota: 0, dailyTokenQuota: 0 }) : null;
+  async function rateLimit(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    if (!limiter) return;
+    const hash = request.provisionAuth?.apiKeyHash ?? "anon";
+    const decision = limiter.checkAndConsume(hash);
+    if (!decision.allowed) {
+      reply.code(429).header("retry-after", "60");
+      await reply.send({ error: { type: "rate_limit_error", message: "Provision rate limit exceeded", code: "provision_rate_limit_exceeded" } });
+    }
+  }
+  // Privileged routes get both auth + the limiter (auth first so the limiter
+  // keys off the verified hash).
+  const privOpts = { preHandler: [provisionAuth, rateLimit] };
 
   function audit(action: string, request: { provisionAuth?: { apiKeyHash: string } }, targetId: string, targetType: string) {
     app.adminAuditService.record({ action, actorKeyHash: request.provisionAuth?.apiKeyHash, targetType, targetId });
@@ -73,7 +93,7 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   });
 
   // ── Plan grant (idempotent) ───────────────────────────────────────────────
-  app.post("/provision/grant", opts, async (request, reply) => {
+  app.post("/provision/grant", privOpts, async (request, reply) => {
     const p = z.object({
       keyId: z.string().min(1),
       planId: z.string().min(1),
@@ -99,17 +119,18 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   });
 
   // ── Wallet top-up ─────────────────────────────────────────────────────────
-  app.post("/provision/wallet/topup", opts, async (request, reply) => {
-    const p = z.object({ keyId: z.string().min(1), usd: z.number().positive() }).safeParse(request.body);
-    if (!p.success) { reply.code(400); return { error: { message: "invalid topup", code: "validation_error" } }; }
-    const walletUsd = app.walletService.topupUsd(p.data.keyId, p.data.usd);
+  app.post("/provision/wallet/topup", privOpts, async (request, reply) => {
+    const p = z.object({ keyId: z.string().min(1), usd: z.number().positive().optional(), amountUsd: z.number().positive().optional() }).safeParse(request.body);
+    if (!p.success || (p.data.usd === undefined && p.data.amountUsd === undefined)) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
+    const amount = (p.data.usd ?? p.data.amountUsd) as number;
+    const walletUsd = app.walletService.topupUsd(p.data.keyId, amount);
     app.apiKeyService.setWalletMicroUsd(p.data.keyId, Math.round(walletUsd * 1_000_000));
     audit("provision.wallet.topup", request, p.data.keyId, "api_key");
     return { keyId: p.data.keyId, walletUsd };
   });
 
   // ── Key creation ──────────────────────────────────────────────────────────
-  app.post("/provision/key", opts, async (request, reply) => {
+  app.post("/provision/key", privOpts, async (request, reply) => {
     const p = z.object({ label: z.string().optional(), planId: z.string().optional() }).safeParse(request.body);
     if (!p.success) { reply.code(400); return { error: { message: "invalid key request", code: "validation_error" } }; }
     if (p.data.planId && !app.planService.get(p.data.planId)) { reply.code(400); return { error: { message: `plan ${p.data.planId} not found`, code: "validation_error" } }; }
@@ -193,11 +214,13 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   });
 
   // ── Earnings mark-paid ────────────────────────────────────────────────────
-  app.post("/provision/earnings/:sellerId/mark-paid", opts, async (request, reply) => {
+  app.post("/provision/earnings/:sellerId/mark-paid", privOpts, async (request, reply) => {
     const { sellerId } = z.object({ sellerId: z.string().min(1) }).parse(request.params);
-    const p = z.object({ usd: z.number().positive(), payoutRef: z.string().optional() }).safeParse(request.body);
-    if (!p.success) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
-    const snapshot = app.sellerEarningsLedger.markPaid(sellerId, p.data.usd);
+    const p = z.object({ usd: z.number().positive().optional(), amountUsd: z.number().positive().optional(), payoutRef: z.string().optional() }).safeParse(request.body);
+    if (!p.success || (p.data.usd === undefined && p.data.amountUsd === undefined)) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
+    const amount = (p.data.usd ?? p.data.amountUsd) as number;
+    // provision-hardening (#5): persist payoutRef on the payout record (was dropped).
+    const snapshot = app.sellerEarningsLedger.markPaid(sellerId, amount, p.data.payoutRef);
     audit("provision.earnings.mark_paid", request, sellerId, "seller");
     return snapshot;
   });

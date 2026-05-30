@@ -12,6 +12,12 @@ export type AppConfig = {
    * keys. Snapshot at startup (not runtime-mutable like the admin password).
    */
   provisionApiKeys: string[];
+  /**
+   * provision-hardening (#5) — per-minute cap on privileged mutating /provision/*
+   * routes (create-key, wallet/topup, grant, mark-paid), per provision key. 0
+   * disables the limit (trusted single-tenant). Default 120 (generous).
+   */
+  provisionRateLimitPerMinute: number;
   requestBodyLimit: string;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   dataFile: string;
@@ -36,6 +42,7 @@ const envSchema = z.object({
   HOST: z.string().min(1).default("0.0.0.0"),
   ADMIN_API_KEYS: z.string().default(""),
   PROVISION_API_KEYS: z.string().default(""),
+  PROVISION_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(120),
   REQUEST_BODY_LIMIT: z.string().min(1).default("1mb"),
   DATA_FILE: z.string().min(1).default("data/gateway-state.json"),
   INTERNAL_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(0),
@@ -95,6 +102,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? adminApiKeys
         : ["admin-key-1"],
     provisionApiKeys: parseCsv(parsed.PROVISION_API_KEYS),
+    provisionRateLimitPerMinute: parsed.PROVISION_RATE_LIMIT_PER_MINUTE,
     requestBodyLimit: parsed.REQUEST_BODY_LIMIT,
     logLevel: parsed.LOG_LEVEL,
     dataFile: parsed.DATA_FILE,

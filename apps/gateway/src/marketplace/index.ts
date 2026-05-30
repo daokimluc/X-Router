@@ -214,13 +214,29 @@ export function registerMarketplace(
 
   // ── provision-webhook (#7) ────────────────────────────────────────────────
   // Restore the business webhook config (separate from the ops Discord/Slack one).
+  // provision-hardening (#5): the HMAC secret is stored ENCRYPTED at rest. On
+  // load, decrypt the persisted ciphertext into the in-memory plaintext the HMAC
+  // signer needs; a legacy plaintext secret (pre-#5) is tolerated and re-encrypted
+  // on the next persist.
   const bizCfg = deps.persistedState?.marketplace?.businessWebhook as
     | { enabled: boolean; url: string; secret: string; events: import("../services/WebhookService.js").WebhookEvent[] }
     | undefined;
-  if (bizCfg) app.webhookService.updateBusinessConfig(bizCfg);
+  if (bizCfg) {
+    let secret = bizCfg.secret ?? "";
+    if (secret && app.encryptionService.isCiphertext(secret)) {
+      try { secret = app.encryptionService.decryptString(secret); }
+      catch { secret = ""; /* unreadable (key changed) → treat as unset */ }
+    }
+    app.webhookService.updateBusinessConfig({ ...bizCfg, secret });
+  }
   app.marketplaceSeam.addPersistenceContributor({
     name: "businessWebhook",
-    toPersisted: () => app.webhookService.getBusinessConfig()
+    toPersisted: () => {
+      const cfg = app.webhookService.getBusinessConfig();
+      // Persist the secret as ciphertext, never plaintext.
+      const secret = cfg.secret ? app.encryptionService.encryptString(cfg.secret) : "";
+      return { ...cfg, secret };
+    }
   });
 
   // The /provision/* command surface (provision-key auth).

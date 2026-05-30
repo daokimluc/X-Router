@@ -169,3 +169,72 @@ function verify(rawBody, signatureHeader, secret) {
   periodic health probe.
 - Admin dashboard UIs for plans/sellers/earnings are website-driven by design;
   the `/admin/*` endpoints exist as a fallback.
+
+---
+
+## 7. Security model & trust assumptions (provision-hardening)
+
+**Read this before exposing the marketplace to anything but trusted development.**
+
+### x-router performs NO tenant isolation — the website is the trust boundary
+
+x-router does **not** know which buyer or seller a request belongs to. It trusts
+the website (the holder of the provision key) to scope **every** `keyId` and
+`sellerId` to the authenticated end-user. There is no per-tenant authorization
+inside the gateway: any `keyId` passed on a provision call is acted on. This is a
+load-bearing security requirement, not an implementation detail.
+
+The website **MUST**:
+- Authenticate its own end-users and map each to the `keyId`/`sellerId` it
+  provisioned for them. Never pass a `keyId` a user doesn't own.
+- Hold the provision key **server-side only** — never ship it to a browser, app,
+  or any client the end-user controls.
+- Verify the `X-Provision-Signature` HMAC on every inbound business webhook before
+  acting on it (the gateway signs with the shared secret; an unverified receiver
+  can be fed forged events).
+
+### The provision key is god-mode — threat model
+
+A single provision key, with no tenant scoping, can do everything below. Treat a
+leak as total compromise of the marketplace's money + data plane.
+
+| A leaked provision key can…                | Mitigation                                  |
+|--------------------------------------------|---------------------------------------------|
+| Mint unlimited wallet balance on any key   | Rotate keys; rate limit; monitor topups     |
+| Read every buyer's wallet + usage          | Server-side-only handling; rotate on suspicion |
+| Read every seller's earnings               | Same                                        |
+| Mark payouts paid / reverse them (forge)   | Audit log; admin-side reconciliation        |
+| Hijack supply / re-price / change markup   | Audit log; alerting on catalog changes      |
+| Reconfigure the outbound business webhook  | Audit log; secret is encrypted at rest      |
+
+Mitigations shipped in the gateway:
+- **Rate limiting** on the highest-privilege mutating routes (`POST /provision/key`,
+  `/provision/wallet/topup`, `/provision/grant`, `/provision/earnings/:id/mark-paid`),
+  per provision key. Configure with `PROVISION_RATE_LIMIT_PER_MINUTE` (default 120;
+  set 0 to disable for a trusted single-tenant deployment, or raise it for a bulk
+  provisioning / migration window). Reads are never throttled.
+- **Webhook secret encrypted at rest** — the business-webhook HMAC secret is stored
+  as AES-GCM ciphertext in the state file (via the same encryption path provider
+  credentials use), never plaintext. A legacy plaintext secret is migrated to
+  ciphertext on the next save. `GET` always returns it masked.
+- **Every provision + admin mutation is recorded** in the audit log with the actor
+  key hash.
+
+### Provision-key rotation (no downtime)
+
+`PROVISION_API_KEYS` is a comma-separated list — **multiple keys are valid at
+once**. To rotate without downtime:
+
+1. Add a new key alongside the old: `PROVISION_API_KEYS=oldkey,newkey` and restart.
+2. Switch the website to send `newkey`.
+3. Remove the old key: `PROVISION_API_KEYS=newkey` and restart.
+
+A compromised key is revoked the moment it leaves the list. Keep the two-key
+window short.
+
+### Field-name note (contract)
+
+`usd` is the canonical amount field on `/provision/wallet/topup` and
+`/provision/earnings/:id/mark-paid`. `amountUsd` is accepted as a deprecated alias
+for backward compatibility; prefer `usd` in new integrations. `payoutRef` on
+mark-paid is persisted on the payout record (for reconciliation).

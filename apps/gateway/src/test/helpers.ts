@@ -9,6 +9,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     internalApiKeys: ["dev-key-1", "dev-key-2"],
     adminApiKeys: ["admin-key-1"],
     provisionApiKeys: [],
+    provisionRateLimitPerMinute: 0,
     requestBodyLimit: "64b",
     dataFile: "data/test-gateway-state.json",
     internalRateLimitPerMinute: 0,

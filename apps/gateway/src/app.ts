@@ -106,6 +106,7 @@ declare module "fastify" {
     modelResolver: ModelResolver;
     providerRuntimeRegistry: ProviderRuntimeRegistry;
     secretService: SecretService;
+    encryptionService: LocalEncryptionService;
     circuitBreaker: CircuitBreaker;
     concurrencyLimiter: ConcurrencyLimiter;
     adminAuditService: AdminAuditService;
@@ -321,6 +322,7 @@ export async function buildApp(
   app.decorate("modelResolver", modelResolver);
   app.decorate("providerRuntimeRegistry", providerRuntimeRegistry);
   app.decorate("secretService", secretService);
+  app.decorate("encryptionService", encryptionService);
   app.decorate("circuitBreaker", circuitBreaker);
   app.decorate("concurrencyLimiter", concurrencyLimiter);
   app.decorate("adminAuditService", adminAuditService);
