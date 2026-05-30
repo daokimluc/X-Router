@@ -2,7 +2,7 @@
 
 - [x] 1.1 Add `provisionApiKeys: string[]` to `AppConfig` (`config.ts`), default `[]`; load from env/config like `adminApiKeys`.
 - [x] 1.2 Create `apps/gateway/src/middleware/provisionAuth.ts`: `createProvisionAuthMiddleware(config)` — `Bearer` token must be in `config.provisionApiKeys`, else 401 `invalid_provision_api_key`. Snapshot is fine (not runtime-mutable). Sets `request.provisionAuth = { apiKeyHash }`.
-- [ ] 1.3 Persist `provisionApiKeys` via the same config/`PersistenceService` path as `adminApiKeys`; add `--set-provision-key` flag to `bin/x-router.js` (writes config.json + exits).
+- [x] 1.3 Persist `provisionApiKeys` via the same config/`PersistenceService` path as `adminApiKeys`; add `--set-provision-key` flag to `bin/x-router.js` (writes config.json + exits).
 - [x] 1.4 Vitest: valid provision key passes; admin key rejected on `/provision/*`; provision key rejected on `/admin/*` and `/v1/*`; missing key → 401.
 
 ## 2. Provision route group
@@ -29,7 +29,7 @@
 
 - [x] 4.1 `usage.recorded` — in the `two-sided-settlement` settlement block, call `notifyBusiness("usage.recorded", settlementDataObject)` after a billable request settles (the data object from #6 task 5.3).
 - [ ] 4.2 `grant.exhausted` — when a plan group's month bucket reaches 0 (SpendLedger/PlanService boundary), emit once per exhaustion with `{ keyId, planId, group, monthUsd }`.
-- [ ] 4.3 `wallet.low` — when `WalletService` balance crosses the low-water threshold (global default, optional per-key override), emit `{ keyId, balanceUsd, thresholdUsd }`.
+- [x] 4.3 `wallet.low` — when `WalletService` balance crosses the low-water threshold (global default, optional per-key override), emit `{ keyId, balanceUsd, thresholdUsd }`.
 - [x] 4.4 `quota.blocked` — when `enforceKeyPolicy` rejects with no boost/overage escape (429/402), emit `{ keyId, reason, httpStatus, group? }`.
 - [ ] 4.5 `supply.unhealthy` — when `ProviderHealthMonitor` marks a seller's account unhealthy, emit `{ sellerId, providerAccountId, reason }`.
 - [x] 4.6 Vitest: settlement triggers `usage.recorded` with the settlement payload; a 429 reject triggers `quota.blocked`; emissions are best-effort (a throwing webhook does not fail the request).

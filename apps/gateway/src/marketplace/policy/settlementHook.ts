@@ -44,6 +44,8 @@ export type SettlementDeps = {
   sellerEarningsLedger: SellerEarningsLedger;
   /** provision-webhook (#7) — emit usage.recorded after settlement. Optional. */
   webhookService?: WebhookService;
+  /** provision-webhook (#7) — wallet.low threshold in USD (default 1.00). */
+  walletLowWaterUsd?: number;
 };
 
 export function createSettlementHook(deps: SettlementDeps): SettlementHook {
@@ -109,6 +111,16 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       const [walletRes, dayRes] = payg.id.split("|");
       if (walletRes) deps.walletService.settleUsd(walletRes, actualSellCost);
       if (dayRes) deps.spendLedgerService.settle(dayRes, actualSellCost);
+      // provision-webhook (#7) — wallet.low: emit if the post-settle balance is
+      // below the low-water threshold (best-effort).
+      const keyId = request.buyerKeyId;
+      if (deps.webhookService && keyId) {
+        const threshold = deps.walletLowWaterUsd ?? 1.0;
+        const balanceUsd = deps.walletService.getUsd(keyId);
+        if (deps.walletService.isProvisioned(keyId) && balanceUsd < threshold) {
+          void deps.webhookService.notifyBusiness("wallet.low", { keyId, balanceUsd, thresholdUsd: threshold });
+        }
+      }
     }
 
     const platformMargin = actualSellCost - sellerCredit;

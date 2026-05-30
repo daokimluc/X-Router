@@ -29,6 +29,8 @@ import { modelGroupOf, matchesGroups } from "../utils/modelGroup.js";
 
 declare module "fastify" {
   interface FastifyRequest {
+    /** Buyer's API key id (marketplace), stashed at enforce for settlement use. */
+    buyerKeyId?: string;
     /** Plan bucket reservation held in enforce, settled post-request. */
     planReservation?: { id: string; scope: string };
     /**
@@ -81,6 +83,7 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
     }
 
     // ── Plan-bound key ───────────────────────────────────────────────────────
+    ctx.request.buyerKeyId = keyId; // for settlement (wallet.low etc.)
     const plan = deps.planService.get(planId);
     if (!plan) return; // plan was deleted; treat as plan-less (no scope/bucket)
     if (!model) return; // no model on this route → no scope/bucket enforcement

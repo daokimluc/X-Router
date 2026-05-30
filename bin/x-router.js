@@ -31,6 +31,7 @@ let host = '0.0.0.0';
 let noMenu = false;
 let printKeysOnly = false;
 let resetAdminKey = false;
+let setProvisionKey = null;
 
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
@@ -39,6 +40,7 @@ for (let i = 0; i < args.length; i++) {
     case '--no-menu': noMenu = true; break;
     case '--print-keys': printKeysOnly = true; break;
     case '--reset-admin-key': resetAdminKey = true; break;
+    case '--set-provision-key': setProvisionKey = args[++i]; break;
     case '--help':
     case '-h':
       printHelp(); process.exit(0);
@@ -55,6 +57,7 @@ Options:
   --no-menu           Run in foreground (no menu, logs to stdout)
   --print-keys        Print saved API keys and exit
   --reset-admin-key   Reset the admin login password to "admin" and exit
+  --set-provision-key <key>  Set the marketplace provision API key and exit
   --help, -h          Show this help
 
 Configuration:
@@ -101,6 +104,19 @@ function ensureConfig() {
 
 const cfg = ensureConfig();
 const adminKeys = process.env.ADMIN_API_KEYS || cfg.adminApiKeys;
+const provisionKeys = process.env.PROVISION_API_KEYS || cfg.provisionApiKeys || '';
+
+if (setProvisionKey !== null) {
+  if (!setProvisionKey || setProvisionKey.startsWith('-')) {
+    console.error('Usage: x-router --set-provision-key <key>');
+    process.exit(1);
+  }
+  cfg.provisionApiKeys = setProvisionKey;
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  console.log('Provision API key set.');
+  console.log(`(saved to ${CONFIG_PATH}) — restart x-router for it to take effect.`);
+  process.exit(0);
+}
 
 if (resetAdminKey) {
   cfg.adminApiKeys = "admin";
@@ -123,6 +139,7 @@ if (noMenu) {
   process.env.PORT = String(portNum);
   process.env.HOST = host;
   process.env.ADMIN_API_KEYS = adminKeys;
+  if (provisionKeys) process.env.PROVISION_API_KEYS = provisionKeys;
   process.env.DATA_FILE = DATA_PATH;
   console.log(`X-Router v${VERSION} starting on ${url}`);
   await import('../dist/server.js');
@@ -140,6 +157,7 @@ if (noMenu) {
       PORT: String(portNum),
       HOST: host,
       ADMIN_API_KEYS: adminKeys,
+      ...(provisionKeys ? { PROVISION_API_KEYS: provisionKeys } : {}),
       DATA_FILE: DATA_PATH,
     },
     stdio: ['ignore', logFd, logFd],

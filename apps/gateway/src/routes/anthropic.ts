@@ -305,6 +305,10 @@ export async function registerAnthropicRoutes(
                       app.spendLedgerService.settle(id, app.modelPricingService.calculateCost(body.model, promptTokens, completionTokens, reported?.cached_tokens ?? 0).totalCost);
                     }
                   }
+                  // two-sided-settlement (#6) — marketplace settlement + seller credit.
+                  app.marketplaceSeam.runSettlement({
+                    request, outcome: "success", model: body.model, promptTokens, completionTokens, cachedTokens: reported?.cached_tokens ?? 0
+                  });
                 } catch (streamError) {
                   lease.releaseFailure(
                     streamError instanceof Error
@@ -388,6 +392,13 @@ export async function registerAnthropicRoutes(
                     app.spendLedgerService.settle(id, cost);
                   }
                 }
+                // two-sided-settlement (#6) — marketplace settlement + seller credit.
+                app.marketplaceSeam.runSettlement({
+                  request, outcome: "success", model: body.model,
+                  promptTokens: usageNormalized.prompt_tokens,
+                  completionTokens: usageNormalized.completion_tokens,
+                  cachedTokens
+                });
               }
               // Phase 32 — semantic-response-cache write (non-stream, normalized response)
               if (cacheKey && cacheMode !== "skip") {
@@ -467,6 +478,10 @@ export async function registerAnthropicRoutes(
                   }
                   request.spendReservation = undefined;
                 }
+                // two-sided-settlement (#6) — release marketplace reservations.
+                app.marketplaceSeam.runSettlement({
+                  request, outcome: "failure", model: body.model, promptTokens: 0, completionTokens: 0
+                });
                 throw error;
               }
             }
@@ -482,6 +497,10 @@ export async function registerAnthropicRoutes(
             }
             request.spendReservation = undefined;
           }
+          // two-sided-settlement (#6) — release marketplace reservations.
+          app.marketplaceSeam.runSettlement({
+            request, outcome: "failure", model: body.model, promptTokens: 0, completionTokens: 0
+          });
           throw lastError;
         }
 

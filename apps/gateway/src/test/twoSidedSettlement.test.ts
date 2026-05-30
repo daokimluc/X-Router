@@ -141,4 +141,29 @@ describe("settlement hook (two-sided)", () => {
     expect(ledger.peek("key:k1:grp:codex")?.month ?? 0).toBe(0); // released
     expect(earnings.snapshot(hoang.id).lifetime).toBe(0);
   });
+
+  it("emits wallet.low after a payg settle when balance drops below threshold", () => {
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    const fakeWebhook = { notifyBusiness: async (event: string, data: Record<string, unknown>) => { events.push({ event, data }); } };
+    const hook2 = createSettlementHook({
+      spendLedgerService: ledger, walletService: wallet, sellerService: sellers,
+      marketPricingService: pricing, sellerEarningsLedger: earnings,
+      webhookService: fakeWebhook as never, walletLowWaterUsd: 1.0
+    });
+    const hoang = sellers.register({ displayName: "hoang", commissionPct: 0 });
+    sellers.approve(hoang.id);
+    wallet.topupUsd("k1", 0.5); // already below the $1 threshold
+    const walletRes = wallet.reserveUsd({ keyId: "k1", estimateUsd: 0.1 });
+    const dayRes = ledger.reserve({ scope: "wallet:k1:payg", estimateUsd: 0.1, dayCap: 10 });
+    const routed = { baseModel: "gpt-5.5", sellerId: hoang.id, accountId: "a1", costPrice: { inputPerM: 2.1, outputPerM: 6.3 }, sellRates: pricing.sellPriceFor("gpt-5.5", { inputPerM: 2.1, outputPerM: 6.3 }) };
+    const req = { routed, payg: { id: `${walletRes.ok ? walletRes.reservationId : ""}|${dayRes.ok ? dayRes.reservationId : ""}`, reason: "month_overage" }, buyerKeyId: "k1", auth: { apiKeyHash: "h1" }, headers: {} } as unknown as FastifyRequest;
+
+    hook2({ request: req, outcome: "success", model: "gpt-5.5", promptTokens: 1000, completionTokens: 500 });
+    const low = events.find((e) => e.event === "wallet.low");
+    expect(low).toBeDefined();
+    expect(low!.data.keyId).toBe("k1");
+    expect(low!.data.thresholdUsd).toBe(1.0);
+    // usage.recorded also emitted
+    expect(events.some((e) => e.event === "usage.recorded")).toBe(true);
+  });
 });
