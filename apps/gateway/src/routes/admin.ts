@@ -1804,8 +1804,20 @@ export async function registerAdminRoutes(
       preHandler: adminAuth
     },
     async () => {
+      // Order accounts by `priority` for display (lower = earlier), so the
+      // reorder up/down endpoint is reflected here. Accounts without a priority
+      // keep insertion order, after prioritized ones. Stable per provider since
+      // the dashboard filters this list by provider instance.
+      const ordered = app.providerRuntimeRegistry.listAccounts()
+        .map((account, index) => ({ account, index }))
+        .sort((a, b) => {
+          const pa = a.account.priority ?? Number.MAX_SAFE_INTEGER;
+          const pb = b.account.priority ?? Number.MAX_SAFE_INTEGER;
+          return pa - pb || a.index - b.index;
+        })
+        .map((x) => x.account);
       return {
-        data: app.providerRuntimeRegistry.listAccounts().map((account) => {
+        data: ordered.map((account) => {
           const secret = app.secretService.getSecretForAccount(account.id);
           const payload = secret ? app.secretService.decryptSecretPayload(secret) : null;
           const p = payload as Record<string, unknown> | null;

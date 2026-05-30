@@ -748,7 +748,17 @@ export async function registerProviderAccountManagementRoutes(
         }
 
         const { pool } = found;
-        const accounts = pool.listAccounts();
+        // Use the SAME order the dashboard shows (priority asc, undefined last,
+        // then stable insertion order) so up/down is consistent across repeated
+        // moves — not the raw insertion order from listAccounts().
+        const accounts = pool.listAccounts()
+          .map((a, i) => ({ a, i }))
+          .sort((x, y) => {
+            const px = x.a.priority ?? Number.MAX_SAFE_INTEGER;
+            const py = y.a.priority ?? Number.MAX_SAFE_INTEGER;
+            return px - py || x.i - y.i;
+          })
+          .map((x) => x.a);
         const currentIndex = accounts.findIndex((a) => a.id === accountId);
 
         if (currentIndex < 0) {
@@ -761,14 +771,16 @@ export async function registerProviderAccountManagementRoutes(
           return { data: { moved: false, message: "Already at boundary" } };
         }
 
-        // Swap priorities by swapping weights
-        const currentAccount = accounts[currentIndex];
-        const targetAccount = accounts[targetIndex];
-        const currentWeight = currentAccount.weight;
-        const targetWeight = targetAccount.weight;
-
-        pool.updateAccount(currentAccount.id, { weight: targetWeight });
-        pool.updateAccount(targetAccount.id, { weight: currentWeight });
+        // Reorder by `priority` (display/selection order), NOT `weight` (which is
+        // load-balancing for weighted-round-robin). Normalize priorities from the
+        // current order first so accounts created without an explicit priority get
+        // a stable sequence, then swap the two neighbours. Lower priority value =
+        // earlier (matches PriorityStrategy and the GET /accounts display sort).
+        accounts.forEach((a, i) => {
+          if (a.priority !== i) pool.updateAccount(a.id, { priority: i });
+        });
+        pool.updateAccount(accounts[currentIndex].id, { priority: targetIndex });
+        pool.updateAccount(accounts[targetIndex].id, { priority: currentIndex });
 
         await app.persistenceService.save(createPersistedState(app));
 

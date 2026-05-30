@@ -367,4 +367,90 @@ describe("Provider Account Management API (/admin/provider-accounts)", () => {
       expect(response.statusCode).toBe(401);
     });
   });
+
+  describe("POST /admin/v1/accounts/:id/priority (reorder)", () => {
+    async function createMock(displayName: string): Promise<string> {
+      const res = await app.inject({
+        method: "POST",
+        url: "/admin/provider-accounts",
+        headers: AUTH_HEADER,
+        payload: { providerType: "mock", displayName, credentials: { mockToken: "t" } },
+      });
+      expect(res.statusCode).toBe(201);
+      return res.json().data.accountId;
+    }
+
+    async function listOrder(providerInstanceId: string): Promise<string[]> {
+      const res = await app.inject({ method: "GET", url: "/admin/v1/accounts", headers: AUTH_HEADER });
+      return res
+        .json()
+        .data.filter((a: { providerInstanceId: string }) => a.providerInstanceId === providerInstanceId)
+        .map((a: { id: string }) => a.id);
+    }
+
+    it("moving an account down reorders the displayed account list", async () => {
+      const defs = app.providerRegistry.listProviderTypes();
+      if (!defs.find((d) => d.type === "mock")) return;
+
+      const a = await createMock("acct-A");
+      const b = await createMock("acct-B");
+      const c = await createMock("acct-C");
+
+      // all three land under the same mock provider instance
+      const all = (await app.inject({ method: "GET", url: "/admin/v1/accounts", headers: AUTH_HEADER })).json().data;
+      const inst = all.find((x: { id: string }) => x.id === a).providerInstanceId;
+
+      const before = await listOrder(inst);
+      expect(before).toEqual([a, b, c]);
+
+      // move A down → expect [B, A, C]
+      const move = await app.inject({
+        method: "POST",
+        url: `/admin/v1/accounts/${a}/priority`,
+        headers: AUTH_HEADER,
+        payload: { direction: "down" },
+      });
+      expect(move.statusCode).toBe(200);
+      expect(move.json().data.moved).toBe(true);
+
+      const after = await listOrder(inst);
+      expect(after).toEqual([b, a, c]);
+    });
+
+    it("moving up at the top boundary is a no-op", async () => {
+      const defs = app.providerRegistry.listProviderTypes();
+      if (!defs.find((d) => d.type === "mock")) return;
+
+      const a = await createMock("top-A");
+      await createMock("top-B");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/admin/v1/accounts/${a}/priority`,
+        headers: AUTH_HEADER,
+        payload: { direction: "up" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.moved).toBe(false);
+    });
+
+    it("does NOT change account weight (weight is load-balancing, not order)", async () => {
+      const defs = app.providerRegistry.listProviderTypes();
+      if (!defs.find((d) => d.type === "mock")) return;
+
+      const a = await createMock("w-A");
+      const b = await createMock("w-B");
+      const weightOf = async (id: string) =>
+        (await app.inject({ method: "GET", url: "/admin/v1/accounts", headers: AUTH_HEADER }))
+          .json()
+          .data.find((x: { id: string }) => x.id === id).weight;
+      const waBefore = await weightOf(a);
+      const wbBefore = await weightOf(b);
+
+      await app.inject({ method: "POST", url: `/admin/v1/accounts/${a}/priority`, headers: AUTH_HEADER, payload: { direction: "down" } });
+
+      expect(await weightOf(a)).toBe(waBefore);
+      expect(await weightOf(b)).toBe(wbBefore);
+    });
+  });
 });
