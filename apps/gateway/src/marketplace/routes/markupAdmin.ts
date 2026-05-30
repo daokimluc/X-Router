@@ -25,7 +25,8 @@ export function registerMarkupAdminRoutes(
     const parsed = z
       .object({
         defaultMarkup: z.number().min(0).optional(),
-        perModel: z.record(z.number().min(0)).optional()
+        // null per-model value REMOVES the override (marketplace-lifecycle #3).
+        perModel: z.record(z.number().min(0).nullable()).optional()
       })
       .safeParse(request.body);
     if (!parsed.success) {
@@ -37,7 +38,7 @@ export function registerMarkupAdminRoutes(
     }
     if (parsed.data.perModel) {
       for (const [model, markup] of Object.entries(parsed.data.perModel)) {
-        pricing.setModelMarkup(model, markup);
+        pricing.setModelMarkup(model, markup); // markup=null deletes the override
       }
     }
     app.adminAuditService.record({

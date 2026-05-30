@@ -177,6 +177,35 @@ export class SellerEarningsLedger {
     return this.snapshot(sellerId);
   }
 
+  /**
+   * Adjust accrued seller credit by a signed delta (correction). Positive adds
+   * (like a credit), negative claws back (like a reverse). Logged in
+   * earnings_reversals (kind=adjust). House guarded. Floors at 0.
+   */
+  adjust(sellerId: string, deltaUsd: number, reason?: string): SellerEarningsSnapshot {
+    if (sellerId === HOUSE_SELLER_ID || deltaUsd === 0) return this.snapshot(sellerId);
+    const delta = usdToMicro(deltaUsd);
+    this.tx(() => {
+      const r = this.rolled(sellerId);
+      this.db.prepare(
+        "INSERT INTO earnings_reversals (id, seller_id, usd_micro, kind, reason, settlement_id, ts) VALUES (?, ?, ?, 'adjust', ?, NULL, ?)"
+      ).run(`er_${randomUUID()}`, sellerId, delta, reason ?? null, Date.now());
+      if (!r) {
+        const seed = Math.max(0, delta);
+        this.db.prepare(
+          "INSERT INTO seller_earnings (seller_id, day_key, month_key, day_micro, month_micro, lifetime_micro, unpaid_micro) VALUES (?, ?, ?, 0, 0, ?, ?)"
+        ).run(sellerId, dayKeyNow(), monthKeyNow(), seed, seed);
+      } else {
+        const nextLifetime = Math.max(0, r.lifetime_micro + delta);
+        const nextUnpaid = Math.max(0, r.unpaid_micro + delta);
+        this.db.prepare(
+          "UPDATE seller_earnings SET lifetime_micro = ?, unpaid_micro = ? WHERE seller_id = ?"
+        ).run(nextLifetime, nextUnpaid, sellerId);
+      }
+    });
+    return this.snapshot(sellerId);
+  }
+
   snapshot(sellerId: string): SellerEarningsSnapshot {
     const r = this.rolled(sellerId);
     if (!r) return { sellerId, day: 0, month: 0, lifetime: 0, unpaid: 0 };

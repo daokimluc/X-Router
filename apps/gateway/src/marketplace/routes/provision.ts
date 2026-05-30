@@ -119,6 +119,69 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     return { id: created.id, key: created.key, planId: created.planId ?? null };
   });
 
+  // ── Key lifecycle (marketplace-lifecycle #3) ──────────────────────────────
+  // Buyer-self-service wind-down: the website automates these per buyer action.
+  for (const action of ["disable", "enable"] as const) {
+    app.post(`/provision/key/:id/${action}`, opts, async (request, reply) => {
+      const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+      try {
+        const record = app.apiKeyService.setEnabled(id, action === "enable");
+        audit(`provision.key.${action}`, request, id, "api_key");
+        return { id, enabled: record.enabled };
+      } catch {
+        reply.code(404);
+        return { error: { message: `key ${id} not found`, code: "not_found" } };
+      }
+    });
+  }
+
+  app.patch("/provision/key/:id", opts, async (request, reply) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+    const p = z.object({
+      enabled: z.boolean().optional(),
+      // ISO timestamp; null clears the expiry.
+      expiresAt: z.string().datetime().nullable().optional()
+    }).safeParse(request.body);
+    if (!p.success || (p.data.enabled === undefined && p.data.expiresAt === undefined)) {
+      reply.code(400); return { error: { message: "provide enabled and/or expiresAt", code: "validation_error" } };
+    }
+    const updated = app.apiKeyService.update(id, {
+      enabled: p.data.enabled,
+      expiresAt: p.data.expiresAt === undefined ? undefined : (p.data.expiresAt === null ? null : new Date(p.data.expiresAt))
+    });
+    if (!updated) { reply.code(404); return { error: { message: `key ${id} not found`, code: "not_found" } }; }
+    audit("provision.key.update", request, id, "api_key");
+    return { id, enabled: updated.enabled, expiresAt: updated.expiresAt ?? null };
+  });
+
+  app.delete("/provision/key/:id", opts, async (request, reply) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+    // Revoke = soft (disable), retaining the key for settlement-log reference.
+    try {
+      app.apiKeyService.setEnabled(id, false);
+      audit("provision.key.revoke", request, id, "api_key");
+      return { id, revoked: true };
+    } catch {
+      reply.code(404);
+      return { error: { message: `key ${id} not found`, code: "not_found" } };
+    }
+  });
+
+  app.get("/provision/keys", opts, async (request) => {
+    const q = z.object({ owner: z.string().optional() }).parse(request.query);
+    const keys = app.apiKeyService
+      .list()
+      .filter((k) => !q.owner || k.owner === q.owner)
+      .map((k) => ({
+        id: k.id,
+        owner: k.owner ?? null,
+        enabled: k.enabled,
+        expiresAt: k.expiresAt ?? null,
+        planId: k.planId ?? null
+      }));
+    return { keys };
+  });
+
   // ── Markup ────────────────────────────────────────────────────────────────
   app.put("/provision/markup", opts, async (request, reply) => {
     const p = z.object({ defaultMarkup: z.number().min(0).optional(), perModel: z.record(z.number().min(0)).optional() }).safeParse(request.body);

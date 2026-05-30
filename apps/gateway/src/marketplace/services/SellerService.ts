@@ -120,6 +120,25 @@ export class SellerService {
     return structuredClone(s);
   }
 
+  /**
+   * Edit a seller's terms after registration (marketplace-lifecycle #3). A
+   * commission change applies to FUTURE settlements only — past recorded credits
+   * are immutable (in the settlement log). The reserved `house` seller is not
+   * editable. Returns null if the seller is unknown or is house.
+   */
+  updateSeller(id: string, patch: { commissionPct?: number; payoutRef?: string }): Seller | null {
+    if (id === HOUSE_SELLER_ID) return null;
+    const s = this.sellers.get(id);
+    if (!s) return null;
+    if (patch.commissionPct !== undefined) {
+      if (patch.commissionPct < 0 || patch.commissionPct > 1) throw new Error("commissionPct must be between 0 and 1");
+      s.commissionPct = patch.commissionPct;
+    }
+    if (patch.payoutRef !== undefined) s.payoutRef = patch.payoutRef;
+    this.persist();
+    return structuredClone(s);
+  }
+
   getSeller(id: string): Seller | undefined {
     const s = this.sellers.get(id);
     return s ? structuredClone(s) : undefined;
@@ -140,6 +159,20 @@ export class SellerService {
   addCanonicalBaseModel(model: string): void {
     this.canonicalBaseModels.add(model);
     this.persist();
+  }
+
+  /**
+   * Remove a base model from the canonical list (marketplace-lifecycle #3).
+   * Rejected while an ENABLED listing still uses it (never silently orphan
+   * routing). Returns false if blocked or absent.
+   */
+  removeCanonicalBaseModel(model: string): { ok: boolean; reason?: "in_use" | "not_found" } {
+    if (!this.canonicalBaseModels.has(model)) return { ok: false, reason: "not_found" };
+    const inUse = Array.from(this.listings.values()).some((l) => l.enabled && l.baseModel === model);
+    if (inUse) return { ok: false, reason: "in_use" };
+    this.canonicalBaseModels.delete(model);
+    this.persist();
+    return { ok: true };
   }
 
   // ── Listings ──────────────────────────────────────────────────────────────
@@ -184,6 +217,21 @@ export class SellerService {
     const l = this.listings.get(id);
     if (!l) return null;
     l.enabled = enabled;
+    this.persist();
+    return structuredClone(l);
+  }
+
+  /**
+   * Re-price a listing in place (marketplace-lifecycle #3) — keeps the id (and so
+   * the model-registry mapping, which is cost-independent). The new cost applies
+   * to subsequent routing/settlement; an in-flight request settles at the cost
+   * captured when it was routed (request.routed), so it is unaffected.
+   */
+  updateListingCost(id: string, costPrice: ListingCost): SellerListing | null {
+    const l = this.listings.get(id);
+    if (!l) return null;
+    l.costPrice = { inputPerM: costPrice.inputPerM, outputPerM: costPrice.outputPerM };
+    if (costPrice.cachedInputPerM !== undefined) l.costPrice.cachedInputPerM = costPrice.cachedInputPerM;
     this.persist();
     return structuredClone(l);
   }

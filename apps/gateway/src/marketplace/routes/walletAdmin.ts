@@ -4,8 +4,10 @@
  * Replaces the engine's old token-based balance/top-up endpoints with USD
  * versions. Registered only when the marketplace is enabled.
  *
- *   GET  /admin/v1/api-keys/:id/wallet   → { id, walletUsd, provisioned }
- *   POST /admin/v1/api-keys/:id/topup    → { id, walletUsd, addedUsd }   (body: { amountUsd })
+ *   GET  /admin/v1/api-keys/:id/wallet         → { id, walletUsd, provisioned }
+ *   POST /admin/v1/api-keys/:id/topup          → { id, walletUsd, addedUsd }   (body: { amountUsd })
+ *   POST /admin/v1/api-keys/:id/wallet/refund  → { id, walletUsd, refundedUsd } (body: { usd, reason })
+ *   POST /admin/v1/api-keys/:id/wallet/debit   → { id, walletUsd, debitedUsd, ok } (body: { usd, reason })
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -67,6 +69,41 @@ export function registerWalletAdminRoutes(
       });
 
       return { id: params.id, walletUsd, addedUsd: body.amountUsd };
+    }
+  );
+
+  // Refund / credit-back (marketplace-lifecycle #3) — invokes the audited
+  // money-correctness primitive. Distinct from topup (buyer paying in).
+  app.post(
+    "/admin/v1/api-keys/:id/wallet/refund",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const body = z.object({ usd: z.number().positive(), reason: z.string().optional() }).safeParse(request.body);
+      if (!body.success) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
+      const record = app.apiKeyService.findById(params.id);
+      if (!record) { reply.code(404); return { error: { message: `API key "${params.id}" not found`, code: "not_found" } }; }
+      const walletUsd = walletService.refundUsd(params.id, body.data.usd, body.data.reason);
+      app.apiKeyService.setWalletMicroUsd(params.id, Math.round(walletUsd * 1_000_000));
+      app.adminAuditService.record({ action: "api_key.wallet.refund", actorKeyHash: request.adminAuth?.apiKeyHash, targetType: "api_key", targetId: params.id });
+      return { id: params.id, walletUsd, refundedUsd: body.data.usd };
+    }
+  );
+
+  // Debit / correction (marketplace-lifecycle #3) — remove funds (floored at 0).
+  app.post(
+    "/admin/v1/api-keys/:id/wallet/debit",
+    { preHandler: adminAuth },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().min(1) }).parse(request.params);
+      const body = z.object({ usd: z.number().positive(), reason: z.string().optional() }).safeParse(request.body);
+      if (!body.success) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
+      const record = app.apiKeyService.findById(params.id);
+      if (!record) { reply.code(404); return { error: { message: `API key "${params.id}" not found`, code: "not_found" } }; }
+      const result = walletService.debitUsd(params.id, body.data.usd);
+      app.apiKeyService.setWalletMicroUsd(params.id, Math.round(result.newBalanceUsd * 1_000_000));
+      app.adminAuditService.record({ action: "api_key.wallet.debit", actorKeyHash: request.adminAuth?.apiKeyHash, targetType: "api_key", targetId: params.id });
+      return { id: params.id, walletUsd: result.newBalanceUsd, debitedUsd: result.ok ? body.data.usd : 0, ok: result.ok };
     }
   );
 }

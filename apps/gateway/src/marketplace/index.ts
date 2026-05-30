@@ -183,10 +183,10 @@ export function registerMarketplace(
     deps.persistedState?.marketplace?.sellerEarnings as PersistedSellerEarnings | undefined
   );
   app.decorate("sellerEarningsLedger", sellerEarningsLedger);
-  registerEarningsAdminRoutes(app, deps.config, sellerEarningsLedger);
 
   // money-correctness (#2): durable settlement log + conservation invariant +
-  // full settlement reversal. SQLite-backed.
+  // full settlement reversal. SQLite-backed. Built before the earnings routes so
+  // the settlement-reverse endpoint can use it.
   const settlementLedger = new SettlementLedger(
     deps.database,
     walletService,
@@ -194,6 +194,8 @@ export function registerMarketplace(
     app.spendLedgerService
   );
   app.decorate("settlementLedger", settlementLedger);
+
+  registerEarningsAdminRoutes(app, deps.config, sellerEarningsLedger, settlementLedger);
 
   // Settlement hook: charges the buyer (plan bucket or wallet) + credits the
   // seller after each billable request. Runs on the engine's settlement seam.
