@@ -1,6 +1,4 @@
 # Session Notes — 2026-05-28 (Phase 32: audit fixes + 4 OpenSpec proposals)
-
-## Latest commits
 - `405d3ee` chore: add OpenSpec slash commands + skills (`.claude/commands/opsx/*`, `.claude/skills/openspec-*`)
 - `10fb0a9` feat(phase31): multi-channel routing + model variants + post-audit fixes
 - `81e41c0` fix: fixed_model routes bypass group filter (Phase 31 regression)
@@ -234,3 +232,31 @@ Both pushed to origin/main and published. Global install updated to 0.3.1.
 **Security TODO for user (tokens pasted in chat this session):** revoke publish token `ghp_9PgL...` and the fine-grained `github_pat_11AF...`, regenerate, then `npm config set //npm.pkg.github.com/:_authToken=<new>`.
 
 
+## Phase 34 — Open-core split + P2P marketplace (in progress 2026-05-30)
+
+See memory `project_open_core_architecture.md` + `project_p2p_marketplace_design.md` for full detail.
+
+**OpenSpec:** all 7 marketplace changes written + `validate --strict` clean: usd-wallet, hourly-spend-buckets, marketplace-plans, seller-supply, lowest-cost-routing, two-sided-settlement, provision-webhook. Explore-only until now.
+
+**Open-core scaffolding DONE (uncommitted):** `config.marketplaceEnabled` + `MARKETPLACE_ENABLED` env (default false); `marketplace/index.ts` `registerMarketplace(app,{config,persistedState})` empty seam; `marketplace/README.md`; single dynamic-import call site in app.ts (after web routes, before dashboard plugin); `test/helpers.ts` +marketplaceEnabled:false; `test/marketplaceBoundary.test.ts` guards "engine never imports marketplace/". Verify: tsc clean, **471 pass + 7 skip**, boots flag on+off.
+
+**INVARIANT:** engine (apps/gateway/src/ outside marketplace/) MUST NOT import marketplace/. One-way dep marketplace→engine. All 7 changes' code → `apps/gateway/src/marketplace/`.
+
+**Active /goal:** implement 7 changes in dep order, no asking, start→finish. Stop hook armed. TaskList #1-#7 created with blockedBy chain (1→{2,3}→4→5→6→7).
+
+**Currently on #1 usd-wallet (BREAKING, not yet coded).** Full touch-point map + seam architecture (3 engine seams: policy-hook array, persistence contributor slice, app.persistState() helper) in memory file. Next concrete step: write `marketplace/utils/money.ts` + `marketplace/services/WalletService.ts`, then repoint ApiKeyService token methods → wallet, gate enforceKeyPolicy step-5 behind wallet via the policy-hook seam (NOT a direct app decoration — that'd violate the boundary since app.ts is engine).
+
+## Phase 34 — ALL 7 CHANGES IMPLEMENTED (2026-05-30, uncommitted)
+
+Full detail in memory `project_open_core_architecture.md`. Summary:
+
+**All 7 marketplace changes implemented into `apps/gateway/src/marketplace/` behind MARKETPLACE_ENABLED flag, one-way engine→marketplace boundary held (boundary test green):**
+- #1 usd-wallet · #2 hourly-spend-buckets · #3 marketplace-plans · #4 seller-supply · #5 lowest-cost-routing · #6 two-sided-settlement · #7 provision-webhook
+
+**Verify:** gateway **569 pass + 7 skip** (was 469 at session start), gateway+dashboard tsc clean, dashboard build clean, all 7 `openspec validate --strict` pass.
+
+**4 engine seams added** (engine never imports marketplace): MarketplaceSeam (keyPolicyChecks[] + persistenceContributors[] + settlementHooks[]), app.persistState(), PersistedGatewayState.marketplace opaque slice, config flags (marketplaceEnabled, provisionApiKeys).
+
+**Deferred (tracked):** dashboard UIs for #4/#5/#6 (specs say website-driven/fallback); anthropic.ts settlement parity; #7 edge emits (grant.exhausted/wallet.low/supply.unhealthy) + bin --set-provision-key flag; request.routed cheapest-approximation.
+
+**NOT committed.** On branch main — branch off before committing (ask user re: commit strategy: per-change vs one Phase-34 commit). Then `openspec archive` per change when accepted.
