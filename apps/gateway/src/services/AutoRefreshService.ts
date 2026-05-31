@@ -2,6 +2,9 @@
  * AutoRefreshService — Background job that proactively refreshes
  * Kiro/OAuth tokens before they expire (5 minutes before expiry).
  * Runs every 60 seconds, checks all accounts with expiresAt.
+ *
+ * Every refresh is funneled through RefreshLockService.refreshIfNeeded so it is
+ * serialized per account and de-duplicated against the on-401 refresh path.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -55,21 +58,23 @@ export class AutoRefreshService {
       const refreshToken = payload.refreshToken as string | undefined;
       if (!refreshToken) continue;
 
+      const providerInstance = app.providerRuntimeRegistry.getProviderInstance(account.providerInstanceId);
+      if (!providerInstance) continue;
+
+      const adapter = app.providerRegistry.getAdapter(providerInstance.type);
+      if (!adapter.refreshSession) continue;
+
       try {
-        const providerInstance = app.providerRuntimeRegistry.getProviderInstance(account.providerInstanceId);
-        if (!providerInstance) continue;
-
-        const adapter = app.providerRegistry.getAdapter(providerInstance.type);
-        if (!adapter.refreshSession) continue;
-
-        const result = await adapter.refreshSession(account, {
+        // Funnel through the per-account lock; refreshIfNeeded re-checks expiry
+        // INSIDE the lock and skips if the on-401 path already refreshed.
+        await app.refreshLockService.refreshIfNeeded({
+          account,
+          adapter,
           providerInstance,
-          credentialPayload: payload
+          secretService: app.secretService,
+          trigger: "background",
+          refreshBeforeMs: REFRESH_BEFORE_MS
         });
-
-        if (result.refreshed && result.credentialPayload) {
-          app.secretService.updateSecretPayload(secret.id, result.credentialPayload);
-        }
       } catch {
         // Silently skip — will retry next tick
       }
