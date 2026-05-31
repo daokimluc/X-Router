@@ -40,7 +40,8 @@
 | PUT | `/provision/markup` | | Đặt markup |
 | GET | `/provision/markup` | | Đọc markup |
 | GET | `/provision/plans` | | Liệt kê gói (cho UI) |
-| GET | `/provision/usage` | | Đối soát usage |
+| GET | `/provision/usage` | | Đối soát usage (token/cost) |
+| GET | `/provision/settlements` | | Đối soát settlement per-record (tiền chính xác) |
 | GET | `/provision/webhook` | | Đọc cấu hình webhook |
 | PUT | `/provision/webhook` | | Đặt cấu hình webhook |
 
@@ -91,8 +92,12 @@ Body: rỗng. Thu hồi = disable (giữ lại để đối soát settlement-log
 `owner` optional (lọc theo label đã đặt lúc tạo). 200:
 ```json
 { "keys": [ { "id": "internal_key_3", "owner": "user_42",
-              "enabled": true, "expiresAt": null, "planId": "plan_claude" } ] }
+              "enabled": true, "expiresAt": null, "planId": "plan_claude",
+              "walletUsd": 12.5, "provisioned": true } ] }
 ```
+> `walletUsd` + `provisioned` trả kèm (không cần N+1 `GET /provision/wallet/:id`).
+> `provisioned:false` → key chưa từng mở ví (`walletUsd:0`). Key đã revoke vẫn xuất
+> hiện ở đây với `enabled:false` — website tự lọc nếu muốn ẩn.
 
 ### POST /provision/key/:id/rotate  — đổi secret tại chỗ
 Body: rỗng. Cấp secret mới, **giữ nguyên** id / gói / ví / mọi cấu hình; secret cũ
@@ -147,14 +152,19 @@ Body:
 ### POST /provision/seller  — đăng ký seller (→ pending)
 Body:
 ```json
-{ "displayName": "hoang", "payoutRef": "bank_acc_xyz", "commissionPct": 0.08 }
+{ "displayName": "hoang", "payoutRef": "bank_acc_xyz", "commissionPct": 0.08,
+  "externalRef": "user_42" }
 ```
-- `payoutRef`, `commissionPct` (0..1) optional.
+- `payoutRef`, `commissionPct` (0..1), `externalRef` optional.
+- `externalRef`: định danh tự do website sở hữu (vd userId). CHỈ là tiện ích
+  lọc/đối soát — KHÔNG phân quyền (website vẫn tự scope sellerId). Đừng nhét userId
+  vào `payoutRef`; dùng `externalRef`.
 
 200:
 ```json
 { "seller": { "id": "seller_hoang_xxx", "displayName": "hoang",
               "status": "pending", "payoutRef": "bank_acc_xyz",
+              "externalRef": "user_42",
               "commissionPct": 0.08, "createdAt": "2026-05-30T..." } }
 ```
 
@@ -162,9 +172,9 @@ Body:
 Body: rỗng. 200: `{ "seller": { ...status: "approved" | "suspended" } }`.
 Không tồn tại → `404`. (Seller phải `approved` thì listing mới định tuyến được.)
 
-### GET /provision/sellers?status=pending  — liệt kê
-`status` optional (`pending`|`approved`|`suspended`).
-200: `{ "sellers": [ { id, displayName, status, payoutRef?, commissionPct?, createdAt } ] }`
+### GET /provision/sellers?status=pending&externalRef=user_42  — liệt kê
+`status` (`pending`|`approved`|`suspended`) + `externalRef` đều optional (lọc).
+200: `{ "sellers": [ { id, displayName, status, payoutRef?, externalRef?, commissionPct?, createdAt } ] }`
 
 ### POST /provision/listing  — tạo listing (seller bán model ở giá vốn)
 Body:
@@ -253,15 +263,32 @@ Query (tất cả optional): `since` (ISO-8601), `keyId`, `limit` (1..1000, mặ
 200:
 ```json
 { "total": 1240,
-  "data": [ { "id", "requestId", "protocol": "openai|anthropic", "model",
-    "providerType", "providerInstanceId", "accountId?", "apiKeyHash?",
-    "promptTokens", "completionTokens", "totalTokens", "cachedTokens?",
-    "estimatedCost?", "isStream?", "clientIp?", "logType?", "cacheHit?",
-    "createdAt" } ] }
+  "data": [ { "id", "ts": 1730000000000, "apiKeyHash", "model",
+    "providerType", "protocol", "promptTokens", "completionTokens",
+    "totalTokens", "cachedTokens", "estimatedCost" } ] }
 ```
-> Đây là reconciliation-grade (token/model/cost/thời gian), KHÔNG có
-> sellerCredit/platformMargin per-record — số liệu chia tiền lấy từ webhook
-> `usage.recorded`.
+> Đây là reconciliation-grade (token/model/cost/thời gian) đọc từ **usage log bền
+> vững (SQLite)** — sống sót qua cap ring-buffer + restart. KHÔNG có
+> sellerCredit/platformMargin per-record → dùng `/provision/settlements` (dưới) cho
+> tiền chính xác.
+
+### GET /provision/settlements  — đối soát settlement per-record (TIỀN CHÍNH XÁC)
+Query (optional): `keyId` (lọc theo buyer key), `sellerId`, `since` (ISO-8601),
+`limit` (1..1000, mặc định 100). `keyId` không tồn tại → `{data:[],total:0}`.
+200:
+```json
+{ "total": 320,
+  "data": [ { "id": "stl_...", "ts": 1730000000000,
+    "buyerKeyId": "internal_key_3", "baseModel": "gpt-5.5", "sellerId": "hoang",
+    "promptTokens": 1000, "completionTokens": 500,
+    "collected": 0.006, "sellerCredit": 0.0048, "platformMargin": 0.0012,
+    "billTrack": "payg", "reversed": false } ] }
+```
+> Mỗi dòng mang **số tiền ĐÃ GHI NHẬN** (không phải ước tính): `collected` =
+> `sellerCredit + platformMargin`. Dùng để replay CHÍNH XÁC bill buyer + tích payout
+> seller cho khoảng bị miss webhook. `reversed:true` = settlement đã bị đảo (đừng
+> tính). `sellerId="house"` → không tích payout. Đây là nguồn thay thế đầy đủ cho
+> `usage.recorded` bị lỡ.
 
 <!-- SEC_WEBHOOK -->
 

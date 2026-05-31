@@ -25,15 +25,16 @@ export function registerSellerAdminRoutes(
   const adminAuth = createAdminAuthMiddleware(config);
 
   app.get("/admin/v1/sellers", { preHandler: adminAuth }, async (request) => {
-    const q = z.object({ status: z.enum(["pending", "approved", "suspended"]).optional() }).parse(request.query);
-    return { sellers: sellerService.listSellers(q.status) };
+    const q = z.object({ status: z.enum(["pending", "approved", "suspended"]).optional(), externalRef: z.string().optional() }).parse(request.query);
+    return { sellers: sellerService.listSellers(q) };
   });
 
   app.post("/admin/v1/sellers", { preHandler: adminAuth }, async (request, reply) => {
     const parsed = z.object({
       displayName: z.string().min(1),
       payoutRef: z.string().optional(),
-      commissionPct: z.number().min(0).max(1).optional()
+      commissionPct: z.number().min(0).max(1).optional(),
+      externalRef: z.string().optional()
     }).safeParse(request.body);
     if (!parsed.success) {
       reply.code(400);

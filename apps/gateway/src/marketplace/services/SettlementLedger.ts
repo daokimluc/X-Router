@@ -201,4 +201,66 @@ export class SettlementLedger {
       ok: solvent && marginMatches
     };
   }
+
+  /**
+   * Per-record settlement query for reconciliation replay (provision-read). Lets
+   * the website rebuild exact buyer bills + seller credit for a window it missed
+   * via webhook — every figure (collected, sellerCredit, platformMargin) is the
+   * actually-recorded value, not an estimate. Newest-first, bounded.
+   */
+  query(q: { sellerId?: string; buyerKeyId?: string; since?: Date; limit?: number } = {}): {
+    total: number;
+    data: Array<{
+      id: string;
+      ts: number;
+      buyerKeyId: string | null;
+      baseModel: string | null;
+      sellerId: string | null;
+      promptTokens: number;
+      completionTokens: number;
+      collected: number;
+      sellerCredit: number;
+      platformMargin: number;
+      billTrack: string | null;
+      reversed: boolean;
+    }>;
+  } {
+    const limit = Math.max(1, Math.min(q.limit ?? 100, 1000));
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (q.sellerId) { where.push("seller_id = ?"); params.push(q.sellerId); }
+    if (q.buyerKeyId) { where.push("buyer_key_id = ?"); params.push(q.buyerKeyId); }
+    if (q.since) { where.push("ts >= ?"); params.push(q.since.getTime()); }
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const total = (this.db.prepare(`SELECT COUNT(*) AS c FROM settlement_log ${clause}`).get(...params) as { c: number }).c;
+    const rows = this.db.prepare(
+      `SELECT id, ts, buyer_key_id, base_model, seller_id, prompt_tokens, completion_tokens,
+              collected_micro, seller_credit_micro, platform_margin_micro, bill_track, reversed
+       FROM settlement_log ${clause} ORDER BY ts DESC LIMIT ?`
+    ).all(...params, limit) as Array<{
+      id: string; ts: number; buyer_key_id: string | null; base_model: string | null;
+      seller_id: string | null; prompt_tokens: number; completion_tokens: number;
+      collected_micro: number; seller_credit_micro: number; platform_margin_micro: number;
+      bill_track: string | null; reversed: number;
+    }>;
+
+    return {
+      total,
+      data: rows.map((r) => ({
+        id: r.id,
+        ts: r.ts,
+        buyerKeyId: r.buyer_key_id,
+        baseModel: r.base_model,
+        sellerId: r.seller_id,
+        promptTokens: r.prompt_tokens,
+        completionTokens: r.completion_tokens,
+        collected: microToUsd(r.collected_micro),
+        sellerCredit: microToUsd(r.seller_credit_micro),
+        platformMargin: microToUsd(r.platform_margin_micro),
+        billTrack: r.bill_track,
+        reversed: r.reversed === 1
+      }))
+    };
+  }
 }

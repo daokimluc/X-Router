@@ -41,7 +41,7 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
 
   // ── Seller lifecycle ──────────────────────────────────────────────────────
   app.post("/provision/seller", opts, async (request, reply) => {
-    const p = z.object({ displayName: z.string().min(1), payoutRef: z.string().optional(), commissionPct: z.number().min(0).max(1).optional() }).safeParse(request.body);
+    const p = z.object({ displayName: z.string().min(1), payoutRef: z.string().optional(), commissionPct: z.number().min(0).max(1).optional(), externalRef: z.string().optional() }).safeParse(request.body);
     if (!p.success) { reply.code(400); return { error: { message: "invalid seller", code: "validation_error" } }; }
     const seller = app.sellerService.register(p.data);
     audit("provision.seller.register", request, seller.id, "seller");
@@ -208,7 +208,11 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
         owner: k.owner ?? null,
         enabled: k.enabled,
         expiresAt: k.expiresAt ?? null,
-        planId: k.planId ?? null
+        planId: k.planId ?? null,
+        // walletUsd inline to avoid an N+1 GET /provision/wallet/:id per key.
+        // provisioned:false → walletUsd:0 (never opened a wallet).
+        walletUsd: app.walletService.getUsd(k.id),
+        provisioned: app.walletService.isProvisioned(k.id)
       }));
     return { keys };
   });
@@ -262,8 +266,8 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   });
 
   app.get("/provision/sellers", opts, async (request) => {
-    const q = z.object({ status: z.enum(["pending", "approved", "suspended"]).optional() }).parse(request.query);
-    return { sellers: app.sellerService.listSellers(q.status) };
+    const q = z.object({ status: z.enum(["pending", "approved", "suspended"]).optional(), externalRef: z.string().optional() }).parse(request.query);
+    return { sellers: app.sellerService.listSellers(q) };
   });
 
   app.get("/provision/listings", opts, async (request) => {
@@ -291,6 +295,28 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     // UsageService ring-buffer cap + restarts (provision-hardening follow-up).
     return app.usageLogStore.query({
       ...(apiKeyHash ? { apiKeyHash } : {}),
+      ...(q.since ? { since: new Date(q.since) } : {}),
+      limit: q.limit ?? 100
+    });
+  });
+
+  // Per-record SETTLEMENT replay (exact money). Unlike /provision/usage (tokens
+  // only), each row carries collected / sellerCredit / platformMargin / billTrack
+  // / settlementId / reversed — so the website can rebuild exact buyer bills +
+  // seller credit for any window it missed via webhook. Filter by buyer key
+  // (scoped by keyId) and/or sellerId and/or since.
+  app.get("/provision/settlements", opts, async (request) => {
+    const q = z.object({
+      since: z.string().datetime().optional(),
+      keyId: z.string().optional(),
+      sellerId: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(1000).optional()
+    }).parse(request.query);
+    // keyId given but unknown → no records (don't leak other keys' settlements).
+    if (q.keyId && !app.apiKeyService.findById(q.keyId)) return { data: [], total: 0 };
+    return app.settlementLedger.query({
+      ...(q.keyId ? { buyerKeyId: q.keyId } : {}),
+      ...(q.sellerId ? { sellerId: q.sellerId } : {}),
       ...(q.since ? { since: new Date(q.since) } : {}),
       limit: q.limit ?? 100
     });

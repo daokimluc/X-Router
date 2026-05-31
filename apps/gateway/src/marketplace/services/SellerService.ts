@@ -18,6 +18,13 @@ export type Seller = {
   status: SellerStatus;
   /** Opaque string the website maps to a payout account. */
   payoutRef?: string;
+  /**
+   * Free-form external reference the website owns (e.g. its userId). FILTER /
+   * reconciliation convenience only — NOT an authorization key (x-router does no
+   * tenant isolation; the website still scopes every sellerId itself). Symmetric
+   * with an api key's `owner`.
+   */
+  externalRef?: string;
   /** Platform commission on this seller's credit (0..1); applied in #6. */
   commissionPct?: number;
   createdAt: string;
@@ -81,13 +88,14 @@ export class SellerService {
 
   // ── Sellers ───────────────────────────────────────────────────────────────
 
-  register(input: { displayName: string; payoutRef?: string; commissionPct?: number }): Seller {
+  register(input: { displayName: string; payoutRef?: string; commissionPct?: number; externalRef?: string }): Seller {
     const id = `seller_${input.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${Date.now().toString(36)}`;
     const seller: Seller = {
       id,
       displayName: input.displayName,
       status: "pending",
       payoutRef: input.payoutRef,
+      externalRef: input.externalRef,
       commissionPct: input.commissionPct,
       createdAt: new Date().toISOString()
     };
@@ -144,9 +152,10 @@ export class SellerService {
     return s ? structuredClone(s) : undefined;
   }
 
-  listSellers(status?: SellerStatus): Seller[] {
+  listSellers(filter?: { status?: SellerStatus; externalRef?: string }): Seller[] {
     return Array.from(this.sellers.values())
-      .filter((s) => !status || s.status === status)
+      .filter((s) => !filter?.status || s.status === filter.status)
+      .filter((s) => filter?.externalRef === undefined || s.externalRef === filter.externalRef)
       .map((s) => structuredClone(s));
   }
 

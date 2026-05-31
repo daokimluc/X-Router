@@ -75,7 +75,7 @@ describe("lowest-cost-routing-wiring: routedContextFor (by leased account)", () 
       { sellerId: "hoang", instance: "pi_hoang", account: "a_hoang", inPerM: 2.4, outPerM: 7.0 },
     ]);
     const pricing = new MarketPricingService(); // 0.15
-    const sellerId = svc.listSellers("approved").find((s) => s.displayName === "hoang")!.id;
+    const sellerId = svc.listSellers({ status: "approved" }).find((s) => s.displayName === "hoang")!.id;
     const routed = routedContextFor(svc, pricing, "gpt-5.5", "a_hoang");
     expect(routed?.sellerId).toBe(sellerId);
     expect(routed?.sellRates.inputPerM).toBeCloseTo(2.4 * 1.15, 6);
