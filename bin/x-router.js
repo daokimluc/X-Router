@@ -34,6 +34,7 @@ let resetAdminKey = false;
 let setProvisionKey = null;
 let addProvisionKey = null;
 let removeProvisionKey = null;
+let setMarketplace = null;
 
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
@@ -45,6 +46,7 @@ for (let i = 0; i < args.length; i++) {
     case '--set-provision-key': setProvisionKey = args[++i]; break;
     case '--add-provision-key': addProvisionKey = args[++i]; break;
     case '--remove-provision-key': removeProvisionKey = args[++i]; break;
+    case '--set-marketplace': setMarketplace = args[++i]; break;
     case '--help':
     case '-h':
       printHelp(); process.exit(0);
@@ -64,10 +66,11 @@ Options:
   --set-provision-key <key>  Set the marketplace provision API key and exit
   --add-provision-key <key>     Add a provision key (keeps existing — for rotation)
   --remove-provision-key <key>  Remove one provision key (revoke without downtime)
+  --set-marketplace <on|off>    Enable/disable the marketplace layer and exit
   --help, -h          Show this help
 
 Configuration:
-  ~/.x-router/config.json          Saved API keys (auto-generated on first run)
+  ~/.x-router/config.json          Saved API keys + marketplace flag (auto-generated on first run)
   ~/.x-router/gateway-state.json   Gateway data (accounts, usage, logs, ...)
   ~/.x-router/server.log           Server log (rotated each launch)
 
@@ -111,6 +114,26 @@ function ensureConfig() {
 const cfg = ensureConfig();
 const adminKeys = process.env.ADMIN_API_KEYS || cfg.adminApiKeys;
 const provisionKeys = process.env.PROVISION_API_KEYS || cfg.provisionApiKeys || '';
+// Marketplace flag: explicit MARKETPLACE_ENABLED env wins; otherwise the
+// persisted config.json `marketplaceEnabled` (set via --set-marketplace). The
+// gateway only turns the marketplace on when the env var is exactly "true".
+const marketplaceEnabled =
+  process.env.MARKETPLACE_ENABLED !== undefined
+    ? process.env.MARKETPLACE_ENABLED === 'true'
+    : cfg.marketplaceEnabled === true;
+
+if (setMarketplace !== null) {
+  const v = String(setMarketplace).toLowerCase();
+  if (!['on', 'off', 'true', 'false'].includes(v)) {
+    console.error('Usage: x-router --set-marketplace <on|off>');
+    process.exit(1);
+  }
+  cfg.marketplaceEnabled = v === 'on' || v === 'true';
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  console.log(`Marketplace ${cfg.marketplaceEnabled ? 'ENABLED' : 'disabled'}.`);
+  console.log(`(saved to ${CONFIG_PATH}) — restart x-router for it to take effect.`);
+  process.exit(0);
+}
 
 if (setProvisionKey !== null) {
   if (!setProvisionKey || setProvisionKey.startsWith('-')) {
@@ -178,6 +201,7 @@ if (noMenu) {
   process.env.HOST = host;
   process.env.ADMIN_API_KEYS = adminKeys;
   if (provisionKeys) process.env.PROVISION_API_KEYS = provisionKeys;
+  process.env.MARKETPLACE_ENABLED = marketplaceEnabled ? 'true' : 'false';
   process.env.DATA_FILE = DATA_PATH;
   console.log(`X-Router v${VERSION} starting on ${url}`);
   await import('../dist/server.js');
@@ -196,6 +220,7 @@ if (noMenu) {
       HOST: host,
       ADMIN_API_KEYS: adminKeys,
       ...(provisionKeys ? { PROVISION_API_KEYS: provisionKeys } : {}),
+      MARKETPLACE_ENABLED: marketplaceEnabled ? 'true' : 'false',
       DATA_FILE: DATA_PATH,
     },
     stdio: ['ignore', logFd, logFd],
