@@ -275,6 +275,96 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     return { listings: app.sellerService.listListings(q.baseModel) };
   });
 
+  // provision-listing-metrics — per-listing display metrics for the marketplace
+  // card, joined from THREE sources keyed by the listing's providerAccountId +
+  // (sellerId, baseModel). Provision-scope read; no admin key, no money change.
+  // Every metric is null when its source is empty — never a fabricated value.
+  // Freshness/grain differ per metric, so the response carries a `meta` contract:
+  //   requests/tokens = settlement window (since); success = lifetime per account;
+  //   latency/rps = rolling LatencyTracker window.
+  app.get("/provision/listings/metrics", opts, async (request) => {
+    const q = z.object({
+      baseModel: z.string().optional(),
+      since: z.string().datetime().optional()
+    }).parse(request.query);
+    const since = q.since ? new Date(q.since) : undefined;
+
+    // 1. Requests + tokens: one GROUP BY over settlement_log, keyed (seller,model).
+    const agg = app.settlementLedger.aggregateByModel({ since });
+    const aggKey = (sellerId: string, baseModel: string) => `${sellerId} ${baseModel}`;
+    const aggByKey = new Map<string, { requests: number; promptTokens: number; completionTokens: number }>();
+    for (const a of agg) {
+      aggByKey.set(aggKey(a.sellerId ?? "", a.baseModel ?? ""), {
+        requests: a.requests,
+        promptTokens: a.promptTokens,
+        completionTokens: a.completionTokens
+      });
+    }
+
+    // 2. Latency/rps: snapshot tuples keyed (providerInstanceId, publicModel,
+    // accountId). Group by accountId — an account can serve multiple publicModels.
+    const snap = app.latencyTracker.snapshot();
+    const windowSeconds = snap.windowSeconds || 300;
+    const latByAccount = new Map<string, { okCount: number; busiest?: { count: number; p50: number | null; p95: number | null } }>();
+    for (const t of snap.tuples) {
+      const entry = latByAccount.get(t.accountId) ?? { okCount: 0 };
+      entry.okCount += t.ok.count;
+      // p50/p95: pick the busiest (ok) tuple for the account, so a high-traffic
+      // model's percentiles aren't diluted by a rarely-used one on the same key.
+      if (!entry.busiest || t.ok.count > entry.busiest.count) {
+        entry.busiest = { count: t.ok.count, p50: t.ok.p50, p95: t.ok.p95 };
+      }
+      latByAccount.set(t.accountId, entry);
+    }
+
+    const listings = app.sellerService.listListings(q.baseModel);
+    const metrics = listings
+      .filter((l) => l.enabled)
+      .map((l) => {
+        const counts = aggByKey.get(aggKey(l.sellerId, l.baseModel));
+        const account = app.providerRuntimeRegistry.getAccount(l.providerAccountId);
+        const rt = account?.runtime;
+        const lat = latByAccount.get(l.providerAccountId);
+
+        // Lifetime success rate per account (clearly labeled lifetime, not windowed).
+        // null when the account is gone or has never served a request.
+        const successRate =
+          rt && rt.totalRequests > 0
+            ? Math.round((1 - rt.failedRequests / rt.totalRequests) * 10000) / 10000
+            : null;
+
+        return {
+          listingId: l.id,
+          sellerId: l.sellerId,
+          baseModel: l.baseModel,
+          providerInstanceId: l.providerInstanceId,
+          providerAccountId: l.providerAccountId,
+          // settlement window (since):
+          requests: counts?.requests ?? 0,
+          promptTokens: counts?.promptTokens ?? 0,
+          completionTokens: counts?.completionTokens ?? 0,
+          totalTokens: counts ? counts.promptTokens + counts.completionTokens : 0,
+          // lifetime, per account:
+          successRate,
+          totalRequestsLifetime: rt?.totalRequests ?? null,
+          failedRequestsLifetime: rt?.failedRequests ?? null,
+          // rolling latency window:
+          latencyP50Ms: lat?.busiest?.p50 ?? null,
+          latencyP95Ms: lat?.busiest?.p95 ?? null,
+          rps: lat ? Math.round((lat.okCount / windowSeconds) * 1000) / 1000 : null
+        };
+      });
+
+    return {
+      meta: {
+        settlementWindowSince: since ? since.toISOString() : null,
+        successHorizon: "lifetime" as const,
+        latencyWindowSeconds: windowSeconds
+      },
+      metrics
+    };
+  });
+
   app.get("/provision/markup", opts, async () => {
     return app.marketPricingService.listMarkups();
   });

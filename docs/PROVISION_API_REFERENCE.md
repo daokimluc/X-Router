@@ -34,6 +34,7 @@
 | PATCH | `/provision/listing/:id` | | Bật/tắt listing |
 | DELETE | `/provision/listing/:id` | | Xoá listing |
 | GET | `/provision/listings` | | Liệt kê listing |
+| GET | `/provision/listings/metrics` | | Metrics per-listing cho card (requests/tokens/success/latency/rps) |
 | POST | `/provision/earnings/:sellerId/mark-paid` | ✅ | Báo đã trả tiền seller |
 | GET | `/provision/earnings/:sellerId` | | Doanh thu 1 seller |
 | GET | `/provision/earnings/platform` | | Platform margin |
@@ -203,6 +204,46 @@ Body: `{ "enabled": false }`. 200: `{ "listing": {...} }`. Không tồn tại �
 
 ### DELETE /provision/listing/:id
 200: `{ "deleted": "listing_xxx" }`. Không tồn tại → `404`.
+
+### GET /provision/listings/metrics  — metrics per-listing cho marketplace card
+Query (optional): `?baseModel=gpt-5.5` (lọc 1 model), `?since=<ISO>` (cửa sổ đếm
+requests/tokens, mặc định = all-time).
+
+Gộp 3 nguồn nội bộ theo listing (qua `providerAccountId` + `(sellerId, baseModel)`):
+
+200:
+```json
+{
+  "meta": {
+    "settlementWindowSince": null,
+    "successHorizon": "lifetime",
+    "latencyWindowSeconds": 300
+  },
+  "metrics": [
+    {
+      "listingId": "listing_xxx", "sellerId": "seller_hoang_xxx",
+      "baseModel": "gpt-5.5",
+      "providerInstanceId": "openai_1", "providerAccountId": "acc_1",
+      "requests": 128, "promptTokens": 40231, "completionTokens": 18420, "totalTokens": 58651,
+      "successRate": 0.98, "totalRequestsLifetime": 1500, "failedRequestsLifetime": 30,
+      "latencyP50Ms": 120, "latencyP95Ms": 800, "rps": 0.42
+    }
+  ]
+}
+```
+
+**Chân trời thời gian KHÁC NHAU — đọc `meta` để không trộn lẫn:**
+- `requests` / `*Tokens` = tổng các settlement đã settle trong cửa sổ `since`, **đã loại
+  bỏ record `reversed`** (refund). Group theo `(sellerId, baseModel)` — nếu 1 seller có
+  nhiều listing cùng baseModel khác account, các số này bị gộp chung.
+- `successRate` / `*Lifetime` = **cumulative LIFETIME** của account
+  (`failedRequests/totalRequests`), KHÔNG phải tỉ lệ gần đây. `null` nếu account chưa
+  từng phục vụ request.
+- `latencyP50Ms` / `latencyP95Ms` / `rps` = **cửa sổ rolling 5 phút** in-memory (mất khi
+  restart). `null` nếu account không có traffic trong cửa sổ. `rps = ok_count / 300`.
+- **Không bịa số:** metric nào không có nguồn → `null` (không phải 100% hay 0 giả).
+- Provision-scope: admin/client key → `401`. Context window KHÔNG có ở đây — website tự
+  maintain bảng tĩnh `baseModel → context` (xem `ANSWERS_FROM_XROUTER_METRICS.md`).
 
 <!-- SEC_EARNINGS -->
 

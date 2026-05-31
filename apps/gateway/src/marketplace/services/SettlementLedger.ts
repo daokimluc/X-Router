@@ -206,6 +206,44 @@ export class SettlementLedger {
   }
 
   /**
+   * Aggregate settled, non-reversed records grouped by (sellerId, baseModel) —
+   * the grain a marketplace listing maps to. Sums request count + tokens in one
+   * SQL GROUP BY (no row paging). Reversed (refunded) settlements are excluded
+   * so a card doesn't count requests/tokens that were unwound. Optional `since`
+   * bounds the window. Used by GET /provision/listings/metrics.
+   */
+  aggregateByModel(q: { since?: Date } = {}): Array<{
+    sellerId: string | null;
+    baseModel: string | null;
+    requests: number;
+    promptTokens: number;
+    completionTokens: number;
+  }> {
+    const where: string[] = ["reversed = 0"];
+    const params: Array<string | number> = [];
+    if (q.since) { where.push("ts >= ?"); params.push(q.since.getTime()); }
+    const clause = `WHERE ${where.join(" AND ")}`;
+    const rows = this.db.prepare(
+      `SELECT seller_id, base_model,
+              COUNT(*) AS requests,
+              COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+              COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+       FROM settlement_log ${clause}
+       GROUP BY seller_id, base_model`
+    ).all(...params) as Array<{
+      seller_id: string | null; base_model: string | null;
+      requests: number; prompt_tokens: number; completion_tokens: number;
+    }>;
+    return rows.map((r) => ({
+      sellerId: r.seller_id,
+      baseModel: r.base_model,
+      requests: r.requests,
+      promptTokens: r.prompt_tokens,
+      completionTokens: r.completion_tokens
+    }));
+  }
+
+  /**
    * Per-record settlement query for reconciliation replay (provision-read). Lets
    * the website rebuild exact buyer bills + seller credit for a window it missed
    * via webhook — every figure (collected, sellerCredit, platformMargin) is the
