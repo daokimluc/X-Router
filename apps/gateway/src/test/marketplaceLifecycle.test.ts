@@ -91,6 +91,27 @@ describe("marketplace-lifecycle: buyer-key lifecycle on provision", () => {
     expect(filtered.json().keys.every((k: { owner: string }) => k.owner === "alice")).toBe(true);
     expect(filtered.json().keys.length).toBe(1);
   });
+
+  it("rotate issues a new secret, old stops working, id/plan preserved", async () => {
+    const app = await build();
+    const created = await app.inject({ method: "POST", url: "/provision/key", headers: prov, payload: { label: "rot", planId: "plan_claude" } });
+    const keyId = created.json().id;
+    const oldKey = created.json().key;
+
+    // old key works
+    expect((await app.inject({ method: "GET", url: "/v1/models", headers: { authorization: `Bearer ${oldKey}` } })).statusCode).toBe(200);
+
+    const rot = await app.inject({ method: "POST", url: `/provision/key/${keyId}/rotate`, headers: prov });
+    expect(rot.statusCode).toBe(200);
+    const newKey = rot.json().key;
+    expect(newKey).not.toBe(oldKey);
+    expect(rot.json().id).toBe(keyId);           // same id
+    expect(rot.json().planId).toBe("plan_claude"); // plan preserved
+
+    // old key now rejected, new key works
+    expect((await app.inject({ method: "GET", url: "/v1/models", headers: { authorization: `Bearer ${oldKey}` } })).statusCode).toBeGreaterThanOrEqual(401);
+    expect((await app.inject({ method: "GET", url: "/v1/models", headers: { authorization: `Bearer ${newKey}` } })).statusCode).toBe(200);
+  });
 });
 
 describe("marketplace-lifecycle: listing re-price + seller terms + canonical models", () => {

@@ -41,6 +41,15 @@ export type RoutedCapture = (
 ) => void;
 
 /**
+ * Per-account cost lookup for a pooled model (lowest-cost-routing-wiring). The
+ * marketplace builds it from seller listings so the engine's LowestCostStrategy
+ * can rank accounts at `acquire` time. Returns null when the model has no costed
+ * supply (then the strategy degrades to its tie-break order). The engine stays
+ * agnostic — it only passes the lookup into the selection context.
+ */
+export type CostForBuilder = (model: string) => ((accountId: string) => { inputPerM: number; outputPerM: number; cachedInputPerM?: number } | null) | null;
+
+/**
  * A policy check run during `enforceKeyPolicy`, after the engine's own gates.
  * Return a rejection to stop the request (the enforcer sends it and halts), or
  * `undefined`/void to allow it to proceed. Checks run in registration order;
@@ -102,6 +111,7 @@ export class MarketplaceSeam {
   readonly settlementHooks: SettlementHook[] = [];
   private candidateRanker: CandidateRanker | null = null;
   private routedCapture: RoutedCapture | null = null;
+  private costForBuilder: CostForBuilder | null = null;
 
   addKeyPolicyCheck(check: KeyPolicyCheck): void {
     this.keyPolicyChecks.push(check);
@@ -123,6 +133,25 @@ export class MarketplaceSeam {
   /** Register the routed-context capture run after a lease is acquired. */
   setRoutedCapture(fn: RoutedCapture): void {
     this.routedCapture = fn;
+  }
+
+  /** Register the per-model cost-lookup builder (lowest-cost-routing-wiring). */
+  setCostForBuilder(fn: CostForBuilder): void {
+    this.costForBuilder = fn;
+  }
+
+  /**
+   * Build the per-account cost lookup for a model, to pass into pool `acquire`
+   * so LowestCostStrategy can rank. Returns undefined when the marketplace is off
+   * or the model has no costed supply (the strategy then degrades gracefully).
+   */
+  costForModel(model: string): ((accountId: string) => { inputPerM: number; outputPerM: number; cachedInputPerM?: number } | null) | undefined {
+    if (!this.costForBuilder) return undefined;
+    try {
+      return this.costForBuilder(model) ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Capture routed settlement context from the leased account. No-op when unset. */

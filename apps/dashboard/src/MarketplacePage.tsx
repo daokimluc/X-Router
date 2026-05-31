@@ -489,11 +489,16 @@ function EarningsPanel({ api }: { api: ApiClient }) {
   const [sellerId, setSellerId] = useState("");
   const [snap, setSnap] = useState<EarningsSnapshot | null>(null);
   const [platform, setPlatform] = useState<number | null>(null);
+  const [books, setBooks] = useState<{ totalCollected: number; totalSellerCredit: number; recordedMargin: number; expectedMargin: number; solvent: boolean; marginMatches: boolean; ok: boolean } | null>(null);
   const [action, setAction] = useState<{ kind: "markPaid" | "reverse"; amount: string; reason: string } | null>(null);
   const [settlementId, setSettlementId] = useState("");
 
   const loadPlatform = useCallback(async () => {
-    try { const r = await api.get<{ platformMarginUsd: number }>("/admin/v1/earnings/platform"); setPlatform(r.platformMarginUsd); }
+    try {
+      const r = await api.get<{ platformMarginUsd: number }>("/admin/v1/earnings/platform");
+      setPlatform(r.platformMarginUsd);
+      setBooks(await api.get("/admin/v1/marketplace/reconcile/platform"));
+    }
     catch (e) { show("err", errMsg(e)); }
   }, [api, show]);
   useEffect(() => { void loadPlatform(); }, [loadPlatform]);
@@ -532,6 +537,24 @@ function EarningsPanel({ api }: { api: ApiClient }) {
       {flash}
       <h3 style={{ marginBottom: 12 }}>{t("mkt.earnings.title")}</h3>
       <div style={{ marginBottom: 16, fontSize: 14 }}>{t("mkt.earnings.platformMargin")}: <strong>${(platform ?? 0).toFixed(4)}</strong></div>
+
+      {books && (
+        <div className="tableWrap" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <strong>{t("mkt.books.title")}</strong>
+            <span style={{ fontSize: 12, fontWeight: 700, color: books.ok ? "#059669" : "#ef4444" }}>
+              {books.ok ? `✓ ${t("mkt.books.ok")}` : `✗ ${t("mkt.books.violation")}`}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 24, fontSize: 13, flexWrap: "wrap", color: "var(--color-text-muted)" }}>
+            <div>{t("mkt.books.collected")}: <strong>${books.totalCollected.toFixed(4)}</strong></div>
+            <div>{t("mkt.books.sellerCredit")}: <strong>${books.totalSellerCredit.toFixed(4)}</strong></div>
+            <div>{t("mkt.books.margin")}: <strong>${books.recordedMargin.toFixed(4)}</strong> / ${books.expectedMargin.toFixed(4)}</div>
+            <div>{t("mkt.books.solvent")}: {books.solvent ? "✓" : "✗"}</div>
+            <div>{t("mkt.books.marginMatch")}: {books.marginMatches ? "✓" : "✗"}</div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 12 }}>
         <label className="formField" style={{ flex: 1 }}><span>{t("mkt.earnings.sellerId")}</span><input value={sellerId} onChange={(e) => setSellerId(e.target.value)} /></label>

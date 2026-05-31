@@ -188,6 +188,16 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     }
   });
 
+  // Rotate the client secret in place (keeps id/plan/wallet). New plaintext
+  // returned ONCE; the old secret stops working immediately.
+  app.post("/provision/key/:id/rotate", privOpts, async (request, reply) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+    const rotated = app.apiKeyService.rotate(id);
+    if (!rotated) { reply.code(404); return { error: { message: `key ${id} not found`, code: "not_found" } }; }
+    audit("provision.key.rotate", request, id, "api_key");
+    return { id: rotated.id, key: rotated.key, planId: rotated.planId ?? null };
+  });
+
   app.get("/provision/keys", opts, async (request) => {
     const q = z.object({ owner: z.string().optional() }).parse(request.query);
     const keys = app.apiKeyService
@@ -277,9 +287,11 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     const apiKeyHash = q.keyId ? app.apiKeyService.findById(q.keyId)?.keyHash : undefined;
     // keyId given but unknown → no records (avoid leaking all-key usage).
     if (q.keyId && !apiKeyHash) return { data: [], total: 0 };
-    return app.usageService.query({
+    // Read the DURABLE usage log (SQLite) so reconciliation survives the live
+    // UsageService ring-buffer cap + restarts (provision-hardening follow-up).
+    return app.usageLogStore.query({
       ...(apiKeyHash ? { apiKeyHash } : {}),
-      ...(q.since ? { from: new Date(q.since) } : {}),
+      ...(q.since ? { since: new Date(q.since) } : {}),
       limit: q.limit ?? 100
     });
   });

@@ -32,6 +32,8 @@ let noMenu = false;
 let printKeysOnly = false;
 let resetAdminKey = false;
 let setProvisionKey = null;
+let addProvisionKey = null;
+let removeProvisionKey = null;
 
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
@@ -41,6 +43,8 @@ for (let i = 0; i < args.length; i++) {
     case '--print-keys': printKeysOnly = true; break;
     case '--reset-admin-key': resetAdminKey = true; break;
     case '--set-provision-key': setProvisionKey = args[++i]; break;
+    case '--add-provision-key': addProvisionKey = args[++i]; break;
+    case '--remove-provision-key': removeProvisionKey = args[++i]; break;
     case '--help':
     case '-h':
       printHelp(); process.exit(0);
@@ -58,6 +62,8 @@ Options:
   --print-keys        Print saved API keys and exit
   --reset-admin-key   Reset the admin login password to "admin" and exit
   --set-provision-key <key>  Set the marketplace provision API key and exit
+  --add-provision-key <key>     Add a provision key (keeps existing — for rotation)
+  --remove-provision-key <key>  Remove one provision key (revoke without downtime)
   --help, -h          Show this help
 
 Configuration:
@@ -114,6 +120,38 @@ if (setProvisionKey !== null) {
   cfg.provisionApiKeys = setProvisionKey;
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
   console.log('Provision API key set.');
+  console.log(`(saved to ${CONFIG_PATH}) — restart x-router for it to take effect.`);
+  process.exit(0);
+}
+
+// Provision keys are stored comma-separated (CLI-readable, same as the env var).
+function provisionKeyList() {
+  return String(cfg.provisionApiKeys || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+if (addProvisionKey !== null) {
+  if (!addProvisionKey || addProvisionKey.startsWith('-')) {
+    console.error('Usage: x-router --add-provision-key <key>');
+    process.exit(1);
+  }
+  const list = provisionKeyList();
+  if (!list.includes(addProvisionKey)) list.push(addProvisionKey);
+  cfg.provisionApiKeys = list.join(',');
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  console.log(`Provision API key added. ${list.length} key(s) active.`);
+  console.log(`(saved to ${CONFIG_PATH}) — restart x-router for it to take effect.`);
+  process.exit(0);
+}
+
+if (removeProvisionKey !== null) {
+  if (!removeProvisionKey || removeProvisionKey.startsWith('-')) {
+    console.error('Usage: x-router --remove-provision-key <key>');
+    process.exit(1);
+  }
+  const list = provisionKeyList().filter((k) => k !== removeProvisionKey);
+  cfg.provisionApiKeys = list.join(',');
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  console.log(`Provision API key removed. ${list.length} key(s) remain.`);
   console.log(`(saved to ${CONFIG_PATH}) — restart x-router for it to take effect.`);
   process.exit(0);
 }

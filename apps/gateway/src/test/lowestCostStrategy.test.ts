@@ -71,12 +71,19 @@ describe("LowestCostStrategy", () => {
     expect(picked?.id).toBe("priced");
   });
 
-  it("returns null when no candidate has a cost", () => {
-    const picked = strat.select([acct("x")], { now, costFor: () => null });
-    expect(picked).toBeNull();
+  it("degrades to tie-break order when no candidate has a cost (does not throw/null)", () => {
+    // Two candidates, no cost data → falls back to least-busy/priority/id instead
+    // of returning null (which would make acquire throw NoAvailableAccountError).
+    const picked = strat.select([acct("x", 3), acct("y", 1)], { now, costFor: () => null });
+    expect(picked?.id).toBe("y"); // least busy
   });
 
-  it("returns null without a cost lookup", () => {
-    expect(strat.select([acct("x")], { now })).toBeNull();
+  it("degrades gracefully without a cost lookup at all", () => {
+    const picked = strat.select([acct("x", 5), acct("y", 2)], { now });
+    expect(picked?.id).toBe("y");
+  });
+
+  it("still returns null for an empty candidate set", () => {
+    expect(strat.select([], { now })).toBeNull();
   });
 });

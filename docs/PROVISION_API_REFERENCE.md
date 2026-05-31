@@ -21,6 +21,7 @@
 | POST | `/provision/key/:id/enable` | | Bật lại key |
 | PATCH | `/provision/key/:id` | | Đổi enabled / expiresAt |
 | DELETE | `/provision/key/:id` | | Thu hồi (soft) key |
+| POST | `/provision/key/:id/rotate` | ✅ | Đổi secret (giữ id/gói/ví) |
 | GET | `/provision/keys` | | Liệt kê key đã cấp |
 | POST | `/provision/grant` | ✅ | Gán/đổi gói cho key |
 | POST | `/provision/wallet/topup` | ✅ | Nạp USD vào ví |
@@ -92,6 +93,15 @@ Body: rỗng. Thu hồi = disable (giữ lại để đối soát settlement-log
 { "keys": [ { "id": "internal_key_3", "owner": "user_42",
               "enabled": true, "expiresAt": null, "planId": "plan_claude" } ] }
 ```
+
+### POST /provision/key/:id/rotate  — đổi secret tại chỗ
+Body: rỗng. Cấp secret mới, **giữ nguyên** id / gói / ví / mọi cấu hình; secret cũ
+ngừng hoạt động ngay. Dùng khi buyer nghi key bị lộ.
+200 (plaintext mới trả về **một lần**):
+```json
+{ "id": "internal_key_3", "key": "igw_yyy", "planId": "plan_claude" }
+```
+Không tồn tại → `404 not_found`.
 
 ### POST /provision/grant  — gán/đổi gói (idempotent)
 Body:

@@ -20,11 +20,12 @@ import { SellerService, type PersistedSellers } from "./services/SellerService.j
 import { MarketPricingService, type PersistedMarketPricing } from "./services/MarketPricingService.js";
 import { SellerEarningsLedger, type PersistedSellerEarnings } from "./services/SellerEarningsLedger.js";
 import { SettlementLedger } from "./services/SettlementLedger.js";
+import { SupplyHealthMonitor } from "./services/SupplyHealthMonitor.js";
 import { type PaygDecision } from "./services/PaygDecision.js";
 import { RealPaygDecision } from "./services/RealPaygDecision.js";
 import { createMarketplacePolicyCheck } from "./policy/marketplacePolicyCheck.js";
 import { createSettlementHook } from "./policy/settlementHook.js";
-import { createCandidateRanker, routedContextFor } from "./policy/marketplaceRouting.js";
+import { createCandidateRanker, routedContextFor, buildCostFor } from "./policy/marketplaceRouting.js";
 import { syncAllListings } from "./policy/sellerRegistry.js";
 import { registerWalletAdminRoutes } from "./routes/walletAdmin.js";
 import { registerPlanAdminRoutes } from "./routes/planAdmin.js";
@@ -174,6 +175,11 @@ export function registerMarketplace(
     const ctxRouted = routedContextFor(sellerService, marketPricingService, model, accountId);
     if (ctxRouted) req.routed = ctxRouted;
   });
+  // Per-account cost lookup so an instance using the `lowest_cost` pool strategy
+  // can actually rank by seller cost at acquire time (not just the candidate-layer
+  // ranker). buildCostFor returns null for a model with no costed supply → the
+  // strategy degrades to its tie-break order.
+  app.marketplaceSeam.setCostForBuilder((model) => buildCostFor(sellerService, model));
 
   // ── two-sided-settlement (#6) ─────────────────────────────────────────────
   // SQLite-backed (persistence-sqlite) — durable seller credit + platform
@@ -244,4 +250,19 @@ export function registerMarketplace(
 
   // Admin endpoints to manage the business webhook config.
   registerBusinessWebhookAdminRoutes(app, deps.config);
+
+  // Proactive supply health (provision-webhook #7 follow-up): periodically scan
+  // account runtime state and emit supply.unhealthy on the transition into
+  // unhealthy, so a dead non-house seller is caught even without live traffic.
+  const supplyHealth = new SupplyHealthMonitor({
+    listAccounts: () => app.providerRuntimeRegistry.listAccounts().map((a) => ({
+      id: a.id,
+      sellerId: (a as { sellerId?: string }).sellerId,
+      status: a.status,
+      runtime: { consecutiveFailures: a.runtime.consecutiveFailures }
+    })),
+    webhookService: app.webhookService
+  });
+  supplyHealth.start();
+  app.addHook("onClose", () => supplyHealth.stop());
 }

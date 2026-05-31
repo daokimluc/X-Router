@@ -52,6 +52,7 @@ import { ApiKeyService } from "./services/ApiKeyService.js";
 import { AdminKeyService } from "./services/AdminKeyService.js";
 import { RequestLogService } from "./services/RequestLogService.js";
 import { UsageService } from "./services/UsageService.js";
+import { UsageLogStore } from "./services/UsageLogStore.js";
 import { ModelPricingService } from "./services/ModelPricingService.js";
 import { TokenSaverService } from "./services/TokenSaverService.js";
 import { RequestQueueService } from "./services/RequestQueueService.js";
@@ -84,6 +85,7 @@ export type AppDependencies = {
   routingProfileRegistry?: RoutingProfileRegistry;
   providerRuntimeRegistry?: ProviderRuntimeRegistry;
   secretService?: SecretService;
+  encryptionService?: LocalEncryptionService;
   circuitBreaker?: CircuitBreaker;
   concurrencyLimiter?: ConcurrencyLimiter;
   adminAuditService?: AdminAuditService;
@@ -116,6 +118,7 @@ declare module "fastify" {
     adminKeyService: AdminKeyService;
     requestLogService: RequestLogService;
     usageService: UsageService;
+    usageLogStore: UsageLogStore;
     rateLimitService: RateLimitService;
     persistenceService: PersistenceService;
     database: Database;
@@ -221,9 +224,11 @@ export async function buildApp(
     (id) => providerRuntimeRegistry.getProviderInstance(id)?.groupName,
     (id) => providerRuntimeRegistry.getProviderInstance(id)?.modelMapping
   );
+  const encryptionService =
+    dependencies.encryptionService ?? new LocalEncryptionService(config.encryptionKey);
   const secretService =
     dependencies.secretService ??
-    new SecretService(new LocalEncryptionService("development-local-secret-key"));
+    new SecretService(encryptionService);
   const circuitBreaker = dependencies.circuitBreaker ?? new CircuitBreaker();
   const concurrencyLimiter =
     dependencies.concurrencyLimiter ?? new ConcurrencyLimiter(100);
@@ -241,6 +246,20 @@ export async function buildApp(
   const requestLogService =
     dependencies.requestLogService ?? new RequestLogService();
   const usageService = dependencies.usageService ?? new UsageService();
+  // Durable append-only usage log on SQLite for long-range reconciliation
+  // (/provision/usage). The ring-buffer UsageService stays the live UI source.
+  const usageLogStore = new UsageLogStore(sqliteDb);
+  usageService.setSink((r) => usageLogStore.append({
+    apiKeyHash: r.apiKeyHash,
+    model: r.model,
+    providerType: r.providerType,
+    protocol: r.protocol,
+    promptTokens: r.promptTokens,
+    completionTokens: r.completionTokens,
+    totalTokens: r.totalTokens,
+    cachedTokens: r.cachedTokens,
+    estimatedCost: r.estimatedCost
+  }));
   const rateLimitService =
     dependencies.rateLimitService ??
     new RateLimitService({
@@ -262,7 +281,6 @@ export async function buildApp(
     dailyRequestQuota: 0, // unlimited daily
     dailyTokenQuota: 0
   });
-  const encryptionService = new LocalEncryptionService("development-local-secret-key");
 
   // Token Saver
   const tokenSaverService = new TokenSaverService();
@@ -347,6 +365,7 @@ export async function buildApp(
 
   app.decorate("requestLogService", requestLogService);
   app.decorate("usageService", usageService);
+  app.decorate("usageLogStore", usageLogStore);
   app.decorate("rateLimitService", rateLimitService);
   app.decorate("persistenceService", persistenceService);
   app.decorate("tokenSaverService", tokenSaverService);

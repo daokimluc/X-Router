@@ -18,6 +18,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     addAccountRateLimitPerMinute: 10,
     logLevel: "silent",
     marketplaceEnabled: false,
+    encryptionKey: "development-local-secret-key",
     ...overrides
   };
 }

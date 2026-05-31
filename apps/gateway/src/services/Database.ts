@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -119,6 +119,29 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
         ts INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_earnings_reversals_seller ON earnings_reversals (seller_id);
+    `);
+  },
+  // v3 — durable usage log for long-range reconciliation (the in-memory
+  // UsageService ring buffer is capped ~1000 and serves live UI; this append-only
+  // table backs /provision/usage so the website can rebuild its ledger across any
+  // time range after missed webhooks).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS usage_log (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        api_key_hash TEXT,
+        model TEXT,
+        provider_type TEXT,
+        protocol TEXT,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        estimated_cost_micro INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_usage_log_ts ON usage_log (ts);
+      CREATE INDEX IF NOT EXISTS idx_usage_log_key ON usage_log (api_key_hash, ts);
     `);
   }
 ];

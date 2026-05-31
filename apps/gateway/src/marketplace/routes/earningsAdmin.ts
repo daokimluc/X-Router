@@ -80,4 +80,16 @@ export function registerEarningsAdminRoutes(
   app.get("/admin/v1/earnings/platform", { preHandler: adminAuth }, async () => {
     return { platformMarginUsd: ledger.getPlatformMargin() };
   });
+
+  // Books-health reconciliation (money-correctness #2 read; admin-marketplace-ui).
+  // Platform solvency: Σcollected ≥ ΣsellerCredit and recorded margin matches.
+  app.get("/admin/v1/marketplace/reconcile/platform", { preHandler: adminAuth }, async () => {
+    return settlementLedger.reconcilePlatform();
+  });
+
+  // Per-seller: unpaid == Σcredits − Σpayouts + Σpayout_reversals − Σreversals.
+  app.get("/admin/v1/marketplace/reconcile/seller/:id", { preHandler: adminAuth }, async (request) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    return settlementLedger.reconcileSeller(params.id);
+  });
 }

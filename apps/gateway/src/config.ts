@@ -32,6 +32,13 @@ export type AppConfig = {
    * flag that separates the open-core engine from the proprietary marketplace.
    */
   marketplaceEnabled: boolean;
+  /**
+   * Key used to encrypt secrets at rest (provider credentials + business-webhook
+   * secret). Defaults to a well-known dev key; production MUST override it via
+   * `ENCRYPTION_KEY` or the gateway refuses to start. Rotating it makes existing
+   * ciphertext unreadable (re-enter secrets).
+   */
+  encryptionKey: string;
 };
 
 const envSchema = z.object({
@@ -52,10 +59,14 @@ const envSchema = z.object({
   MARKETPLACE_ENABLED: z
     .enum(["true", "false"])
     .default("false"),
+  ENCRYPTION_KEY: z.string().optional(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info")
 });
+
+/** Well-known development key for secrets-at-rest. MUST be overridden in production. */
+export const DEFAULT_ENCRYPTION_KEY = "development-local-secret-key";
 
 function parseCsv(value: string): string[] {
   return value
@@ -92,6 +103,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("ADMIN_API_KEYS must contain at least one key in production");
   }
 
+  // Secrets-at-rest key. Production must override the dev default, else any reader
+  // of the state file can decrypt credentials + the webhook secret.
+  const encryptionKey = parsed.ENCRYPTION_KEY?.trim() || DEFAULT_ENCRYPTION_KEY;
+  if (parsed.NODE_ENV === "production" && encryptionKey === DEFAULT_ENCRYPTION_KEY) {
+    throw new Error("ENCRYPTION_KEY must be set to a non-default value in production");
+  }
+
   return {
     nodeEnv: parsed.NODE_ENV,
     port: parsed.PORT,
@@ -110,6 +128,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     internalDailyRequestQuota: parsed.INTERNAL_DAILY_REQUEST_QUOTA,
     internalDailyTokenQuota: parsed.INTERNAL_DAILY_TOKEN_QUOTA,
     addAccountRateLimitPerMinute: parseAddAccountRateLimit(parsed.ADD_ACCOUNT_RATE_LIMIT_PER_MIN),
-    marketplaceEnabled: parsed.MARKETPLACE_ENABLED === "true"
+    marketplaceEnabled: parsed.MARKETPLACE_ENABLED === "true",
+    encryptionKey
   };
 }

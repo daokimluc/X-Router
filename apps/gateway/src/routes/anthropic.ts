@@ -193,7 +193,10 @@ export async function registerAnthropicRoutes(
                 providerInstance.maxConcurrentRequests
               );
               lease = accountPool.acquire({
-                model: candidate.publicModel
+                model: candidate.publicModel,
+                // lowest-cost-routing-wiring — rank by seller cost if the pool
+                // uses the lowest_cost strategy (undefined otherwise).
+                costFor: app.marketplaceSeam.costForModel(candidate.publicModel)
               });
               // lowest-cost-routing-wiring — capture routed context from the lease.
               app.marketplaceSeam.captureRouted(request, candidate.publicModel, lease.account.id);

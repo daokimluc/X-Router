@@ -185,6 +185,26 @@ export class ApiKeyService {
     return record?.key || null;
   }
 
+  /**
+   * Rotate a key's secret in place: issue a new `igw_…` value + hash while
+   * preserving id, plan, wallet linkage, and every other field. The old secret
+   * stops working immediately. Returns the new plaintext (shown once) or null if
+   * the key is unknown.
+   */
+  rotate(id: string): CreatedInternalApiKey | null {
+    const entry = Array.from(this.keys.entries()).find(([, r]) => r.id === id);
+    if (!entry) return null;
+    const [oldMapKey, record] = entry;
+    const newKey = `igw_${randomBytes(24).toString("hex")}`;
+    record.key = newKey;
+    record.keyHash = hashApiKey(newKey);
+    // Re-index: create() keys the map by the plaintext secret, so move the entry
+    // to the new secret to stay consistent with that scheme.
+    this.keys.delete(oldMapKey);
+    this.keys.set(newKey, record);
+    return structuredClone(record);
+  }
+
   create(input: {
     owner?: string;
     teamId?: string;

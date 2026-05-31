@@ -202,7 +202,10 @@ export async function registerOpenAIRoutes(
               providerInstance.maxConcurrentRequests
             );
             lease = accountPool.acquire({
-              model: candidate.publicModel
+              model: candidate.publicModel,
+              // lowest-cost-routing-wiring — let a `lowest_cost` pool rank by
+              // seller cost (undefined when marketplace off / no costed supply).
+              costFor: app.marketplaceSeam.costForModel(candidate.publicModel)
             });
             // lowest-cost-routing-wiring — capture routed settlement context from
             // the account actually leased (marketplace fills request.routed).

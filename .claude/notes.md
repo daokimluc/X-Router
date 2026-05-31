@@ -260,3 +260,29 @@ Full detail in memory `project_open_core_architecture.md`. Summary:
 **Deferred (tracked):** dashboard UIs for #4/#5/#6 (specs say website-driven/fallback); anthropic.ts settlement parity; #7 edge emits (grant.exhausted/wallet.low/supply.unhealthy) + bin --set-provision-key flag; request.routed cheapest-approximation.
 
 **NOT committed.** On branch main — branch off before committing (ask user re: commit strategy: per-change vs one Phase-34 commit). Then `openspec archive` per change when accepted.
+
+## Phase 34b — 5 post-audit hardening changes ALL DONE (2026-05-30)
+
+Branch `feat/phase34-marketplace`. 5 commits, one per change:
+- `d08fe7c` #1 persistence-sqlite — WalletService + SellerEarningsLedger → SQLite (node:sqlite DatabaseSync, WAL, transactions). New services/Database.ts. SpendLedger stays JSON (scope-narrowed).
+- `818bdd7` #2 money-correctness — settle-buyer-first → credit from COLLECTED (conservation collected===credit+margin); unlisted-route fallback cost (never $0); refund/reverse primitives; new SettlementLedger (settlement_log + reverseSettlement + reconcile). DB v2 migration; transaction() made reentrant.
+- `67b60c9` #3 marketplace-lifecycle — provision key disable/enable/revoke/expire/list; admin wallet refund/debit, earnings reverse/adjust, settlement reverse, listing re-price, seller-term edit, canonical-model add/remove, markup-override delete.
+- `46141c2` #4 admin-marketplace-ui — apps/dashboard MarketplacePage (lazy chunk, 8 sub-tabs), gated by marketplaceEnabled from /v1/public/auth-info. EN/VI i18n.
+- `8c65397` #5 provision-hardening — encrypt webhook secret at rest; rate-limit privileged /provision/* (PROVISION_RATE_LIMIT_PER_MINUTE, default 120); trust-model docs (§7 MARKETPLACE_INTEGRATION.md); fix payoutRef drop + usd/amountUsd dual-accept.
+
+**Verify:** gateway 622 pass + 7 skip (was 590 at Phase-34b start), gateway+dashboard tsc clean, dashboard build clean (MarketplacePage separate 28.77kB chunk), all 5 `openspec validate --strict` pass. Engine→marketplace boundary held throughout (boundary test green).
+
+**NOT merged to main, NOT archived.** Next: user decides merge of feat/phase34-marketplace → main, then `openspec archive <change>` per change. Manual smoke deferred (each tasks.md has a 6.3/7.3/8.3 manual item for the user).
+
+## Phase 34c — 7 code-gap fixes (2026-05-31, post-34b audit)
+
+User asked to fix all gaps found after 34b. Branch `feat/phase34-marketplace`, one commit. All 7 done:
+1. **LowestCostStrategy trap** — degraded gracefully (least-busy/priority/id fallback, no more null→NoAvailableAccountError) + wired `costFor` into pool `acquire` via new `MarketplaceSeam.setCostForBuilder`/`costForModel` seam (marketplace registers `buildCostFor`). openai.ts + anthropic.ts pass `costFor`.
+2. **Encryption key via env** — `config.encryptionKey` (env `ENCRYPTION_KEY`, default `DEFAULT_ENCRYPTION_KEY`); production guard throws on default. Single encryptionService in app.ts reused for SecretService.
+3. **bin provision-key flags** — added `--add-provision-key`/`--remove-provision-key` (`--set-provision-key` already existed).
+4. **Books-health** — GET `/admin/v1/marketplace/reconcile/platform` + `/seller/:id` + dashboard EarningsPanel books-health card (i18n mkt.books.*).
+5. **API key rotation** — `ApiKeyService.rotate(id)` + POST `/provision/key/:id/rotate` (new secret, same id/plan/wallet).
+6. **UsageService→SQLite** — kept ring buffer for live UI; added durable `usage_log` (Database v3) + `UsageLogStore` (engine); UsageService.setSink mirrors every record; `/provision/usage` now reads UsageLogStore.
+7. **Periodic supply health** — `marketplace/services/SupplyHealthMonitor` scans account runtime (disabled/cooldown/consecutiveFailures≥3), emits `supply.unhealthy` once per non-house account on transition, re-arms on recovery; started in registerMarketplace, stopped onClose.
+
+**Verify:** gateway tsc clean, **631 pass + 7 skip** (was 622), dashboard tsc+build clean (MarketplacePage separate chunk), boundary green. Docs PROVISION_API_REFERENCE.md updated with rotate. See [[phase34c-gap-fixes]] memory.

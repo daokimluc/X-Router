@@ -106,8 +106,15 @@ export class UsageService {
   private readonly records: UsageRecord[] = [];
   // Phase 32 — aggregate cache (30s TTL or invalidated on record())
   private aggregateCache = new Map<string, { value: AggregateResult; expiresAt: number }>();
+  /** Optional durable sink (UsageLogStore) — mirrors each record for reconciliation. */
+  private sink?: (record: UsageRecord) => void;
 
   constructor(private readonly maxRecords = 1000) {}
+
+  /** Attach a durable sink; every record() is also appended to it (best-effort). */
+  setSink(sink: (record: UsageRecord) => void): void {
+    this.sink = sink;
+  }
 
   record(input: Omit<UsageRecord, "id" | "createdAt">): UsageRecord {
     const record: UsageRecord = {
@@ -124,6 +131,11 @@ export class UsageService {
 
     // Invalidate aggregate cache on any new record
     this.aggregateCache.clear();
+
+    // Mirror to the durable sink (never let a sink error break usage recording).
+    if (this.sink) {
+      try { this.sink(record); } catch { /* best-effort */ }
+    }
 
     return structuredClone(record);
   }
