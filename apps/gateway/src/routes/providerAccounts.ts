@@ -21,7 +21,8 @@ import type { SecretService } from "../services/SecretService.js";
 import type { LocalEncryptionService } from "../services/LocalEncryptionService.js";
 import type { AdminAuditService } from "../services/AdminAuditService.js";
 import type { MetricsService } from "../services/MetricsService.js";
-import type { PersistenceService } from "../services/PersistenceService.js";
+import type { StateStore } from "../services/PersistenceService.js";
+import { createPersistedState } from "../services/createPersistedState.js";
 import type { ConfigRevisionService } from "../services/ConfigRevisionService.js";
 import type { ProviderAdapterRegistry } from "../providers/registry/ProviderAdapterRegistry.js";
 import type { ProviderRuntimeRegistry } from "../provider-runtime/ProviderRuntimeRegistry.js";
@@ -58,7 +59,7 @@ export type ProviderAccountRouteDeps = {
   addAccountRateLimiter: RateLimitService;
   adminAuditService: AdminAuditService;
   metricsService: MetricsService;
-  persistenceService: PersistenceService;
+  persistenceService: StateStore;
   configRevisionService: ConfigRevisionService;
 };
 
@@ -954,21 +955,3 @@ export async function registerProviderAccountRoutes(
   );
 }
 
-// ============================================================================
-// Helper to create persisted state (same as in app.ts)
-// ============================================================================
-
-function createPersistedState(app: FastifyInstance) {
-  return {
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.list(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions(),
-    },
-  };
-}

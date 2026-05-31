@@ -10,6 +10,9 @@ export type ConfigRevision = {
 };
 
 export class ConfigRevisionService {
+  /** Cap on retained revision history — oldest are trimmed beyond this. */
+  static readonly MAX_REVISIONS = 50;
+
   private currentConfig: Record<string, unknown>;
   private readonly revisions: ConfigRevision[] = [];
 
@@ -19,6 +22,13 @@ export class ConfigRevisionService {
   ) {
     this.currentConfig = structuredClone(initialConfig);
     this.revisions.push(...initialRevisions.map((revision) => structuredClone(revision)));
+    this.trim();
+  }
+
+  private trim(): void {
+    if (this.revisions.length > ConfigRevisionService.MAX_REVISIONS) {
+      this.revisions.splice(0, this.revisions.length - ConfigRevisionService.MAX_REVISIONS);
+    }
   }
 
   getCurrent(): Record<string, unknown> {
@@ -43,9 +53,14 @@ export class ConfigRevisionService {
   ): ConfigRevision {
     this.validateDraft(config);
 
+    // Monotonic version derived from the highest seen version, not array length
+    // (which would repeat numbers once old revisions are trimmed).
+    const nextVersion =
+      this.revisions.reduce((max, r) => Math.max(max, r.version), 0) + 1;
+
     const revision: ConfigRevision = {
       id: `config_rev_${randomUUID()}`,
-      version: this.revisions.length + 1,
+      version: nextVersion,
       config: structuredClone(config),
       createdAt: new Date(),
       publishedAt: new Date(),
@@ -53,6 +68,7 @@ export class ConfigRevisionService {
     };
 
     this.revisions.push(revision);
+    this.trim();
     this.currentConfig = structuredClone(config);
     return {
       ...revision,

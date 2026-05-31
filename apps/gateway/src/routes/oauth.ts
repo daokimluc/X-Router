@@ -342,7 +342,7 @@ export async function exchangeOAuthCallbackAccount(
     }
   });
 
-  await saveRuntimeState(app);
+  app.persistState();
   record.accountId = account.id;
   record.accountCreated = true;
   record.tokenExchanged = true;
@@ -463,37 +463,14 @@ async function completePendingOAuthAccount(
     targetType: "account",
     targetId: account.id
   });
-  void app.persistenceService.save({
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.list(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions()
-    }
-  });
+  // OAuth callback is a GET — NOT matched by the onSend persist hook. Persist
+  // the FULL state via the canonical path so adding an account never truncates
+  // teams/pricing/marketplace/… or blanks raw API-key material.
+  app.persistState();
 
   callback.accountId = account.id;
   callback.accountCreated = true;
   oauthPendingAccounts.delete(pending.state);
-}
-
-async function saveRuntimeState(app: FastifyInstance): Promise<void> {
-  await app.persistenceService.save({
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.list(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions()
-    }
-  });
 }
 
 function findOAuthAccount(
@@ -678,19 +655,8 @@ async function completeOAuthSessionCallback(
     targetId: sessionId
   });
 
-  // Persist
-  void app.persistenceService.save({
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.list(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions()
-    }
-  });
+  // Persist the FULL state (canonical builder) — never a partial subset.
+  app.persistState();
 
   // Mark session as completed
   oauthSessionStore.complete(sessionId, accountId);

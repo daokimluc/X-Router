@@ -343,19 +343,9 @@ export async function handleOAuthPKCECallback(
     targetId: accountId,
   });
 
-  // 9. Persist state
-  void app.persistenceService.save({
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.list(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions(),
-    },
-  });
+  // 9. Persist the FULL state via the canonical builder (never a partial subset
+  // — that dropped teams/pricing/marketplace and blanked raw key material).
+  app.persistState();
 
   // 10. Clean up pending state
   pendingOAuthStates.delete(state);

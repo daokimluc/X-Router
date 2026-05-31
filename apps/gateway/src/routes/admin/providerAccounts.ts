@@ -22,6 +22,7 @@ import { createAdminAuthMiddleware } from "../../middleware/adminAuth.js";
 import type { ProviderAccount } from "../../providers/base/ProviderAccount.js";
 import type { ProviderTypeDefinition } from "../../providers/registry/ProviderTypeDefinition.js";
 import type { ProviderHealth } from "../../providers/base/types.js";
+import { createPersistedState } from "../../services/createPersistedState.js";
 
 // ============================================================================
 // Request Schemas
@@ -795,23 +796,4 @@ export async function registerProviderAccountManagementRoutes(
       }
     }
   );
-}
-
-// ============================================================================
-// Helper to create persisted state
-// ============================================================================
-
-function createPersistedState(app: FastifyInstance) {
-  return {
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.list(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions(),
-    },
-  };
 }

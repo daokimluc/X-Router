@@ -46,7 +46,9 @@ function stubPersistence(marketplaceSlice: Record<string, unknown>): Persistence
   return {
     load: async () => state,
     save: async () => {},
-    enqueueSave: () => {}
+    saveDebounced: () => {},
+    flush: async () => {},
+    drain: async () => {}
   } as unknown as PersistenceService;
 }
 
