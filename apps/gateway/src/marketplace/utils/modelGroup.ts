@@ -70,10 +70,12 @@ export function expandModelGroups(models: string[]): Record<string, string[]> {
 }
 
 /**
- * Expand a plan's `modelGroups` into the concrete model list to display. `"*"`
- * (grant-all) returns `["*"]` verbatim — the caller renders "all models" rather
- * than enumerating. Otherwise returns the union of the granted groups' members
- * from `groupMembers` (typically the output of {@link expandModelGroups}).
+ * Expand a plan's `modelGroups` into the concrete model list to display. Each
+ * entry may be a GROUP label or a specific MODEL name (admins set both):
+ *   - `"*"` (grant-all) → `["*"]` verbatim (caller renders "all models").
+ *   - a known group key → the union of its members from `groupMembers`.
+ *   - anything else → treated as a literal model name, kept as-is.
+ * (typically `groupMembers` is the output of {@link expandModelGroups}.)
  */
 export function modelsForPlanGroups(
   planGroups: string[],
@@ -81,16 +83,26 @@ export function modelsForPlanGroups(
 ): string[] {
   if (planGroups.includes("*")) return ["*"];
   const seen = new Set<string>();
-  for (const g of planGroups) {
-    for (const m of groupMembers[g] ?? []) seen.add(m);
+  for (const entry of planGroups) {
+    if (Object.prototype.hasOwnProperty.call(groupMembers, entry)) {
+      for (const m of groupMembers[entry]) seen.add(m); // entry is a group label
+    } else {
+      seen.add(entry); // entry is a specific model name
+    }
   }
   return Array.from(seen);
 }
 
 /**
- * Whether a model's group is granted by a plan's group list. `"*"` in the
- * plan's groups matches every group.
+ * Whether a model is granted by a plan's `modelGroups` list. An entry in the
+ * list may be either a GROUP label (`"claude"`, `"free"`, `"*"`) or a specific
+ * MODEL name (`"claude-opus-4-8"`) — admins set both forms. `"*"` matches every
+ * group. The model's own name (when provided) is matched literally so a plan
+ * scoped to explicit models works too.
  */
-export function matchesGroups(group: string, planGroups: string[]): boolean {
-  return planGroups.includes("*") || planGroups.includes(group);
+export function matchesGroups(group: string, planGroups: string[], model?: string): boolean {
+  if (planGroups.includes("*")) return true;
+  if (planGroups.includes(group)) return true;
+  if (model && planGroups.includes(model)) return true;
+  return false;
 }

@@ -96,7 +96,7 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
     if (!model) return; // no model on this route → no scope/bucket enforcement
 
     const group = modelGroupOf(model);
-    if (!matchesGroups(group, plan.modelGroups)) {
+    if (!matchesGroups(group, plan.modelGroups, model)) {
       return reject(403, {
         error: {
           type: "forbidden",

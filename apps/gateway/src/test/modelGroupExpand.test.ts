@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   modelGroupOf,
+  matchesGroups,
   expandModelGroups,
   modelsForPlanGroups,
   freeModels,
@@ -64,7 +65,37 @@ describe("modelsForPlanGroups", () => {
     expect(out.length).toBeGreaterThan(0);
   });
 
-  it("unknown group → empty (no crash)", () => {
-    expect(modelsForPlanGroups(["nope"], members)).toEqual([]);
+  it("an entry that is not a known group is treated as a literal model name", () => {
+    // "nope" isn't a group key → kept verbatim as a model (admins may list a
+    // model name directly in modelGroups).
+    expect(modelsForPlanGroups(["nope"], members)).toEqual(["nope"]);
+  });
+
+  it("treats a specific model name in modelGroups as a literal member", () => {
+    // Admins sometimes put model names (not group labels) in a plan's modelGroups.
+    const out = modelsForPlanGroups(["claude-opus-4-8", "claude-sonnet-4-6"], members).sort();
+    expect(out).toEqual(["claude-opus-4-8", "claude-sonnet-4-6"]);
+  });
+
+  it("mixes group labels and literal model names", () => {
+    const out = modelsForPlanGroups(["codex", "claude-opus-4-8"], members).sort();
+    expect(out).toEqual(["claude-opus-4-8", "gpt-5.5"]);
+  });
+});
+
+describe("matchesGroups accepts group labels AND literal model names", () => {
+  it("matches by group label", () => {
+    expect(matchesGroups("claude", ["claude"], "claude-opus-4-8")).toBe(true);
+  });
+  it("matches by literal model name when plan lists models not groups", () => {
+    // plan.modelGroups = specific models; the model's group is "claude" which is
+    // NOT in the list, but the literal model name IS → must match.
+    expect(matchesGroups("claude", ["claude-opus-4-8", "claude-sonnet-4-6"], "claude-opus-4-8")).toBe(true);
+  });
+  it("rejects a model neither by group nor literal name", () => {
+    expect(matchesGroups("gemini", ["claude-opus-4-8"], "gemini-2.5-pro")).toBe(false);
+  });
+  it("'*' matches everything", () => {
+    expect(matchesGroups("anything", ["*"], "whatever")).toBe(true);
   });
 });
