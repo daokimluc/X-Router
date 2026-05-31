@@ -365,7 +365,12 @@ export class PersistenceService implements StateStore {
   /** Flush any pending save and wait for all writes to settle (shutdown). */
   async drain(): Promise<void> {
     await this.flush();
-    await this.writing.catch(() => undefined);
+    // Surface a failed final write rather than silently dropping it — the
+    // operator should know the last state mutation may not have persisted.
+    await this.writing.catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(`[persistence] final save on drain failed: ${String(err)}`);
+    });
   }
 }
 

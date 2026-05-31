@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { NoAvailableAccountError, type AccountPool } from "../../account-pool/AccountPool.js";
 import { CircuitBreakerOpenError } from "../../services/CircuitBreaker.js";
 import { ProviderError } from "../../providers/base/ProviderErrors.js";
-import { ConcurrencyLimitError } from "../../services/ConcurrencyLimiter.js";
+import { ConcurrencyLimitError, type ConcurrencyLimiter } from "../../services/ConcurrencyLimiter.js";
+import type { RequestQueueService } from "../../services/RequestQueueService.js";
 import { isProviderStream } from "../../utils/sse.js";
 import { resolveAccountProxyOptions } from "../../proxy/resolveAccountProxy.js";
 import type { ResolvedModelCandidate, ReasoningEffort } from "../../router/ModelResolver.js";
@@ -63,6 +64,40 @@ function readAccessToken(payload: Record<string, unknown>): string | undefined {
  * lifecycle, so the OpenAI/Anthropic failure-path divergences (F1-F6b, R3) can
  * no longer drift apart.
  */
+
+/**
+ * Acquire a global concurrency slot, falling back to the request queue when the
+ * limiter is saturated. A freed slot is NOT reserved for the woken waiter, so a
+ * fresh request can race in and take it; if the re-acquire then fails, this
+ * re-queues instead of 503-ing a request that already waited (F1 handoff race).
+ * Bounded by `maxAttempts` so a persistently-full gateway still surfaces the
+ * overload error rather than looping forever. Returns the release fn.
+ */
+export async function acquireGlobalWithQueue(
+  limiter: Pick<ConcurrencyLimiter, "acquireGlobal">,
+  queue: Pick<RequestQueueService, "isEnabled" | "waitForSlot">,
+  maxAttempts = 8
+): Promise<() => void> {
+  try {
+    return limiter.acquireGlobal();
+  } catch (concurrencyErr) {
+    if (!queue.isEnabled()) {
+      throw concurrencyErr;
+    }
+    for (let attempt = 0; ; attempt += 1) {
+      await queue.waitForSlot(); // throws on queue-full / timeout
+      try {
+        return limiter.acquireGlobal();
+      } catch (raceErr) {
+        if (attempt + 1 >= maxAttempts) {
+          throw raceErr; // lost the race too many times — surface overload
+        }
+        // else: lost the freed slot to a racing request → re-queue + wait again
+      }
+    }
+  }
+}
+
 export class RequestPipeline {
   constructor(private readonly app: FastifyInstance) {}
 
@@ -76,19 +111,10 @@ export class RequestPipeline {
     const app = this.app;
 
     // F1 — global concurrency + queue acquire, wired ONCE for both protocols.
-    // When the limiter rejects and the queue is enabled, wait for a slot;
-    // release() in `finally` wakes the next waiter regardless of protocol.
-    let releaseGlobal: (() => void) | undefined;
-    try {
-      releaseGlobal = app.concurrencyLimiter.acquireGlobal();
-    } catch (concurrencyErr) {
-      if (app.requestQueueService.isEnabled()) {
-        await app.requestQueueService.waitForSlot();
-        releaseGlobal = app.concurrencyLimiter.acquireGlobal();
-      } else {
-        throw concurrencyErr;
-      }
-    }
+    const releaseGlobal = await acquireGlobalWithQueue(
+      app.concurrencyLimiter,
+      app.requestQueueService
+    );
 
     try {
       let lastError: unknown;

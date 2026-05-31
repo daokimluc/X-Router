@@ -233,7 +233,11 @@ export class ConfigStore implements StateStore {
 
   async drain(): Promise<void> {
     await this.flush();
-    await this.writing.catch(() => undefined);
+    // Surface a failed final write rather than silently dropping it.
+    await this.writing.catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(`[config-store] final save on drain failed: ${String(err)}`);
+    });
   }
 
   // ── internals ──────────────────────────────────────────────
