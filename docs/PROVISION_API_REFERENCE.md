@@ -40,7 +40,8 @@
 | GET | `/provision/earnings/platform` | | Platform margin |
 | PUT | `/provision/markup` | | Đặt markup |
 | GET | `/provision/markup` | | Đọc markup |
-| GET | `/provision/plans` | | Liệt kê gói (cho UI) |
+| GET | `/provision/plans` | | Liệt kê gói (cho UI) — kèm `models` đã expand |
+| GET | `/provision/model-groups` | | group → danh sách model (cho plan card) |
 | GET | `/provision/usage` | | Đối soát usage (token/cost) |
 | GET | `/provision/settlements` | | Đối soát settlement per-record (tiền chính xác) |
 | GET | `/provision/webhook` | | Đọc cấu hình webhook |
@@ -293,9 +294,30 @@ Body (cả hai optional, >= 0):
 ```json
 { "plans": [ { "id": "plan_claude", "name": "Claude", "priceUsd": 10,
    "modelGroups": ["claude"],
+   "models": ["claude-opus-4-8", "claude-sonnet-4-6"],
    "buckets": { "hourUsd": 0.5, "dayUsd": 3, "monthUsd": 10 },
    "overageEnabled": false, "paygDailyLimitUsd": null } ] }
 ```
+> `models` = danh sách model cụ thể của plan, expand sẵn từ `modelGroups` (cùng
+> bộ phân loại enforcement dùng — không lệch). Plan grant-all (`modelGroups: ["*"]`)
+> → `models: ["*"]` (render "Tất cả model", không liệt kê). Group `free` luôn được
+> seed từ Set cứng nên plan Free không bao giờ rỗng.
+
+### GET /provision/model-groups  — group → danh sách model
+Query (optional): `?activeOnly=true` (chỉ giữ model có listing enabled của seller đã duyệt).
+200:
+```json
+{ "groups": {
+    "claude": ["claude-opus-4-8", "claude-sonnet-4-6"],
+    "codex":  ["gpt-5.5"],
+    "gemini": ["gemini-2.5-pro"],
+    "free":   ["gpt-4o-mini", "gemini-1.5-flash", "gemini-2.0-flash"],
+    "other":  []
+} }
+```
+> Nguồn: canonical base models phân loại qua `modelGroupOf` (single source). `free`
+> luôn = Set cứng (`FREE_MODELS`), độc lập với canonical. Provision-scope (KHÔNG
+> admin). Mapping gần tĩnh → website cache vài phút thoải mái.
 
 ### GET /provision/usage  — đối soát (bù cho webhook lỡ)
 Query (tất cả optional): `since` (ISO-8601), `keyId`, `limit` (1..1000, mặc định 100).

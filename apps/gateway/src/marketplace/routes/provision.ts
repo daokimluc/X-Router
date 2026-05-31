@@ -11,6 +11,22 @@ import type { AppConfig } from "../../config.js";
 import { createProvisionAuthMiddleware } from "../../middleware/provisionAuth.js";
 import { RateLimitService } from "../../services/RateLimitService.js";
 import { registerListingMappings } from "../policy/sellerRegistry.js";
+import { expandModelGroups, modelsForPlanGroups } from "../utils/modelGroup.js";
+
+/**
+ * group -> member models from the canonical base-model list, classified by the
+ * shared modelGroupOf (so it never drifts from enforcement). When `activeOnly`,
+ * keep only canonical models that have at least one ENABLED listing. The `free`
+ * group is always seeded from the curated FREE_MODELS set (not derivable from
+ * canonical), so a Free plan never shows zero models.
+ */
+function canonicalGroupMembers(app: FastifyInstance, activeOnly: boolean): Record<string, string[]> {
+  let models = app.sellerService.listCanonicalBaseModels();
+  if (activeOnly) {
+    models = models.filter((m) => app.sellerService.listingCostFor(m).length > 0);
+  }
+  return expandModelGroups(models);
+}
 
 export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig): void {
   const provisionAuth = createProvisionAuthMiddleware(config);
@@ -262,7 +278,24 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   });
 
   app.get("/provision/plans", opts, async () => {
-    return { plans: app.planService.list() };
+    // marketplace-plan-groups — embed the expanded model list per plan so the
+    // website's plan card shows concrete models, not raw group labels. `["*"]`
+    // stays as ["*"] (caller renders "all models"). Group source = canonical
+    // base models classified by modelGroupOf (the same fn enforcement uses).
+    const members = canonicalGroupMembers(app, false);
+    const plans = app.planService.list().map((p) => ({
+      ...p,
+      models: modelsForPlanGroups(p.modelGroups, members)
+    }));
+    return { plans };
+  });
+
+  // marketplace-plan-groups — group -> member models, for the website to render
+  // plan chips. Provision-scope (display data, NOT admin). `?activeOnly=true`
+  // keeps only canonical models that have at least one ENABLED listing.
+  app.get("/provision/model-groups", opts, async (request) => {
+    const q = z.object({ activeOnly: z.coerce.boolean().optional() }).parse(request.query ?? {});
+    return { groups: canonicalGroupMembers(app, q.activeOnly === true) };
   });
 
   app.get("/provision/sellers", opts, async (request) => {
