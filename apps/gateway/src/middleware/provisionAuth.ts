@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { AppConfig } from "../config.js";
 import { hashApiKey } from "../utils/hash.js";
 
@@ -19,13 +20,13 @@ declare module "fastify" {
  * here. Snapshot is fine — provision keys are not changed at runtime.
  */
 export function createProvisionAuthMiddleware(config: AppConfig) {
-  const keys = new Set(config.provisionApiKeys);
+  const keys = config.provisionApiKeys;
   return async function provisionAuthMiddleware(
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     const token = parseBearerToken(request.headers.authorization);
-    if (!token || !keys.has(token)) {
+    if (!token || !matchesAnyKey(token, keys)) {
       await reply.code(401).send({
         error: {
           type: "authentication_error",
@@ -37,6 +38,24 @@ export function createProvisionAuthMiddleware(config: AppConfig) {
     }
     request.provisionAuth = { apiKeyHash: hashApiKey(token) };
   };
+}
+
+/**
+ * Constant-time membership: compare the candidate against every configured key
+ * with timingSafeEqual (over their sha256 hashes, so unequal lengths don't leak
+ * and don't throw). The provision key is a god-mode secret — avoid leaking it
+ * byte-by-byte via comparison timing. Always scans all keys (no early return).
+ */
+function matchesAnyKey(token: string, keys: string[]): boolean {
+  const candidate = createHash("sha256").update(token).digest();
+  let matched = false;
+  for (const key of keys) {
+    const known = createHash("sha256").update(key).digest();
+    if (candidate.length === known.length && timingSafeEqual(candidate, known)) {
+      matched = true;
+    }
+  }
+  return matched;
 }
 
 function parseBearerToken(value: string | undefined): string | null {

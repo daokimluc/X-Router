@@ -332,6 +332,20 @@ export async function registerAnthropicRoutes(
                     );
                   }
 
+                  // Release held reservations on mid-stream failure (PAYG wallet
+                  // hold + spend buckets) — else they stay charged for a request
+                  // that never completed.
+                  if (request.spendReservation) {
+                    const ids = request.spendReservation.id.split("|");
+                    for (const id of ids) {
+                      app.spendLedgerService.release(id);
+                    }
+                    request.spendReservation = undefined;
+                  }
+                  app.marketplaceSeam.runSettlement({
+                    request, outcome: "failure", model: body.model, promptTokens: 0, completionTokens: 0
+                  });
+
                   if (!reply.raw.writableEnded) {
                     reply.raw.end();
                   }

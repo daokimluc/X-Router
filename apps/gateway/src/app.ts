@@ -421,6 +421,7 @@ export async function buildApp(
       persistenceEnabled &&
       (
         (request.url.startsWith("/admin/") && ["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) ||
+        (request.url.startsWith("/provision/") && ["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) ||
         (request.url.startsWith("/v1/") && request.method === "POST")
       ) &&
       reply.statusCode < 400

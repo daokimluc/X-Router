@@ -25,6 +25,7 @@ import { secondsUntilNextHourUTC, secondsUntilNextDayUTC, secondsUntilNextMonthU
 import type { WalletService } from "../services/WalletService.js";
 import type { PlanService } from "../services/PlanService.js";
 import type { PaygDecision } from "../services/PaygDecision.js";
+import type { MarketPricingService } from "../services/MarketPricingService.js";
 import { modelGroupOf, matchesGroups } from "../utils/modelGroup.js";
 
 declare module "fastify" {
@@ -48,6 +49,14 @@ export type MarketplacePolicyDeps = {
   spendLedgerService: SpendLedgerService;
   modelPricingService: ModelPricingService;
   paygDecision: PaygDecision;
+  /**
+   * money-correctness — settlement charges the SELL price (cost × (1+markup)) but
+   * the pre-routing estimate only has engine list cost. Inflate the estimate by
+   * the default markup so the funds-check + PAYG-daily reservation are on a
+   * sell-price-approximate basis (avoids passing a low estimate then draining the
+   * wallet to the floor at settle). Optional — falls back to raw list cost.
+   */
+  marketPricingService?: MarketPricingService;
   getBody: (req: FastifyRequest) => { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined;
   /** provision-webhook (#7) — emit quota.blocked on a hard rejection. Optional. */
   webhookService?: WebhookService;
@@ -98,7 +107,10 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
     }
 
     const scope = `key:${keyId}:grp:${group}`;
-    const estimateUsd = estimateUpperBoundCost(model, deps.getBody(ctx.request), deps.modelPricingService);
+    // Inflate the list-cost estimate by the default markup so the reservation +
+    // PAYG funds-check approximate the sell price actually charged at settle.
+    const markupMult = 1 + (deps.marketPricingService?.getDefaultMarkup() ?? 0);
+    const estimateUsd = estimateUpperBoundCost(model, deps.getBody(ctx.request), deps.modelPricingService) * markupMult;
     const reserve = deps.spendLedgerService.reserve({
       scope,
       estimateUsd,

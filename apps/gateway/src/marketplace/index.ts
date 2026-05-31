@@ -161,6 +161,7 @@ export function registerMarketplace(
       planService,
       spendLedgerService: app.spendLedgerService,
       modelPricingService: app.modelPricingService,
+      marketPricingService,
       paygDecision,
       getBody: (req) => req.body as { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined,
       webhookService: app.webhookService
@@ -172,8 +173,10 @@ export function registerMarketplace(
   // the route from the account actually leased (not a pre-routing guess).
   app.marketplaceSeam.setCandidateRanker(createCandidateRanker(sellerService));
   app.marketplaceSeam.setRoutedCapture((req, model, accountId) => {
-    const ctxRouted = routedContextFor(sellerService, marketPricingService, model, accountId);
-    if (ctxRouted) req.routed = ctxRouted;
+    // Always (re)assign — on failover to an uncosted account, ctxRouted is null
+    // and request.routed MUST clear, else settlement would credit the previously
+    // captured (failed) seller for a request a different account served.
+    req.routed = routedContextFor(sellerService, marketPricingService, model, accountId) ?? undefined;
   });
   // Per-account cost lookup so an instance using the `lowest_cost` pool strategy
   // can actually rank by seller cost at acquire time (not just the candidate-layer

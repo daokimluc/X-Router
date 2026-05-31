@@ -309,6 +309,20 @@ export async function registerOpenAIRoutes(
                   );
                 }
 
+                // Release held reservations on a mid-stream failure — otherwise
+                // the PAYG wallet hold (debited up-front at enforce time) and the
+                // spend buckets stay charged for a request that never completed.
+                if (request.spendReservation) {
+                  const ids = request.spendReservation.id.split("|");
+                  for (const id of ids) {
+                    app.spendLedgerService.release(id);
+                  }
+                  request.spendReservation = undefined;
+                }
+                app.marketplaceSeam.runSettlement({
+                  request, outcome: "failure", model: body.model, promptTokens: 0, completionTokens: 0
+                });
+
                 request.log.warn(
                   {
                     requestId: request.id,
@@ -468,6 +482,19 @@ export async function registerOpenAIRoutes(
           }
         }
       }
+
+      // Every candidate exhausted (all retryable) or none available — release any
+      // held reservation + run failure settlement so a wallet hold isn't leaked.
+      if (request.spendReservation) {
+        const ids = request.spendReservation.id.split("|");
+        for (const id of ids) {
+          app.spendLedgerService.release(id);
+        }
+        request.spendReservation = undefined;
+      }
+      app.marketplaceSeam.runSettlement({
+        request, outcome: "failure", model: body.model, promptTokens: 0, completionTokens: 0
+      });
 
       if (lastError) {
         throw lastError;

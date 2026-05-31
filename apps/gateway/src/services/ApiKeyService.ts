@@ -50,6 +50,12 @@ export type CreatedInternalApiKey = InternalApiKeyRecord & {
 
 export class ApiKeyService {
   private readonly keys = new Map<string, InternalApiKeyRecord & { key: string }>();
+  /**
+   * Monotonic sequence for `internal_key_N` ids. Bumped past any seeded/loaded id
+   * so a hard delete (which shrinks the map) can never make a later create reuse
+   * a live id — id collisions would silently cross-wire wallets/plans/settlements.
+   */
+  private nextSeq = 0;
 
   /**
    * @param seedKeys  Optional initial keys (legacy boot-strap, mainly used
@@ -65,7 +71,17 @@ export class ApiKeyService {
         enabled: true,
         createdAt: new Date()
       });
+      this.bumpSeq(`internal_key_${index + 1}`);
     });
+  }
+
+  /** Advance nextSeq past the numeric suffix of an `internal_key_N` id. */
+  private bumpSeq(id: string): void {
+    const m = /^internal_key_(\d+)$/.exec(id);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > this.nextSeq) this.nextSeq = n;
+    }
   }
 
   isValid(key: string): boolean {
@@ -225,7 +241,7 @@ export class ApiKeyService {
   } = {}): CreatedInternalApiKey {
     const key = `igw_${randomBytes(24).toString("hex")}`;
     const record = {
-      id: `internal_key_${this.keys.size + 1}`,
+      id: `internal_key_${this.nextSeq + 1}`,
       key,
       keyHash: hashApiKey(key),
       enabled: true,
@@ -249,6 +265,7 @@ export class ApiKeyService {
     };
 
     this.keys.set(key, record);
+    this.bumpSeq(record.id);
     return structuredClone(record);
   }
 
@@ -258,6 +275,7 @@ export class ApiKeyService {
       ...structuredClone(record),
       key: rawKey
     });
+    this.bumpSeq(record.id);
   }
 
   /** Returns true if the key has expired (expiresAt set and in the past). */
