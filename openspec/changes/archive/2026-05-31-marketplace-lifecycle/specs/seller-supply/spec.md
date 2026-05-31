@@ -26,6 +26,8 @@ at their reserve-time cost.
 - **WHEN** a seller creates a listing whose `baseModel` is not in the canonical list
 - **THEN** the operation SHALL be rejected
 
+## ADDED Requirements
+
 ### Requirement: Seller terms are editable after creation
 
 The gateway SHALL allow an admin to update a seller's `commissionPct` and
