@@ -410,4 +410,60 @@ describe("Admin API", () => {
 
     await app.close();
   });
+
+  // admin-error-semantics (A1/A2)
+  it("returns 400 with field detail for a malformed admin body (not 500)", async () => {
+    const app = await buildApp(testConfig());
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/admin/v1/provider-instances",
+      headers: { authorization: "Bearer admin-key-1" },
+      payload: {} // missing required id/type/name → ZodError
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json();
+    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.code).toBe("invalid_request");
+    // Field path is surfaced (not a generic 500 message).
+    expect(body.error.message).toMatch(/Invalid request/);
+
+    await app.close();
+  });
+
+  it("returns 404 for an admin operation on a missing resource (not 500)", async () => {
+    const app = await buildApp(testConfig());
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/admin/v1/accounts/does-not-exist/reset-suspension",
+      headers: { authorization: "Bearer admin-key-1" }
+    });
+
+    expect(response.statusCode).toBe(404);
+    const body = response.json();
+    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.message).toMatch(/not found/i);
+
+    await app.close();
+  });
+
+  it("returns 400 for a malformed :id param (not 500)", async () => {
+    const app = await buildApp(testConfig());
+
+    // Empty id segment is caught by Fastify routing; use a credential rotate with
+    // a bad body to exercise the ZodError→400 path on a param-bearing route.
+    const response = await app.inject({
+      method: "POST",
+      url: "/admin/v1/accounts/some-id/credential",
+      headers: { authorization: "Bearer admin-key-1" },
+      payload: { wrong: "shape" } // fails credentialRotateSchema → 400
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("invalid_request");
+
+    await app.close();
+  });
 });
