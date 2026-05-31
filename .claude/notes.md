@@ -334,3 +334,23 @@ Gateway **675 pass / 7 skip** (was 637 baseline → +38), tsc clean, all 5 `open
 **Known-remaining (low severity, deferred):** F1 queue handoff can still 503 a woken waiter if a fresh request steals the freed global slot (pre-existing); shutdown drain swallows a failed final save (low impact — each mutation re-saves full state).
 
 **Manual smoke still on user:** restart global x-router (migrates JSON→SQLite once, keeps JSON as rollback) → verify accounts/keys/models intact; kill -9 mid-write; force half-open + auth-fail probe → recovers after cooldown; confirm single refresh loop in logs.
+
+## RELEASES v0.4.0 → v0.4.4 + marketplace endpoints + ops fixes (2026-05-31, ALL PUSHED to origin/main)
+
+After the 5 core-engine changes landed, shipped a series of releases (all committed + tagged + pushed; openspec all archived, `npx openspec list` = none):
+
+**v0.4.0** — release of the 5 core-engine changes + post-review fixes (above).
+
+**v0.4.1 — usage backfill (real data fix).** persistence-durability moved `usage` out of JSON into SQLite `usage_log`, but the config migration didn't carry usage → Usage page blank after upgrade (data not lost, just unread). Added `UsageLogStore.importRows()` (preserves ts+id, INSERT OR IGNORE) + one-time backfill in app boot when usage_log empty. Ran on user's real DB: 27 rows recovered.
+
+**v0.4.2 — marketplace flag in config.json.** Global `x-router` bin never read MARKETPLACE_ENABLED → always started marketplace OFF (only the dev `npm run dev` + apps/gateway/.env turned it on). bin/x-router.js now reads `marketplaceEnabled` from `~/.x-router/config.json` (env wins) + passes to gateway in both launch paths + new `x-router --set-marketplace on|off`. Root cause of "vào lại không thấy marketplace". See [[xrouter-foza-config-alignment]].
+
+**v0.4.3 — provision-plan-groups** (change `marketplace-plan-groups`). `modelGroup.ts` gained `expandModelGroups`/`modelsForPlanGroups`/`freeModels`/`ALL_GROUPS`; `GET /provision/plans` embeds `models`, new `GET /provision/model-groups?activeOnly=`. For the Foza plan card. See [[marketplace-listing-metrics]].
+
+**v0.4.4 — plan modelGroups accepts model names.** Found on real data: `plan_claude.modelGroups = ["claude-opus-4-8","claude-sonnet-4-6"]` (model names, not group labels). Two bugs: (1) display `modelsForPlanGroups` returned `[]`; (2) WORSE — enforcement `matchesGroups` only compared the model's group, so a model-name plan rejected EVERY request with 403 model_not_in_plan (plan unusable). Fixed both: `matchesGroups(group, planGroups, model?)` matches literal model name too (callsite passes model); `modelsForPlanGroups` keeps a non-group entry as a literal model. Backward compatible.
+
+**Also: `GET /provision/listings/metrics`** (change `marketplace-listing-metrics`, in v0.4.x) — per-listing card metrics joined from settlement_log + ProviderAccount.runtime + LatencyTracker. + `CredentialWritebackService` persist fix.
+
+**The "known-remaining" F1 queue-handoff + drain-swallow bugs ARE NOW FIXED** (acquireGlobalWithQueue re-queue loop; drain logs failed final save).
+
+**Ops state:** global `x-router` (v0.4.4) is the operational instance — port 3100, `~/.x-router/` data, marketplace ON. Do NOT use `npm run dev` (8080, apps/gateway/data/, different/older store) as operational. Key alignment: adminApiKeys=`admin`, provisionApiKeys=`provision-key-1`, internalApiKeys=`xrk_b9e0...`; Foza website `.env.local` synced to these. Full guide: `D:/Project/XRouter.ai/docs/XROUTER_CONFIG_SOURCE_OF_TRUTH.md`. Run gateway tests: `cd apps/gateway && rtk proxy npx vitest run --root .` (plain vitest picks up unrelated workspaces). Suite: 716 pass / 7 skip.
