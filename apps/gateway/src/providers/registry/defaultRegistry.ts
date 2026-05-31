@@ -48,6 +48,19 @@ export type DefaultRegistryOptions = {
    * subsequent requests reuse the new token.
    */
   onCredentialRefreshed?: (accountId: string, payload: Record<string, unknown>) => void;
+  /**
+   * Optional per-account serializer for an adapter's in-band token refresh, so
+   * it cannot run concurrently with the background/on-401 refresh paths for the
+   * same account (a rotating refresh token is then consumed once). The callback
+   * receives the stale credential snapshot and a refresh routine; it should
+   * acquire the per-account lock, re-read the LIVE credential, and either return
+   * it (already fresh) or run the routine.
+   */
+  refreshCoordinator?: (
+    accountId: string,
+    stale: Record<string, unknown>,
+    doRefresh: (current: Record<string, unknown>) => Promise<Record<string, unknown>>
+  ) => Promise<Record<string, unknown>>;
 };
 
 export function createDefaultProviderRegistry(
@@ -59,7 +72,12 @@ export function createDefaultProviderRegistry(
   registry.register(mockProviderDefinition, new MockProviderAdapter());
   registry.register(
     kiroProviderDefinition,
-    new KiroProviderAdapter(undefined, undefined, options.onCredentialRefreshed)
+    new KiroProviderAdapter(
+      undefined,
+      undefined,
+      options.onCredentialRefreshed,
+      options.refreshCoordinator as ConstructorParameters<typeof KiroProviderAdapter>[3]
+    )
   );
   registry.register(windsurfProviderDefinition, new WindsurfProviderAdapter());
 

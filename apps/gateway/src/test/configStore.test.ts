@@ -143,6 +143,95 @@ describe("ConfigStore (non-money-state-to-sqlite)", () => {
     db.close();
   });
 
+  it("preserves model-mappings that share an id but differ by publicModel", async () => {
+    const db = new Database(":memory:");
+    const store = new ConfigStore(db);
+    // Real-world data allowed two mappings with the same `id` (different public
+    // models). A bare-`id` row key would collapse them — this guards that.
+    const state = makeState({
+      modelMappings: [
+        { id: "dup", publicModel: "kiro-opus-4.7", providerInstanceId: "p1", providerType: "kiro", upstreamModel: "claude-opus-4.7", capabilities: ["chat"], enabled: true },
+        { id: "dup", publicModel: "claude-opus-4-7", providerInstanceId: "p1", providerType: "kiro", upstreamModel: "claude-opus-4.7", capabilities: ["chat"], enabled: true }
+      ] as PersistedGatewayState["modelMappings"]
+    });
+    store.importFrom(state);
+
+    const loaded = (await store.load())!;
+    expect(loaded.modelMappings).toHaveLength(2);
+    expect(loaded.modelMappings.map((m) => m.publicModel).sort()).toEqual(["claude-opus-4-7", "kiro-opus-4.7"]);
+
+    db.close();
+  });
+
+  it("a failed save rolls back, leaving the last committed state intact (crash-safety)", async () => {
+    const db = new Database(":memory:");
+    const store = new ConfigStore(db);
+    store.importFrom(makeState());
+    const good = (await store.load())!;
+    expect(good.accounts).toHaveLength(1);
+
+    // Force a mid-transaction failure: a state whose entity serialization throws.
+    const poisoned = (await store.load())!;
+    const circular: Record<string, unknown> = { id: "bad" };
+    circular.self = circular; // JSON.stringify throws on a circular ref
+    poisoned.accounts = [circular as unknown as PersistedGatewayState["accounts"][number]];
+    await expect(store.save(poisoned)).rejects.toBeTruthy();
+
+    // The interrupted transaction rolled back — the prior good state is intact.
+    const after = (await store.load())!;
+    expect(after.accounts).toHaveLength(1);
+    expect(after.accounts[0].id).toBe("acc1");
+
+    db.close();
+  });
+
+  it("delete-then-readd an identical-content row persists correctly (cache eviction)", async () => {
+    const db = new Database(":memory:");
+    const store = new ConfigStore(db);
+    store.importFrom(makeState());
+
+    // Remove the account, save (deletes the row), then re-add the SAME content.
+    const s1 = (await store.load())!;
+    const account = s1.accounts[0];
+    s1.accounts = [];
+    await store.save(s1);
+    expect((await store.load())!.accounts).toHaveLength(0);
+
+    const s2 = (await store.load())!;
+    s2.accounts = [account];
+    await store.save(s2);
+
+    // The re-added row must be present after a fresh reload — guards the diff
+    // cache from skipping the re-insert because of a stale (un-evicted) entry.
+    const reloaded = (await store.load())!;
+    expect(reloaded.accounts).toHaveLength(1);
+    expect(reloaded.accounts[0].id).toBe("acc1");
+
+    db.close();
+  });
+
+  it("preserves list order after a mid-list insert (ord not stale)", async () => {
+    const db = new Database(":memory:");
+    const store = new ConfigStore(db);
+    const mk = (id: string, pm: string) => ({ id, publicModel: pm, providerInstanceId: "p1", providerType: "kiro", upstreamModel: pm, capabilities: ["chat"], enabled: true });
+    store.importFrom(makeState({
+      modelMappings: [mk("a", "ma"), mk("c", "mc")] as PersistedGatewayState["modelMappings"]
+    }));
+
+    const s = (await store.load())!;
+    s.modelMappings = [
+      s.modelMappings[0],
+      mk("b", "mb") as PersistedGatewayState["modelMappings"][number],
+      s.modelMappings[1]
+    ];
+    await store.save(s);
+
+    const reloaded = (await store.load())!;
+    expect(reloaded.modelMappings.map((m) => m.id)).toEqual(["a", "b", "c"]);
+
+    db.close();
+  });
+
   it("debounced save coalesces and drain flushes", async () => {
     const db = new Database(":memory:");
     const store = new ConfigStore(db, { debounceMs: 10 });

@@ -69,9 +69,23 @@ export class RefreshLockService {
   }
 
   /**
+   * Serialize an arbitrary per-account refresh routine (keyed by accountId) so it
+   * cannot run concurrently with any other refresh for the same account — incl.
+   * an adapter's in-band token refresh during a request. The callback owns its
+   * own re-check (it must re-read the live credential inside the lock and skip if
+   * already rotated) — this only provides the mutual exclusion that the
+   * background/on-401 paths also funnel through.
+   */
+  async serialize<T>(accountId: string, fn: () => Promise<T>): Promise<T> {
+    return this.mutex.runExclusive(accountId, fn);
+  }
+
+  /**
    * Refresh an account's credential under the per-account lock, re-checking
-   * inside the lock whether a refresh is still required. This is the single
-   * funnel for every refresh trigger.
+   * inside the lock whether a refresh is still required. Used by the periodic
+   * background loop and the on-401 path; an adapter's in-band refresh serializes
+   * against these through {@link serialize} (same per-account mutex), so all
+   * refresh paths for one account are mutually exclusive.
    *
    * - `background`: skip if the stored credential's expiry is already beyond the
    *   refresh window (another path refreshed it since we decided to).

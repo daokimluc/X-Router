@@ -214,6 +214,18 @@ export async function buildApp(
     createDefaultProviderRegistry({
       onCredentialRefreshed: (accountId, payload) =>
         app.credentialWritebackService.persist(accountId, payload),
+      // Serialize an adapter's in-band token refresh per account with the
+      // background/on-401 refresh paths (RefreshLockService), re-reading the
+      // live credential inside the lock so a rotating refresh token is consumed
+      // once even under concurrent requests for the same account.
+      refreshCoordinator: (accountId, stale, doRefresh) =>
+        app.refreshLockService.serialize(accountId, () => {
+          const secret = app.secretService.getSecretForAccount(accountId);
+          const current = secret
+            ? (app.secretService.decryptSecretPayload(secret) as Record<string, unknown>)
+            : stale;
+          return doRefresh(current);
+        }),
     });
   const modelRegistry =
     dependencies.modelRegistry ??
@@ -425,7 +437,7 @@ export async function buildApp(
   app.decorate("modelPricingService", modelPricingService);
   app.decorate("mediaRouter", mediaRouter);
   app.decorate("accountQuotaService", new AccountQuotaService());
-  app.decorate("credentialWritebackService", new CredentialWritebackService(secretService));
+  app.decorate("credentialWritebackService", new CredentialWritebackService(secretService, () => app.persistState()));
   const latencyTracker = new LatencyTrackerService();
   if (config.nodeEnv !== "test") {
     latencyTracker.start();
@@ -588,33 +600,39 @@ async function buildConfigStore(
     return store;
   }
   if (!store.isImported()) {
+    let raw: string;
     try {
-      const raw = await readFile(config.dataFile, "utf8");
-      const legacy = parsePersistedState(JSON.parse(raw));
-      const { imported } = store.importFrom(legacy);
-      // eslint-disable-next-line no-console
-      console.info(`[config-store] imported ${imported} config rows from legacy JSON ${config.dataFile}`);
+      raw = await readFile(config.dataFile, "utf8");
     } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-        // A present-but-unreadable legacy file is worth surfacing, but must not
-        // block boot — the store simply starts empty (fresh install behavior).
-        // eslint-disable-next-line no-console
-        console.warn(`[config-store] skipped legacy JSON import: ${String(error)}`);
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        // No legacy file = fresh install. Mark imported so we don't re-stat it
+        // every boot; the store starts empty, which is correct here.
+        store.importFrom(EMPTY_STATE);
+        return store;
       }
-      // Mark imported so we don't retry a missing/broken legacy file every boot.
-      store.importFrom({
-        providerInstances: [],
-        accounts: [],
-        modelMappings: [],
-        routingProfiles: [],
-        apiKeys: [],
-        secrets: [],
-        config: { current: {}, revisions: [] }
-      } as PersistedGatewayState);
+      throw error; // a present-but-unreadable file is a real fault — fail loudly
     }
+    // A PRESENT legacy file that fails to parse/validate must NOT be silently
+    // wiped: importing empty + marking done would permanently abandon the
+    // deployment's accounts/secrets/keys. Fail boot loudly (matches the JSON
+    // PersistenceService.load() behavior) so the operator can fix/rollback.
+    const legacy = parsePersistedState(JSON.parse(raw));
+    const { imported } = store.importFrom(legacy);
+    // eslint-disable-next-line no-console
+    console.info(`[config-store] imported ${imported} config rows from legacy JSON ${config.dataFile}`);
   }
   return store;
 }
+
+const EMPTY_STATE: PersistedGatewayState = {
+  providerInstances: [],
+  accounts: [],
+  modelMappings: [],
+  routingProfiles: [],
+  apiKeys: [],
+  secrets: [],
+  config: { current: {}, revisions: [] }
+} as PersistedGatewayState;
 
 function parseBodyLimit(value: string): number {
   const match = value.trim().toLowerCase().match(/^(\d+)(b|kb|mb)?$/);

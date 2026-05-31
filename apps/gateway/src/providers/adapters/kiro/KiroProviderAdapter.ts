@@ -26,7 +26,19 @@ export class KiroProviderAdapter implements AIProviderAdapter {
   constructor(
     private readonly client = new KiroClient(),
     private readonly authClient = new KiroAuthClient(),
-    private readonly onCredentialRefreshed?: (accountId: string, payload: Record<string, unknown>) => void
+    private readonly onCredentialRefreshed?: (accountId: string, payload: Record<string, unknown>) => void,
+    /**
+     * Optional per-account refresh coordinator. When provided, the in-band token
+     * refresh (resolveCredential) runs through it so it serializes with the
+     * background + on-401 refresh paths (RefreshLockService) and re-reads the
+     * live credential inside the lock — a rotating refresh token is then consumed
+     * exactly once even under concurrent requests for the same account.
+     */
+    private readonly refreshCoordinator?: (
+      accountId: string,
+      stale: KiroCredentialPayload,
+      doRefresh: (current: KiroCredentialPayload) => Promise<KiroCredentialPayload>
+    ) => Promise<KiroCredentialPayload>
   ) {}
 
   getCapabilities(): ProviderCapabilities {
@@ -232,12 +244,23 @@ export class KiroProviderAdapter implements AIProviderAdapter {
     }
 
     if (credential.refreshToken) {
-      const token = await this.authClient.refreshToken(credential);
-      const updated = applyKiroToken(credential, token);
-      if (accountId && this.onCredentialRefreshed) {
-        this.onCredentialRefreshed(accountId, updated as unknown as Record<string, unknown>);
+      const doRefresh = async (current: KiroCredentialPayload): Promise<KiroCredentialPayload> => {
+        // Re-check inside the (optional) lock: another path may have rotated the
+        // token while we waited, in which case `current` is already fresh.
+        if (current.accessToken && !shouldRefreshKiroCredential(current)) {
+          return current;
+        }
+        const token = await this.authClient.refreshToken(current);
+        const next = applyKiroToken(current, token);
+        if (accountId && this.onCredentialRefreshed) {
+          this.onCredentialRefreshed(accountId, next as unknown as Record<string, unknown>);
+        }
+        return next;
+      };
+      if (accountId && this.refreshCoordinator) {
+        return this.refreshCoordinator(accountId, credential, doRefresh);
       }
-      return updated;
+      return doRefresh(credential);
     }
 
     if (credential.code && credential.codeVerifier) {
