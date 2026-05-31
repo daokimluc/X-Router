@@ -80,6 +80,50 @@ export class UsageLogStore {
     }
   }
 
+  /** Total row count (cheap; used by the one-time backfill guard). */
+  count(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS c FROM usage_log").get() as { c: number }).c;
+  }
+
+  /**
+   * One-time backfill of historical usage rows that preserves the ORIGINAL
+   * timestamp + id (unlike append(), which stamps Date.now() and a fresh id).
+   * Used to migrate the pre-SQLite JSON `usage` slice into usage_log so the
+   * Usage page is not empty after upgrading. Idempotent per id (INSERT OR
+   * IGNORE). Returns how many rows were inserted.
+   */
+  importRows(rows: Array<UsageLogEntry & { id?: string; ts?: number }>): number {
+    const stmt = this.db.prepare(
+      `INSERT OR IGNORE INTO usage_log
+        (id, ts, request_id, api_key_hash, model, provider_type, protocol,
+         prompt_tokens, completion_tokens, total_tokens, cached_tokens, estimated_cost_micro)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    let inserted = 0;
+    for (const r of rows) {
+      try {
+        const res = stmt.run(
+          r.id ?? `ulog_${randomUUID()}`,
+          r.ts ?? Date.now(),
+          r.requestId ?? null,
+          r.apiKeyHash ?? null,
+          r.model ?? null,
+          r.providerType ?? null,
+          r.protocol ?? null,
+          Math.round(r.promptTokens || 0),
+          Math.round(r.completionTokens || 0),
+          Math.round(r.totalTokens || 0),
+          Math.round(r.cachedTokens || 0),
+          Math.round((r.estimatedCost || 0) * 1_000_000)
+        );
+        inserted += Number(res.changes ?? 0);
+      } catch {
+        // skip a malformed legacy row rather than abort the whole backfill
+      }
+    }
+    return inserted;
+  }
+
   query(q: UsageLogQuery = {}): { data: UsageLogRow[]; total: number } {
     const limit = Math.max(1, Math.min(q.limit ?? 100, 1000));
     const where: string[] = [];

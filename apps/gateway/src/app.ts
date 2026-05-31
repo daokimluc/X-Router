@@ -288,6 +288,14 @@ export async function buildApp(
     cachedTokens: r.cachedTokens,
     estimatedCost: r.estimatedCost
   }));
+  // One-time backfill: usage_log is the new home for usage history, but the
+  // legacy JSON state file still holds pre-upgrade usage rows that the
+  // config migration did not carry. If usage_log is empty, import them once
+  // (preserving original timestamps + ids; idempotent via INSERT OR IGNORE) so
+  // the Usage page is not blank after upgrading. Best-effort; never blocks boot.
+  if (persistenceEnabled && usageLogStore.count() === 0) {
+    await backfillUsageLogFromLegacyJson(usageLogStore, config.dataFile);
+  }
   const rateLimitService =
     dependencies.rateLimitService ??
     new RateLimitService({
@@ -582,6 +590,51 @@ export async function buildApp(
 /** Derive the SQLite money-store path from the JSON state file (sibling file). */
 function deriveSqlitePath(dataFile: string): string {
   return join(dirname(dataFile), "gateway.sqlite");
+}
+
+/**
+ * One-time backfill of the legacy JSON `usage` slice into the SQLite usage_log,
+ * preserving each record's original timestamp + id. Runs only when usage_log is
+ * empty (so it doesn't double-count once real traffic populates the table). The
+ * config migration (buildConfigStore) intentionally does NOT carry usage —
+ * usage lives in usage_log now — so without this the Usage page would be blank
+ * after upgrading from a pre-SQLite JSON state. Best-effort: a missing/corrupt
+ * legacy file is ignored (fresh install or no history).
+ */
+async function backfillUsageLogFromLegacyJson(
+  usageLogStore: UsageLogStore,
+  dataFile: string
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readFile(dataFile, "utf8");
+  } catch {
+    return; // no legacy file → nothing to backfill
+  }
+  try {
+    const legacy = JSON.parse(raw) as { usage?: Array<Record<string, unknown>> };
+    const usage = Array.isArray(legacy.usage) ? legacy.usage : [];
+    if (usage.length === 0) return;
+    const rows = usage.map((u) => ({
+      id: typeof u.id === "string" ? u.id : undefined,
+      ts: u.createdAt ? new Date(u.createdAt as string).getTime() : Date.now(),
+      requestId: typeof u.requestId === "string" ? u.requestId : undefined,
+      apiKeyHash: typeof u.apiKeyHash === "string" ? u.apiKeyHash : undefined,
+      model: typeof u.model === "string" ? u.model : undefined,
+      providerType: typeof u.providerType === "string" ? u.providerType : undefined,
+      protocol: typeof u.protocol === "string" ? u.protocol : undefined,
+      promptTokens: Number(u.promptTokens) || 0,
+      completionTokens: Number(u.completionTokens) || 0,
+      totalTokens: Number(u.totalTokens) || 0,
+      cachedTokens: Number(u.cachedTokens) || 0,
+      estimatedCost: Number(u.estimatedCost) || 0
+    }));
+    const inserted = usageLogStore.importRows(rows);
+    // eslint-disable-next-line no-console
+    console.info(`[usage-backfill] imported ${inserted} legacy usage rows into usage_log from ${dataFile}`);
+  } catch {
+    // corrupt legacy JSON → skip backfill (config import path surfaces the error)
+  }
 }
 
 /**
