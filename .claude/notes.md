@@ -286,3 +286,36 @@ User asked to fix all gaps found after 34b. Branch `feat/phase34-marketplace`, o
 7. **Periodic supply health** — `marketplace/services/SupplyHealthMonitor` scans account runtime (disabled/cooldown/consecutiveFailures≥3), emits `supply.unhealthy` once per non-house account on transition, re-arms on recovery; started in registerMarketplace, stopped onClose.
 
 **Verify:** gateway tsc clean, **631 pass + 7 skip** (was 622), dashboard tsc+build clean (MarketplacePage separate chunk), boundary green. Docs PROVISION_API_REFERENCE.md updated with rotate. See [[phase34c-gap-fixes]] memory.
+
+## Phase 34d/34d.1/34e + Phase 34 MERGED (2026-05-31)
+
+- 34d/34d.1: Foza integration contract — seller externalRef, walletUsd in /provision/keys, GET /provision/settlements (per-record replay), settlementId on usage.recorded webhook + requestId correlation (usage_log+settlement_log Database v4). Docs: docs/PROVISION_API_REFERENCE.md, docs/WEBSITE_INTEGRATION_REQUIREMENTS.md, D:/Project/XRouter.ai/docs/ANSWERS_FROM_XROUTER.md (XRouter.ai not a git repo).
+- 34e: bug-audit fixes — mid-stream failure reservation leak (openai+anthropic), provision mutations not persisted (onSend hook now matches /provision/*), ApiKeyService id collision (monotonic nextSeq), routed-stale-on-failover, PAYG estimate ×markup, constant-time provision key compare. +2 regression tests. 637 pass.
+- ALL Phase 34→34e MERGED to main (fast-forward) + pushed; 14 marketplace openspec changes archived into openspec/specs/. Remaining open changes = 4 Phase-32 ones (untouched).
+
+## CORE ENGINE AUDIT → 5 proposals written (explore mode, NOT implemented)
+
+Deep multi-agent read-only audit of the NON-marketplace engine. Found CRITICAL bugs verified in code. 5 OpenSpec proposals written + validated --strict, sitting in openspec/changes/ (untracked, not committed):
+- resilience-hardening (🔴 circuit stuck half-open CircuitBreaker.ts:71-73,97 + refresh race / wire dead RefreshLockService + collapse dup server.ts:96 loop)
+- persistence-durability (🔴 partial-save drops slices admin.ts:4240 + oauth GET; non-atomic writeFile bricks boot; hot-path full-file rewrite)
+- request-pipeline-unification (🟡 openai.ts/anthropic.ts ~60% copy-paste drift → F1-F6b,R3; extract RequestPipeline+ProtocolHandler) — highest value
+- admin-routes-decompose (🟢 ZodError→500 should be 400; not-found→500 should be 404; split admin.ts 4319 lines)
+- non-money-state-to-sqlite (🟢 config state JSON→SQLite, after persistence-durability)
+
+Full detail (bug list with file:line, severity, suggested order) in memory [[core-engine-audit]]. Impl order: resilience-hardening + persistence-durability first (urgent+small), then request-pipeline-unification, then the 2 LOW. Context was very full at end of audit session → implement one change per fresh session, re-read live code each time (line numbers drift).
+
+## CORE ENGINE: ALL 5 PROPOSALS IMPLEMENTED (2026-05-31, uncommitted on main)
+
+Gateway **675 pass / 7 skip** (was 637 baseline → +38), tsc clean, all 5 `openspec validate --strict` pass, engine→marketplace boundary green. Test the gateway with `cd apps/gateway && rtk proxy npx vitest run --root .` (plain vitest picks up unrelated workspaces and reports false failures).
+
+1. **resilience-hardening** — CircuitBreaker: `canRequest` pure (no mutation); open→half_open moved into `beforeRequest`; new `recordResult(id,{ok,countsAsFailure},config)` = single terminal accounting + `releaseProbe(id)` for retry-without-conclude (fixes stuck-half-open-forever). RefreshLockService.`refreshIfNeeded()` serializes per-account refresh + re-checks in-lock (background skip-if-fresh, on-401 skip-if-token-rotated); wired into AutoRefreshService + both routes' on-401; deleted dup server.ts refresh loop. Tests: circuitBreaker.test.ts (7), refreshLock.test.ts (+3).
+
+2. **persistence-durability** — PersistenceService: atomic tmp+fsync+rename + `.bak` fallback; `schemaVersion` (v1, absent→v0); concrete zod for accounts/secrets/apiKeys/modelMappings (field-path errors); `saveDebounced` single-flight + drain. Killed partial-save: extracted canonical `services/createPersistedState.ts` (listWithKeys — raw keys), pointed ALL save paths at it (saveAdminRuntimeState ×26, oauth ×3, OAuthPKCE, 2 route-local copies). onSend dropped `/v1` POST; usage hydrated from SQLite usage_log; usage+requestLogs dropped from JSON. ConfigRevisionService MAX_REVISIONS=50. Global onResponse hook releases leaked spendReservation (cache-hit/404/direct-route). Tests: persistenceDurability.test.ts (9), persistenceCompleteState.test.ts (2).
+
+3. **request-pipeline-unification** — new `routes/pipeline/`: ProtocolHandler interface + RequestPipeline (one failover loop, `classifyError` retryable/capacity/terminal, recordSuccessUsage, failSettle) + OpenAIProtocolHandler + AnthropicProtocolHandler. openai.ts/anthropic.ts now thin wrappers. Structurally fixed F1 (queue wired once), F2 (stream consumeTokens both protocols), F3 (exhaustion failSettle), F4 (always-estimate usage), F5/F6b (tool_use cache-skip + anthropic-shaped body), R3 (capacity→failover). Tests: requestPipeline.test.ts (3), pipelineDriftFixes.test.ts (3). 31 parity suites unchanged.
+
+4. **admin-routes-decompose** — ZodError→400 + NotFoundError→404 (new errors/NotFoundError.ts, 16 throws); FIXED latent bug: error envelope was dead for ALL routes (registerErrorHandler ran after dashboard app.register() closed the context) → moved BEFORE routes. helpers.ts (parseIdParam ×26, recordAudit ×59, findAccountPoolForAccount). Full split: admin.ts 4023→1296 lines (version+oauth-import) + 8 domain modules (catalog/observability/settings/keys/instances/accounts/testing) + index.ts registrar. +3 tests.
+
+5. **non-money-state-to-sqlite** — Database.ts v5 (config_entities + config_kv). New ConfigStore implements shared `StateStore` (drop-in for PersistenceService), diff-on-save = single-row writes, load reconstructs + parsePersistedState. app.ts buildConfigStore = one-time marker-guarded JSON→SQLite import (file kept as rollback). Zero service call-site changes. Tests: configStore.test.ts (7), configStoreE2E.test.ts (1, boot-from-SQLite no JSON).
+
+**NOT committed.** On branch main. Per-change manual smoke items deferred (each tasks.md). Next: commit (per-change or one "core-engine-hardening") + `openspec archive` each.

@@ -1,5 +1,6 @@
 import fastify, { type FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AppConfig } from "./config.js";
 import { registerErrorHandler } from "./middleware/errorHandler.js";
@@ -7,7 +8,7 @@ import { registerLogger } from "./middleware/logger.js";
 import { registerRequestId } from "./middleware/requestId.js";
 import { registerHealthzRoute } from "./routes/healthz.js";
 import { registerAnthropicRoutes } from "./routes/anthropic.js";
-import { registerAdminRoutes } from "./routes/admin.js";
+import { registerAdminRoutes } from "./routes/admin/index.js";
 import { registerModelsRoute } from "./routes/models.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerOAuthRoutes } from "./routes/oauth.js";
@@ -59,6 +60,8 @@ import { RequestQueueService } from "./services/RequestQueueService.js";
 import { TeamService } from "./services/TeamService.js";
 import { AccountQuotaService } from "./services/AccountQuotaService.js";
 import { AutoRefreshService } from "./services/AutoRefreshService.js";
+import { RefreshLockService } from "./services/RefreshLockService.js";
+import { createPersistedState } from "./services/createPersistedState.js";
 import { CredentialWritebackService } from "./services/CredentialWritebackService.js";
 import { LatencyTrackerService } from "./services/LatencyTrackerService.js";
 import { SpendLedgerService } from "./services/SpendLedgerService.js";
@@ -69,8 +72,11 @@ import { MarketplaceSeam } from "./services/MarketplaceSeam.js";
 import { Database } from "./services/Database.js";
 import {
   PersistenceService,
-  type PersistedGatewayState
+  parsePersistedState,
+  type PersistedGatewayState,
+  type StateStore
 } from "./services/PersistenceService.js";
+import { ConfigStore } from "./services/ConfigStore.js";
 import { AddAccountLockService } from "./services/AddAccountLockService.js";
 import { IdempotencyStore } from "./services/IdempotencyStore.js";
 import { OAuthSessionStore } from "./services/OAuthSessionStore.js";
@@ -96,7 +102,7 @@ export type AppDependencies = {
   requestLogService?: RequestLogService;
   usageService?: UsageService;
   rateLimitService?: RateLimitService;
-  persistenceService?: PersistenceService;
+  persistenceService?: StateStore;
   database?: Database;
 };
 
@@ -110,6 +116,7 @@ declare module "fastify" {
     secretService: SecretService;
     encryptionService: LocalEncryptionService;
     circuitBreaker: CircuitBreaker;
+    refreshLockService: RefreshLockService;
     concurrencyLimiter: ConcurrencyLimiter;
     adminAuditService: AdminAuditService;
     metricsService: MetricsService;
@@ -120,7 +127,7 @@ declare module "fastify" {
     usageService: UsageService;
     usageLogStore: UsageLogStore;
     rateLimitService: RateLimitService;
-    persistenceService: PersistenceService;
+    persistenceService: StateStore;
     database: Database;
     tokenSaverService: TokenSaverService;
     requestQueueService: RequestQueueService;
@@ -174,15 +181,13 @@ export async function buildApp(
     }
   });
 
-  const persistenceService =
-    dependencies.persistenceService ?? new PersistenceService(config.dataFile);
   const persistenceEnabled =
     config.nodeEnv !== "test" || Boolean(dependencies.persistenceService);
-  const persistedState = persistenceEnabled ? await persistenceService.load() : null;
 
   // persistence-sqlite — durable store for transactional money state (wallet +
-  // seller earnings). In test (no real persistence) use an in-memory DB; in
-  // production derive the file next to the JSON state file.
+  // seller earnings) AND, since non-money-state-to-sqlite, the config/runtime
+  // state too. In test (no real persistence) use an in-memory DB; in production
+  // derive the file next to the JSON state file.
   const sqliteDb =
     dependencies.database ??
     new Database(
@@ -194,6 +199,15 @@ export async function buildApp(
   if (!dependencies.database) {
     app.addHook("onClose", () => sqliteDb.close());
   }
+
+  // non-money-state-to-sqlite — the config StateStore. A test that injects a
+  // PersistenceService keeps the JSON substrate; otherwise the SQLite-backed
+  // ConfigStore is used. On first boot, a legacy JSON state file is imported
+  // once (marker-guarded) so existing deployments migrate transparently.
+  const persistenceService =
+    dependencies.persistenceService ??
+    (await buildConfigStore(sqliteDb, config, persistenceEnabled));
+  const persistedState = persistenceEnabled ? await persistenceService.load() : null;
 
   const providerRegistry =
     dependencies.providerRegistry ??
@@ -230,6 +244,7 @@ export async function buildApp(
     dependencies.secretService ??
     new SecretService(encryptionService);
   const circuitBreaker = dependencies.circuitBreaker ?? new CircuitBreaker();
+  const refreshLockService = new RefreshLockService();
   const concurrencyLimiter =
     dependencies.concurrencyLimiter ?? new ConcurrencyLimiter(100);
   const adminAuditService =
@@ -302,10 +317,37 @@ export async function buildApp(
     teamService.load(persistedState.teams);
   }
 
-  // Load persisted usage and request logs
-  if (persistedState?.usage) {
-    usageService.load(persistedState.usage as Parameters<typeof usageService.load>[0]);
+  // Hydrate the live usage ring from the durable SQLite usage_log (newest-first,
+  // capped to the ring size). usage is no longer stored in the JSON state; an
+  // older JSON file's `usage` slice is used only as a fallback when the SQLite
+  // log is empty (forward migration from pre-SQLite state).
+  {
+    const ringCap = 1000;
+    const durable = usageLogStore.query({ limit: ringCap });
+    if (durable.data.length > 0) {
+      usageService.load(
+        durable.data.map((r) => ({
+          id: r.id,
+          requestId: r.requestId ?? "",
+          protocol: (r.protocol as "openai" | "anthropic") ?? "openai",
+          model: r.model ?? "",
+          providerType: r.providerType ?? "",
+          providerInstanceId: "",
+          apiKeyHash: r.apiKeyHash ?? undefined,
+          promptTokens: r.promptTokens,
+          completionTokens: r.completionTokens,
+          totalTokens: r.totalTokens,
+          cachedTokens: r.cachedTokens || undefined,
+          estimatedCost: r.estimatedCost || undefined,
+          createdAt: new Date(r.ts)
+        })) as Parameters<typeof usageService.load>[0]
+      );
+    } else if (persistedState?.usage) {
+      usageService.load(persistedState.usage as Parameters<typeof usageService.load>[0]);
+    }
   }
+  // requestLogs are in-memory only (no longer persisted to JSON). An older file
+  // that still carries them is hydrated once for continuity.
   if (persistedState?.requestLogs) {
     requestLogService.load(persistedState.requestLogs as Parameters<typeof requestLogService.load>[0]);
   }
@@ -343,6 +385,7 @@ export async function buildApp(
   app.decorate("secretService", secretService);
   app.decorate("encryptionService", encryptionService);
   app.decorate("circuitBreaker", circuitBreaker);
+  app.decorate("refreshLockService", refreshLockService);
   app.decorate("concurrencyLimiter", concurrencyLimiter);
   app.decorate("adminAuditService", adminAuditService);
   app.decorate("metricsService", metricsService);
@@ -369,6 +412,11 @@ export async function buildApp(
   app.decorate("usageLogStore", usageLogStore);
   app.decorate("rateLimitService", rateLimitService);
   app.decorate("persistenceService", persistenceService);
+  // Flush any pending debounced save before the process exits so a final
+  // mutation isn't lost on shutdown.
+  if (persistenceEnabled) {
+    app.addHook("onClose", () => persistenceService.drain());
+  }
   app.decorate("tokenSaverService", tokenSaverService);
   app.decorate("requestQueueService", requestQueueService);
   app.decorate("teamService", teamService);
@@ -390,7 +438,7 @@ export async function buildApp(
   spendLedgerService.load(persistedState?.spendLedger ?? null);
   spendLedgerService.setPersistCallback(() => {
     if (persistenceEnabled) {
-      void app.persistenceService.save(createPersistedState(app));
+      app.persistenceService.saveDebounced(createPersistedState(app));
     }
   });
   app.decorate("spendLedgerService", spendLedgerService);
@@ -404,7 +452,7 @@ export async function buildApp(
   // reaching into createPersistedState directly.
   app.decorate("persistState", () => {
     if (persistenceEnabled) {
-      void app.persistenceService.save(createPersistedState(app));
+      app.persistenceService.saveDebounced(createPersistedState(app));
     }
   });
 
@@ -417,23 +465,53 @@ export async function buildApp(
   app.decorate("responseCacheService", responseCacheService);
 
   app.addHook("onSend", async (request, reply, payload) => {
+    // Persist on admin/provision mutations only. A routine /v1/* completion no
+    // longer rewrites the JSON state: usage is durable in SQLite, request logs
+    // are in-memory, and money state (spend ledger / marketplace) self-persists
+    // through its own debounced callbacks. The save is coalesced + single-flight
+    // so a burst of mutations collapses to one ordered write off the hot path.
     if (
       persistenceEnabled &&
       (
         (request.url.startsWith("/admin/") && ["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) ||
-        (request.url.startsWith("/provision/") && ["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) ||
-        (request.url.startsWith("/v1/") && request.method === "POST")
+        (request.url.startsWith("/provision/") && ["POST", "PATCH", "PUT", "DELETE"].includes(request.method))
       ) &&
       reply.statusCode < 400
     ) {
-      await app.persistenceService.save(createPersistedState(app));
+      app.persistenceService.saveDebounced(createPersistedState(app));
     }
 
     return payload;
   });
 
+  // Safety net for spend reservations: release any reservation still held when
+  // the response finishes. The /v1 routes settle/release in the failover loop,
+  // but several early returns (cache hit, no-provider-in-group 404, direct
+  // account routing) bypass that loop and would otherwise leak a wallet hold.
+  // settle() removes the reservation, so this release is a no-op on the happy
+  // path; it only fires for paths that exited without settling.
+  app.addHook("onResponse", async (request) => {
+    const reservation = request.spendReservation;
+    if (!reservation) return;
+    request.spendReservation = undefined;
+    for (const id of reservation.id.split("|")) {
+      try {
+        spendLedgerService.release(id);
+      } catch {
+        // best-effort cleanup — never throw out of a response hook
+      }
+    }
+  });
+
   await registerRequestId(app);
   await registerLogger(app);
+  // Register the error handler BEFORE the routes. A later `app.register()` (the
+  // dashboard's @fastify/static) closes the root context for error-handler
+  // inheritance, so a handler set after the routes would not apply to them —
+  // thrown errors would fall back to Fastify's default shape. Setting it first
+  // guarantees the `{ error: { type, message, code } }` envelope for every route
+  // (and routes the ZodError→400 / NotFoundError→404 corrections correctly).
+  await registerErrorHandler(app);
   await registerMetricsRoute(app, config);
   await registerHealthzRoute(app);
   await registerReadyzRoute(app, config);
@@ -479,8 +557,6 @@ export async function buildApp(
   // Register dashboard static serving AFTER all API routes to ensure API priority
   await registerDashboardPlugin(app);
 
-  await registerErrorHandler(app);
-
   // Start background auto-refresh service (proactively refreshes tokens before expiry)
   if (config.nodeEnv !== "test") {
     const autoRefresh = new AutoRefreshService();
@@ -494,6 +570,50 @@ export async function buildApp(
 /** Derive the SQLite money-store path from the JSON state file (sibling file). */
 function deriveSqlitePath(dataFile: string): string {
   return join(dirname(dataFile), "gateway.sqlite");
+}
+
+/**
+ * non-money-state-to-sqlite — build the SQLite ConfigStore and, on first boot,
+ * import a legacy JSON state file into it once (marker-guarded + idempotent).
+ * The JSON file is read once as an import source then ignored; it is left on
+ * disk as a rollback artifact (not deleted).
+ */
+async function buildConfigStore(
+  database: Database,
+  config: AppConfig,
+  persistenceEnabled: boolean
+): Promise<ConfigStore> {
+  const store = new ConfigStore(database);
+  if (!persistenceEnabled) {
+    return store;
+  }
+  if (!store.isImported()) {
+    try {
+      const raw = await readFile(config.dataFile, "utf8");
+      const legacy = parsePersistedState(JSON.parse(raw));
+      const { imported } = store.importFrom(legacy);
+      // eslint-disable-next-line no-console
+      console.info(`[config-store] imported ${imported} config rows from legacy JSON ${config.dataFile}`);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        // A present-but-unreadable legacy file is worth surfacing, but must not
+        // block boot — the store simply starts empty (fresh install behavior).
+        // eslint-disable-next-line no-console
+        console.warn(`[config-store] skipped legacy JSON import: ${String(error)}`);
+      }
+      // Mark imported so we don't retry a missing/broken legacy file every boot.
+      store.importFrom({
+        providerInstances: [],
+        accounts: [],
+        modelMappings: [],
+        routingProfiles: [],
+        apiKeys: [],
+        secrets: [],
+        config: { current: {}, revisions: [] }
+      } as PersistedGatewayState);
+    }
+  }
+  return store;
 }
 
 function parseBodyLimit(value: string): number {
@@ -533,26 +653,3 @@ function createProviderRuntimeRegistryFromState(
   return new ProviderRuntimeRegistry(state.providerInstances, accountPools);
 }
 
-function createPersistedState(app: FastifyInstance): PersistedGatewayState {
-  return {
-    providerInstances: app.providerRuntimeRegistry.listProviderInstances(),
-    accounts: app.providerRuntimeRegistry.listAccounts(),
-    modelMappings: app.modelRegistry.listModelMappings(),
-    routingProfiles: app.routingProfileRegistry.listRoutingProfiles(),
-    apiKeys: app.apiKeyService.listWithKeys(),
-    secrets: app.secretService.listSecrets(),
-    config: {
-      current: app.configRevisionService.getCurrent(),
-      revisions: app.configRevisionService.listRevisions()
-    },
-    tokenSaver: app.tokenSaverService.getSettings(),
-    teams: app.teamService.list(),
-    usage: app.usageService.listAll(),
-    requestLogs: app.requestLogService.listAll(),
-    proxyPools: app.proxyPoolService.listAll(),
-    rateLimitCounters: app.rateLimitService.exportState(),
-    modelPricing: app.modelPricingService.export(),
-    spendLedger: app.spendLedgerService.toPersisted(),
-    marketplace: app.marketplaceSeam.collectPersisted()
-  };
-}

@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -154,6 +154,29 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE settlement_log ADD COLUMN request_id TEXT;
       CREATE INDEX IF NOT EXISTS idx_usage_log_req ON usage_log (request_id);
       CREATE INDEX IF NOT EXISTS idx_settlement_req ON settlement_log (request_id);
+    `);
+  },
+  // v5 — non-money-state-to-sqlite: config/runtime state moves off the single
+  // JSON document into row-level, id-indexed tables on the same Database. Each
+  // entity is stored as a `data` JSON blob keyed by id so service shapes stay
+  // opaque to the store; a single-entity change writes one row (no whole-graph
+  // rewrite). Singletons (config current/tokenSaver/marketplace/spendLedger/
+  // rateLimitCounters) live in config_kv. The `config_kv` migration marker
+  // `json_import_done` guards the one-time JSON→SQLite import.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS config_entities (
+        entity TEXT NOT NULL,
+        id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        ord INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (entity, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_config_entities_entity ON config_entities (entity, ord);
+      CREATE TABLE IF NOT EXISTS config_kv (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
   }
 ];
