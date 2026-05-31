@@ -74,7 +74,7 @@ describe("phase34d: /provision/settlements per-record replay", () => {
     app.settlementLedger.record({
       buyerKeyId: "internal_key_1", baseModel: "gpt-5.5", sellerId: "hoang",
       promptTokens: 1000, completionTokens: 500, collected: 0.006, sellerCredit: 0.0048,
-      platformMargin: 0.0012, billTrack: "payg", planScope: null
+      platformMargin: 0.0012, billTrack: "payg", planScope: null, requestId: "req_abc"
     });
     app.settlementLedger.record({
       buyerKeyId: "internal_key_2", baseModel: "claude-sonnet-4-6", sellerId: "house",
@@ -86,6 +86,9 @@ describe("phase34d: /provision/settlements per-record replay", () => {
     expect(all.json().total).toBe(2);
     const row = all.json().data.find((r: { buyerKeyId: string }) => r.buyerKeyId === "internal_key_1");
     expect(row).toMatchObject({ sellerId: "hoang", collected: 0.006, sellerCredit: 0.0048, platformMargin: 0.0012, billTrack: "payg", reversed: false });
+    // settlementId (id) + requestId correlation key present
+    expect(typeof row.id).toBe("string");
+    expect(row.requestId).toBe("req_abc");
 
     const bySeller = await app.inject({ method: "GET", url: "/provision/settlements?sellerId=hoang", headers: prov });
     expect(bySeller.json().total).toBe(1);

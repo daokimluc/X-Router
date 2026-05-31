@@ -36,6 +36,8 @@ export type SettlementRecord = {
   billTrack: "plan" | "payg";
   /** Plan-bucket scope (for a plan-track reversal to credit the bucket back). */
   planScope?: string | null;
+  /** Gateway requestId — correlates this row to its usage_log row. */
+  requestId?: string | null;
 };
 
 export type SellerReconciliation = {
@@ -76,8 +78,8 @@ export class SettlementLedger {
       `INSERT INTO settlement_log
         (id, ts, buyer_key_id, base_model, seller_id, prompt_tokens, completion_tokens,
          actual_sell_cost_micro, seller_credit_micro, platform_margin_micro, bill_track,
-         reversed, plan_scope, collected_micro)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+         reversed, plan_scope, collected_micro, request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
     ).run(
       id,
       Date.now(),
@@ -91,7 +93,8 @@ export class SettlementLedger {
       usdToMicro(rec.platformMargin),
       rec.billTrack,
       rec.planScope ?? null,
-      usdToMicro(rec.collected)
+      usdToMicro(rec.collected),
+      rec.requestId ?? null
     );
     return id;
   }
@@ -212,6 +215,7 @@ export class SettlementLedger {
     total: number;
     data: Array<{
       id: string;
+      requestId: string | null;
       ts: number;
       buyerKeyId: string | null;
       baseModel: string | null;
@@ -235,11 +239,11 @@ export class SettlementLedger {
 
     const total = (this.db.prepare(`SELECT COUNT(*) AS c FROM settlement_log ${clause}`).get(...params) as { c: number }).c;
     const rows = this.db.prepare(
-      `SELECT id, ts, buyer_key_id, base_model, seller_id, prompt_tokens, completion_tokens,
+      `SELECT id, request_id, ts, buyer_key_id, base_model, seller_id, prompt_tokens, completion_tokens,
               collected_micro, seller_credit_micro, platform_margin_micro, bill_track, reversed
        FROM settlement_log ${clause} ORDER BY ts DESC LIMIT ?`
     ).all(...params, limit) as Array<{
-      id: string; ts: number; buyer_key_id: string | null; base_model: string | null;
+      id: string; request_id: string | null; ts: number; buyer_key_id: string | null; base_model: string | null;
       seller_id: string | null; prompt_tokens: number; completion_tokens: number;
       collected_micro: number; seller_credit_micro: number; platform_margin_micro: number;
       bill_track: string | null; reversed: number;
@@ -249,6 +253,7 @@ export class SettlementLedger {
       total,
       data: rows.map((r) => ({
         id: r.id,
+        requestId: r.request_id,
         ts: r.ts,
         buyerKeyId: r.buyer_key_id,
         baseModel: r.base_model,

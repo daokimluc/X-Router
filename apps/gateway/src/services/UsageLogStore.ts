@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import type { Database, SqliteDatabase } from "./Database.js";
 
 export type UsageLogEntry = {
+  requestId?: string;
   apiKeyHash?: string;
   model?: string;
   providerType?: string;
@@ -32,6 +33,7 @@ export type UsageLogQuery = {
 
 export type UsageLogRow = {
   id: string;
+  requestId: string | null;
   ts: number;
   apiKeyHash: string | null;
   model: string | null;
@@ -56,12 +58,13 @@ export class UsageLogStore {
     try {
       this.db.prepare(
         `INSERT INTO usage_log
-          (id, ts, api_key_hash, model, provider_type, protocol,
+          (id, ts, request_id, api_key_hash, model, provider_type, protocol,
            prompt_tokens, completion_tokens, total_tokens, cached_tokens, estimated_cost_micro)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         `ulog_${randomUUID()}`,
         Date.now(),
+        entry.requestId ?? null,
         entry.apiKeyHash ?? null,
         entry.model ?? null,
         entry.providerType ?? null,
@@ -89,7 +92,7 @@ export class UsageLogStore {
     const rows = this.db.prepare(
       `SELECT * FROM usage_log ${clause} ORDER BY ts DESC LIMIT ?`
     ).all(...params, limit) as Array<{
-      id: string; ts: number; api_key_hash: string | null; model: string | null;
+      id: string; request_id: string | null; ts: number; api_key_hash: string | null; model: string | null;
       provider_type: string | null; protocol: string | null;
       prompt_tokens: number; completion_tokens: number; total_tokens: number;
       cached_tokens: number; estimated_cost_micro: number;
@@ -99,6 +102,7 @@ export class UsageLogStore {
       total,
       data: rows.map((r) => ({
         id: r.id,
+        requestId: r.request_id,
         ts: r.ts,
         apiKeyHash: r.api_key_hash,
         model: r.model,

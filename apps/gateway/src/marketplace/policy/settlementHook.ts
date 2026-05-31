@@ -26,6 +26,9 @@ declare module "fastify" {
   interface FastifyRequest {
     /** Settlement result, produced here and emitted by provision-webhook (#7). */
     settlement?: {
+      /** Stable, unique id of this settle (settlement_log row id). Idempotency key
+       *  shared by the usage.recorded webhook AND /provision/{usage,settlements}. */
+      settlementId: string;
       /** Buyer's API key id (the website's buyer handle). */
       buyerKeyId: string;
       /** Buyer's API key hash (audit/correlation). */
@@ -174,7 +177,8 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
     if (platformMargin !== 0) deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
 
     // Durable, auditable settlement row (enables reversal + reconciliation).
-    deps.settlementLedger.record({
+    // The returned id is the stable idempotency key surfaced to the website.
+    const settlementId = deps.settlementLedger.record({
       buyerKeyId: request.buyerKeyId ?? "",
       baseModel,
       sellerId,
@@ -184,10 +188,12 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       sellerCredit,
       platformMargin,
       billTrack,
-      planScope
+      planScope,
+      requestId: request.id
     });
 
     request.settlement = {
+      settlementId,
       buyerKeyId: request.buyerKeyId ?? "",
       buyerKeyHash: request.auth?.apiKeyHash ?? "",
       baseModel,

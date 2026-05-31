@@ -250,6 +250,7 @@ export async function buildApp(
   // (/provision/usage). The ring-buffer UsageService stays the live UI source.
   const usageLogStore = new UsageLogStore(sqliteDb);
   usageService.setSink((r) => usageLogStore.append({
+    requestId: r.requestId,
     apiKeyHash: r.apiKeyHash,
     model: r.model,
     providerType: r.providerType,

@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -142,6 +142,18 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       );
       CREATE INDEX IF NOT EXISTS idx_usage_log_ts ON usage_log (ts);
       CREATE INDEX IF NOT EXISTS idx_usage_log_key ON usage_log (api_key_hash, ts);
+    `);
+  },
+  // v4 — shared request_id correlation key (phase34d follow-up). The gateway
+  // requestId ties a usage_log row to its settlement_log row so the website can
+  // join token detail (usage) to money detail (settlement) and de-dupe across the
+  // usage.recorded webhook + both reconciliation reads.
+  (db) => {
+    db.exec(`
+      ALTER TABLE usage_log ADD COLUMN request_id TEXT;
+      ALTER TABLE settlement_log ADD COLUMN request_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_usage_log_req ON usage_log (request_id);
+      CREATE INDEX IF NOT EXISTS idx_settlement_req ON settlement_log (request_id);
     `);
   }
 ];

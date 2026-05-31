@@ -184,6 +184,9 @@ describe("settlement hook (two-sided)", () => {
     expect(usage!.data.buyerKeyHash).toBe("h1");
     expect(usage!.data.baseModel).toBe("gpt-5.5");
     expect(usage!.data.sellerId).toBe(hoang.id);
+    // phase34d — stable idempotency key on the webhook payload
+    expect(typeof usage!.data.settlementId).toBe("string");
+    expect((usage!.data.settlementId as string).startsWith("stl_")).toBe(true);
   });
 
   it("emits grant.exhausted once when a plan-bucket settle crosses the month cap", () => {

@@ -263,7 +263,7 @@ Query (tất cả optional): `since` (ISO-8601), `keyId`, `limit` (1..1000, mặ
 200:
 ```json
 { "total": 1240,
-  "data": [ { "id", "ts": 1730000000000, "apiKeyHash", "model",
+  "data": [ { "id", "requestId", "ts": 1730000000000, "apiKeyHash", "model",
     "providerType", "protocol", "promptTokens", "completionTokens",
     "totalTokens", "cachedTokens", "estimatedCost" } ] }
 ```
@@ -278,17 +278,18 @@ Query (optional): `keyId` (lọc theo buyer key), `sellerId`, `since` (ISO-8601)
 200:
 ```json
 { "total": 320,
-  "data": [ { "id": "stl_...", "ts": 1730000000000,
+  "data": [ { "id": "stl_...", "requestId": "req_...", "ts": 1730000000000,
     "buyerKeyId": "internal_key_3", "baseModel": "gpt-5.5", "sellerId": "hoang",
     "promptTokens": 1000, "completionTokens": 500,
     "collected": 0.006, "sellerCredit": 0.0048, "platformMargin": 0.0012,
     "billTrack": "payg", "reversed": false } ] }
 ```
 > Mỗi dòng mang **số tiền ĐÃ GHI NHẬN** (không phải ước tính): `collected` =
-> `sellerCredit + platformMargin`. Dùng để replay CHÍNH XÁC bill buyer + tích payout
-> seller cho khoảng bị miss webhook. `reversed:true` = settlement đã bị đảo (đừng
-> tính). `sellerId="house"` → không tích payout. Đây là nguồn thay thế đầy đủ cho
-> `usage.recorded` bị lỡ.
+> `sellerCredit + platformMargin`. `id` = `settlementId` (khớp khóa idempotent trong
+> webhook). `requestId` = khóa nối sang `/provision/usage` (cùng request). Dùng để
+> replay CHÍNH XÁC bill buyer + tích payout seller cho khoảng bị miss webhook.
+> `reversed:true` = settlement đã bị đảo (đừng tính). `sellerId="house"` → không tích
+> payout. Đây là nguồn thay thế đầy đủ cho `usage.recorded` bị lỡ.
 
 <!-- SEC_WEBHOOK -->
 
@@ -340,12 +341,16 @@ function verify(rawBody, sigHeader, secret) {
 ### `usage.recorded` (volume cao — nguồn để bill buyer + tích payout seller)
 ```json
 { "event": "usage.recorded", "timestamp": "...", "data": {
-  "buyerKeyId": "internal_key_3", "buyerKeyHash": "…",
+  "settlementId": "stl_...", "buyerKeyId": "internal_key_3", "buyerKeyHash": "…",
   "baseModel": "gpt-5.5", "sellerId": "seller_hoang_xxx",
   "promptTokens": 1000, "completionTokens": 500,
   "actualSellCost": 0.006037, "sellerCredit": 0.004830,
   "platformMargin": 0.001207, "billTrack": "plan" } }
 ```
+- **`settlementId`** = id duy nhất + ổn định của lần settle này (chính là
+  `settlement_log.id`). **Đây là KHÓA IDEMPOTENT**: khử trùng webhook theo nó, và nó
+  khớp `id` trong `GET /provision/settlements` — một khóa dùng chung cho cả realtime
+  lẫn đối soát. Webhook best-effort (có thể trùng/lỡ) → BẮT BUỘC idempotent theo khóa này.
 - `actualSellCost` = số **thu thực tế** từ buyer (đã trừ trường hợp ví chạm đáy).
 - `sellerCredit` = phần cộng dồn cho seller (bỏ qua khi `sellerId="house"`).
 - `billTrack`: `"plan"` (trừ hạn mức gói) | `"payg"` (trừ ví).
