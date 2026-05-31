@@ -319,3 +319,18 @@ Gateway **675 pass / 7 skip** (was 637 baseline → +38), tsc clean, all 5 `open
 5. **non-money-state-to-sqlite** — Database.ts v5 (config_entities + config_kv). New ConfigStore implements shared `StateStore` (drop-in for PersistenceService), diff-on-save = single-row writes, load reconstructs + parsePersistedState. app.ts buildConfigStore = one-time marker-guarded JSON→SQLite import (file kept as rollback). Zero service call-site changes. Tests: configStore.test.ts (7), configStoreE2E.test.ts (1, boot-from-SQLite no JSON).
 
 **NOT committed.** On branch main. Per-change manual smoke items deferred (each tasks.md). Next: commit (per-change or one "core-engine-hardening") + `openspec archive` each.
+
+## CORE ENGINE: COMMITTED + ARCHIVED + POST-REVIEW FIXES (2026-05-31)
+
+6 commits on main (not pushed): 5 per-change + `fb9a54e` archive + `a3ed70e` post-review fixes. All 5 archived into openspec/specs/. Suite **683 pass / 7 skip**, tsc clean, boundary green.
+
+**Post-review (adversarial subagent) found + fixed 5 real bugs, verified vs the real ~/.x-router/gateway-state.json:**
+1. ConfigStore collapsed duplicate-id model-mappings (real data has 2 mappings sharing `model_kiro_custom`, different publicModel) → would lose one on SQLite migration. Fixed: row key = `id|publicModel` for mappings + `#n` dedup for any blank/collision.
+2. ConfigStore save() delete-loop cache key never matched write key → delete-then-readd of identical content silently dropped the row. Fixed + cache now swapped only after txn commit (rollback-safe).
+3. ConfigStore diff signature now includes row index → mid-list reorder persists correct `ord`.
+4. buildConfigStore: a present-but-invalid legacy JSON used to import-empty + mark-done (total config wipe). Now fails boot loudly; only ENOENT starts empty.
+5. Kiro adapter in-band token refresh bypassed the per-account lock → rotating-token double-consume race. Fixed with refreshCoordinator wired through RefreshLockService.serialize() + in-lock live-credential re-read. Plus CredentialWritebackService now persists durably after a refresh.
+
+**Known-remaining (low severity, deferred):** F1 queue handoff can still 503 a woken waiter if a fresh request steals the freed global slot (pre-existing); shutdown drain swallows a failed final save (low impact — each mutation re-saves full state).
+
+**Manual smoke still on user:** restart global x-router (migrates JSON→SQLite once, keeps JSON as rollback) → verify accounts/keys/models intact; kill -9 mid-write; force half-open + auth-fail probe → recovers after cooldown; confirm single refresh loop in logs.
