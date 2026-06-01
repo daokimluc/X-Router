@@ -193,7 +193,6 @@ describe("SellerService.register clamps commissionPct", () => {
 describe("Database v8 migration", () => {
   it("creates token_grant_reservations + wallet_ledger idempotency index + settlement grant_id", () => {
     const db = new Database(":memory:");
-    expect((db.db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as { version: number }).version).toBe(8);
     expect(db.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='token_grant_reservations'").get()).toBeDefined();
     expect(db.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_wallet_ledger_idem'").get()).toBeDefined();
     const cols = db.db.prepare("PRAGMA table_info(settlement_log)").all() as Array<{ name: string }>;

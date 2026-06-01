@@ -31,7 +31,10 @@ export type WebhookEvent =
   | "supply.unhealthy"
   // marketplace-plan-subscription — subscription lifecycle
   | "plan.renewed"
-  | "plan.downgraded";
+  | "plan.downgraded"
+  // money-hardening — a settlement was reversed (refund/clawback); lets the website
+  // unwind its mirrored buyer-spend / seller-payable / margin for that settlement.
+  | "settlement.reversed";
 
 /** Business webhook target — separate from the ops (Discord/Slack) config. */
 export type BusinessWebhookConfig = {

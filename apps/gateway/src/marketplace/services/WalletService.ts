@@ -72,6 +72,33 @@ export class WalletService {
     });
   }
 
+  /**
+   * Idempotent top-up (money-hardening — Foza SePay credit). Credits the wallet
+   * exactly once per `idempotencyKey`: the first call with a key credits + logs a
+   * `wallet_ledger` row carrying that key (UNIQUE index dedupes); a repeated call
+   * with the same key is a no-op that returns the current balance with
+   * `idempotent: true`. Lets the website safely retry an ambiguous credit (a 5xx/
+   * timeout where the gateway may already have committed) without double-crediting.
+   * The whole check-credit-log runs in one transaction.
+   */
+  topupUsdIdempotent(keyId: string, usd: number, idempotencyKey: string): { walletUsd: number; idempotent: boolean } {
+    const add = usdToMicro(usd);
+    return this.tx(() => {
+      const dup = this.db.prepare("SELECT 1 FROM wallet_ledger WHERE idempotency_key = ?").get(idempotencyKey);
+      if (dup) {
+        return { walletUsd: microToUsd(this.balanceMicro(keyId) ?? 0), idempotent: true };
+      }
+      this.db.prepare(
+        `INSERT INTO wallets (key_id, balance_micro) VALUES (?, ?)
+         ON CONFLICT(key_id) DO UPDATE SET balance_micro = balance_micro + excluded.balance_micro`
+      ).run(keyId, add);
+      this.db.prepare(
+        "INSERT INTO wallet_ledger (id, key_id, delta_micro, kind, reason, ts, idempotency_key) VALUES (?, ?, ?, 'topup', ?, ?, ?)"
+      ).run(`wl_${randomUUID()}`, keyId, add, "topup", Date.now(), idempotencyKey);
+      return { walletUsd: microToUsd(this.balanceMicro(keyId) ?? 0), idempotent: false };
+    });
+  }
+
   /** Debit USD, floored at zero. ok:false (no debit) if underfunded. */
   debitUsd(keyId: string, usd: number): { ok: boolean; newBalanceUsd: number } {
     const cost = usdToMicro(usd);

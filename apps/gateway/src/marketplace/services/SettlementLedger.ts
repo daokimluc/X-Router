@@ -22,6 +22,7 @@ import type { WalletService } from "./WalletService.js";
 import type { SellerEarningsLedger } from "./SellerEarningsLedger.js";
 import type { SpendLedgerService } from "../../services/SpendLedgerService.js";
 import type { TokenGrantService } from "./TokenGrantService.js";
+import type { WebhookService } from "../../services/WebhookService.js";
 
 const HOUSE_SELLER_ID = "house";
 
@@ -85,6 +86,9 @@ export class SettlementLedger {
   /** Optional — set after construction so a tokenpack reversal can re-credit the
    *  consumed tokens to the originating grant (money-hardening-2 M4). */
   private tokenGrants?: TokenGrantService;
+  /** Optional — set after construction so a reversal emits a business webhook
+   *  (settlement.reversed) for the website to unwind its mirrored books. */
+  private webhook?: WebhookService;
 
   constructor(
     database: Database,
@@ -99,6 +103,11 @@ export class SettlementLedger {
   /** Wire the token-grant service used to re-credit reversed pack settlements. */
   setTokenGrantService(svc: TokenGrantService): void {
     this.tokenGrants = svc;
+  }
+
+  /** Wire the webhook service so a reversal emits `settlement.reversed`. */
+  setWebhookService(svc: WebhookService): void {
+    this.webhook = svc;
   }
 
   /** Append one settlement row. Returns its id. Asserts conservation. */
@@ -146,7 +155,8 @@ export class SettlementLedger {
    * row already flagged `reversed` is a no-op. Returns whether it reversed.
    */
   reverseSettlement(settlementId: string, reason?: string): boolean {
-    return this.tx(() => {
+    const reversedAt = Date.now();
+    const reversed = this.tx(() => {
       const row = this.db.prepare(
         `SELECT buyer_key_id, seller_id, collected_micro, seller_credit_micro,
                 platform_margin_micro, bill_track, plan_scope, reversed,
@@ -167,9 +177,9 @@ export class SettlementLedger {
             completion_tokens: number;
           }
         | undefined;
-      if (!row || row.reversed) return false;
+      if (!row || row.reversed) return null;
 
-      this.db.prepare("UPDATE settlement_log SET reversed = 1 WHERE id = ?").run(settlementId);
+      this.db.prepare("UPDATE settlement_log SET reversed = 1, reversed_at = ? WHERE id = ?").run(reversedAt, settlementId);
 
       // money-hardening-2 M4: a reversed token-pack request re-credits the consumed
       // tokens to the originating grant (the buyer paid for them off-platform and
@@ -200,8 +210,27 @@ export class SettlementLedger {
       const marginUsd = microToUsd(row.platform_margin_micro);
       if (marginUsd !== 0) this.earnings.recordPlatformMargin(-marginUsd);
 
-      return true;
+      // Payload for the post-commit webhook (emitted outside the tx).
+      return {
+        settlementId,
+        buyerKeyId: row.buyer_key_id,
+        sellerId: row.seller_id,
+        collected: collectedUsd,
+        sellerCredit: creditUsd,
+        platformMargin: marginUsd,
+        billTrack: row.bill_track,
+        reason: reason ?? null
+      };
     });
+
+    // Best-effort business webhook AFTER the durable commit (money-hardening): the
+    // website unwinds its mirrored buyer-spend / seller-payable / margin. Emitted
+    // only on a real transition to reversed (a no-op re-reverse returns null → no
+    // duplicate emit; the website also dedupes idempotently on settlementId).
+    if (reversed) {
+      void this.webhook?.notifyBusiness("settlement.reversed", { ...reversed, reversedAt });
+    }
+    return reversed !== null;
   }
 
   /** Reconcile one seller's unpaid against the log. */
@@ -342,7 +371,7 @@ export class SettlementLedger {
    * via webhook — every figure (collected, sellerCredit, platformMargin) is the
    * actually-recorded value, not an estimate. Newest-first, bounded.
    */
-  query(q: { sellerId?: string; buyerKeyId?: string; since?: Date; limit?: number } = {}): {
+  query(q: { sellerId?: string; buyerKeyId?: string; since?: Date; reversedSince?: Date; limit?: number } = {}): {
     total: number;
     data: Array<{
       id: string;
@@ -358,6 +387,7 @@ export class SettlementLedger {
       platformMargin: number;
       billTrack: string | null;
       reversed: boolean;
+      reversedAt: number | null;
     }>;
   } {
     const limit = Math.max(1, Math.min(q.limit ?? 100, 1000));
@@ -366,18 +396,25 @@ export class SettlementLedger {
     if (q.sellerId) { where.push("seller_id = ?"); params.push(q.sellerId); }
     if (q.buyerKeyId) { where.push("buyer_key_id = ?"); params.push(q.buyerKeyId); }
     if (q.since) { where.push("ts >= ?"); params.push(q.since.getTime()); }
+    // money-hardening (Foza reversal reconcile): when reversedSince is given, return
+    // only rows reversed at/after that instant, ordered by reversed_at — so the
+    // website can sweep NEW reversals regardless of the original settle ts (which a
+    // reversal never changes). Orthogonal to `since` (original-ts window).
+    const reversedMode = q.reversedSince !== undefined;
+    if (reversedMode) { where.push("reversed_at >= ?"); params.push(q.reversedSince!.getTime()); }
     const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const orderCol = reversedMode ? "reversed_at" : "ts";
 
     const total = (this.db.prepare(`SELECT COUNT(*) AS c FROM settlement_log ${clause}`).get(...params) as { c: number }).c;
     const rows = this.db.prepare(
       `SELECT id, request_id, ts, buyer_key_id, base_model, seller_id, prompt_tokens, completion_tokens,
-              collected_micro, seller_credit_micro, platform_margin_micro, bill_track, reversed
-       FROM settlement_log ${clause} ORDER BY ts DESC LIMIT ?`
+              collected_micro, seller_credit_micro, platform_margin_micro, bill_track, reversed, reversed_at
+       FROM settlement_log ${clause} ORDER BY ${orderCol} DESC LIMIT ?`
     ).all(...params, limit) as Array<{
       id: string; request_id: string | null; ts: number; buyer_key_id: string | null; base_model: string | null;
       seller_id: string | null; prompt_tokens: number; completion_tokens: number;
       collected_micro: number; seller_credit_micro: number; platform_margin_micro: number;
-      bill_track: string | null; reversed: number;
+      bill_track: string | null; reversed: number; reversed_at: number | null;
     }>;
 
     return {
@@ -395,7 +432,8 @@ export class SettlementLedger {
         sellerCredit: microToUsd(r.seller_credit_micro),
         platformMargin: microToUsd(r.platform_margin_micro),
         billTrack: r.bill_track,
-        reversed: r.reversed === 1
+        reversed: r.reversed === 1,
+        reversedAt: r.reversed_at
       }))
     };
   }

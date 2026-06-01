@@ -192,10 +192,18 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
 
   // ── Wallet top-up ─────────────────────────────────────────────────────────
   app.post("/provision/wallet/topup", privOpts, async (request, reply) => {
-    const p = z.object({ keyId: z.string().min(1), usd: z.number().positive().optional(), amountUsd: z.number().positive().optional() }).safeParse(request.body);
+    const p = z.object({ keyId: z.string().min(1), usd: z.number().positive().optional(), amountUsd: z.number().positive().optional(), idempotencyKey: z.string().min(1).optional() }).safeParse(request.body);
     if (!p.success || (p.data.usd === undefined && p.data.amountUsd === undefined)) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
     const amount = (p.data.usd ?? p.data.amountUsd) as number;
     if (amount > config.maxTopupUsd) { reply.code(400); return { error: { message: `amount exceeds the maximum of $${config.maxTopupUsd}`, code: "amount_too_large" } }; }
+    // Idempotent when a key is given (Foza SePay credit retry-safe); otherwise the
+    // legacy additive top-up.
+    if (p.data.idempotencyKey) {
+      const r = app.walletService.topupUsdIdempotent(p.data.keyId, amount, p.data.idempotencyKey);
+      app.apiKeyService.setWalletMicroUsd(p.data.keyId, Math.round(r.walletUsd * 1_000_000));
+      audit("provision.wallet.topup", request, p.data.keyId, "api_key");
+      return { keyId: p.data.keyId, walletUsd: r.walletUsd, ...(r.idempotent ? { idempotent: true } : {}) };
+    }
     const walletUsd = app.walletService.topupUsd(p.data.keyId, amount);
     app.apiKeyService.setWalletMicroUsd(p.data.keyId, Math.round(walletUsd * 1_000_000));
     audit("provision.wallet.topup", request, p.data.keyId, "api_key");
@@ -502,6 +510,7 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   app.get("/provision/settlements", opts, async (request) => {
     const q = z.object({
       since: z.string().datetime().optional(),
+      reversedSince: z.string().datetime().optional(),
       keyId: z.string().optional(),
       sellerId: z.string().optional(),
       limit: z.coerce.number().int().min(1).max(1000).optional()
@@ -512,12 +521,13 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
       ...(q.keyId ? { buyerKeyId: q.keyId } : {}),
       ...(q.sellerId ? { sellerId: q.sellerId } : {}),
       ...(q.since ? { since: new Date(q.since) } : {}),
+      ...(q.reversedSince ? { reversedSince: new Date(q.reversedSince) } : {}),
       limit: q.limit ?? 100
     });
   });
 
   // ── Self-service business webhook config (provision-read-api) ─────────────
-  const BUSINESS_EVENTS = ["usage.recorded", "grant.exhausted", "wallet.low", "quota.blocked", "supply.unhealthy", "plan.renewed", "plan.downgraded"] as const;
+  const BUSINESS_EVENTS = ["usage.recorded", "grant.exhausted", "wallet.low", "quota.blocked", "supply.unhealthy", "plan.renewed", "plan.downgraded", "settlement.reversed"] as const;
 
   app.get("/provision/webhook", opts, async () => {
     const cfg = app.webhookService.getBusinessConfig();

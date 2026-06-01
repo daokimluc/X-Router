@@ -40,7 +40,7 @@ export function registerWalletAdminRoutes(
     { preHandler: adminAuth },
     async (request, reply) => {
       const params = z.object({ id: z.string().min(1) }).parse(request.params);
-      const body = request.body as { amountUsd?: number };
+      const body = request.body as { amountUsd?: number; idempotencyKey?: string };
 
       if (typeof body.amountUsd !== "number" || body.amountUsd <= 0) {
         reply.code(400);
@@ -59,6 +59,14 @@ export function registerWalletAdminRoutes(
         return {
           error: { message: `API key "${params.id}" not found`, code: "not_found" }
         };
+      }
+
+      // Idempotent when a key is given (retry-safe); else the legacy additive top-up.
+      if (body.idempotencyKey) {
+        const r = walletService.topupUsdIdempotent(params.id, body.amountUsd, body.idempotencyKey);
+        app.apiKeyService.setWalletMicroUsd(params.id, Math.round(r.walletUsd * 1_000_000));
+        app.adminAuditService.record({ action: "api_key.topup", actorKeyHash: request.adminAuth?.apiKeyHash, targetType: "api_key", targetId: params.id });
+        return { id: params.id, walletUsd: r.walletUsd, addedUsd: r.idempotent ? 0 : body.amountUsd, ...(r.idempotent ? { idempotent: true } : {}) };
       }
 
       const walletUsd = walletService.topupUsd(params.id, body.amountUsd);

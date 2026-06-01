@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -238,6 +238,16 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE settlement_log ADD COLUMN grant_id TEXT;
       ALTER TABLE wallet_ledger ADD COLUMN idempotency_key TEXT;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_ledger_idem ON wallet_ledger (idempotency_key) WHERE idempotency_key IS NOT NULL;
+    `);
+  },
+  // v9 — money-hardening (Foza reversal reconcile): timestamp a settlement reversal
+  // so the website can query reversals by WHEN they were reversed (not the original
+  // settle ts, which a reversal does not change). Pairs with the settlement.reversed
+  // business webhook so Foza can keep its books in sync without an unbounded lookback.
+  (db) => {
+    db.exec(`
+      ALTER TABLE settlement_log ADD COLUMN reversed_at INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_settlement_reversed_at ON settlement_log (reversed_at);
     `);
   }
 ];

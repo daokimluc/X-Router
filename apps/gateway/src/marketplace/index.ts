@@ -239,6 +239,8 @@ export function registerMarketplace(
   );
   // money-hardening-2 M4: re-credit reversed token-pack settlements to their grant.
   settlementLedger.setTokenGrantService(tokenGrantService);
+  // money-hardening: a reversal emits the settlement.reversed business webhook.
+  settlementLedger.setWebhookService(app.webhookService);
   app.decorate("settlementLedger", settlementLedger);
 
   registerEarningsAdminRoutes(app, deps.config, sellerEarningsLedger, settlementLedger);
