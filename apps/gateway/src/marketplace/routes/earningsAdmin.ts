@@ -35,6 +35,12 @@ export function registerEarningsAdminRoutes(
       reply.code(400);
       return { error: { message: "amountUsd must be a positive number", code: "validation_error" } };
     }
+    // marketplace-money-hardening H2: never pay out more than is owed.
+    const unpaid = ledger.snapshot(params.id).unpaid;
+    if (body.data.amountUsd > unpaid + 1e-9) {
+      reply.code(400);
+      return { error: { message: `amount $${body.data.amountUsd} exceeds unpaid $${unpaid}`, code: "amount_exceeds_unpaid" } };
+    }
     const snapshot = ledger.markPaid(params.id, body.data.amountUsd, body.data.payoutRef);
     app.adminAuditService.record({
       action: "earnings.mark_paid",
@@ -83,8 +89,10 @@ export function registerEarningsAdminRoutes(
 
   // Books-health reconciliation (money-correctness #2 read; admin-marketplace-ui).
   // Platform solvency: Σcollected ≥ ΣsellerCredit and recorded margin matches.
+  // marketplace-money-hardening C2: wallet solvency excludes token-pack value;
+  // packs are reconciled separately (prepaid off-platform) and surfaced alongside.
   app.get("/admin/v1/marketplace/reconcile/platform", { preHandler: adminAuth }, async () => {
-    return settlementLedger.reconcilePlatform();
+    return { ...settlementLedger.reconcilePlatform(), packs: settlementLedger.reconcilePacks() };
   });
 
   // Per-seller: unpaid == Σcredits − Σpayouts + Σpayout_reversals − Σreversals.

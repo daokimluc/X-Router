@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -198,6 +198,26 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
         idempotency_key TEXT NOT NULL UNIQUE
       );
       CREATE INDEX IF NOT EXISTS idx_token_grants_lookup ON token_grants (key_id, base_model);
+    `);
+  },
+  // v7 — marketplace-money-hardening: durable per-period subscription charge token
+  // (the idempotency boundary that prevents renewal double-charge across a restart —
+  // written in the SAME transaction as the wallet debit), and a uniqueness guard on
+  // payout references so a retried seller payout cannot double-pay.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS plan_charges (
+        id TEXT PRIMARY KEY,
+        key_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        period_end INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        amount_micro INTEGER NOT NULL,
+        ts INTEGER NOT NULL,
+        UNIQUE (key_id, plan_id, period_end, kind)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plan_charges_key ON plan_charges (key_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_payouts_ref ON payouts (payout_ref) WHERE payout_ref IS NOT NULL;
     `);
   }
 ];

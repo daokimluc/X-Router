@@ -112,6 +112,7 @@ export class MarketplaceSeam {
   private candidateRanker: CandidateRanker | null = null;
   private routedCapture: RoutedCapture | null = null;
   private costForBuilder: CostForBuilder | null = null;
+  private reservationReleaser: ((request: FastifyRequest) => void) | null = null;
 
   addKeyPolicyCheck(check: KeyPolicyCheck): void {
     this.keyPolicyChecks.push(check);
@@ -138,6 +139,27 @@ export class MarketplaceSeam {
   /** Register the per-model cost-lookup builder (lowest-cost-routing-wiring). */
   setCostForBuilder(fn: CostForBuilder): void {
     this.costForBuilder = fn;
+  }
+
+  /**
+   * Register the helper that releases any marketplace reservation still held on a
+   * request (wallet PAYG/boost, plan bucket, token pack). The engine calls it from
+   * the `onResponse` backstop so an early-return path (cache hit, direct-route
+   * 404, no-provider) that bypasses the settlement hook does not leak a held
+   * reservation. No-op when the marketplace is off. (marketplace-money-hardening H1)
+   */
+  setReservationReleaser(fn: (request: FastifyRequest) => void): void {
+    this.reservationReleaser = fn;
+  }
+
+  /** Release any leaked marketplace reservation on a finished request. No-op when off. */
+  releaseLeakedReservations(request: FastifyRequest): void {
+    if (!this.reservationReleaser) return;
+    try {
+      this.reservationReleaser(request);
+    } catch {
+      // never throw out of a response hook
+    }
   }
 
   /**

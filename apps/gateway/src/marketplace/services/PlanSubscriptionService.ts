@@ -82,13 +82,28 @@ export class PlanSubscriptionService {
       return { ok: true, planId: plan.id, walletUsd };
     }
 
-    // Paid plan: all-or-nothing charge, then bind + set period.
-    const charge = this.deps.walletService.chargeUsd(keyId, plan.priceUsd, `plan_subscribe:${plan.id}`);
+    const now = this.now();
+
+    // Durable idempotency (C1b): if the buyer already paid for a still-active
+    // period of this plan (e.g. the charge committed but a crash lost the plan
+    // binding before it persisted), rebind WITHOUT charging again. The exact-time
+    // in-memory guard above can't catch a re-subscribe at a different `now`.
+    const activeEnd = this.deps.walletService.activeChargedPeriodEnd(keyId, plan.id, now);
+    if (activeEnd !== null) {
+      this.deps.apiKeyService.update(keyId, { planId: plan.id, planPeriodEnd: activeEnd, planChargedAt: now });
+      return { ok: true, idempotent: true, planId: plan.id, planPeriodEnd: activeEnd, planChargedAt: now, walletUsd };
+    }
+
+    // Paid plan: all-or-nothing charge with a durable per-period token, then bind.
+    const periodEnd = addOneCalendarMonth(now);
+    const charge = this.deps.walletService.chargeForPeriod(keyId, plan.priceUsd, {
+      planId: plan.id,
+      periodEnd,
+      kind: "subscribe"
+    });
     if (!charge.ok) {
       return { ok: false, reason: "insufficient_funds", priceUsd: plan.priceUsd, walletUsd };
     }
-    const now = this.now();
-    const periodEnd = addOneCalendarMonth(now);
     this.deps.apiKeyService.update(keyId, { planId: plan.id, planChargedAt: now, planPeriodEnd: periodEnd });
     this.deps.apiKeyService.setWalletMicroUsd(keyId, Math.round(charge.newBalanceUsd * 1_000_000));
     this.resetMonthBuckets(keyId, plan);
@@ -131,7 +146,24 @@ export class PlanSubscriptionService {
       return { changed: true, kind: "renewed" };
     }
 
-    const charge = this.deps.walletService.chargeUsd(keyId, plan.priceUsd, `plan_renew:${plan.id}`);
+    // Advance off the OLD period end (not `now`) so a late check doesn't drift the
+    // anchor forward. This is the target period the charge is FOR — also the
+    // durable idempotency token.
+    const periodEnd = addOneCalendarMonth(key.planPeriodEnd);
+    const charge = this.deps.walletService.chargeForPeriod(keyId, plan.priceUsd, {
+      planId: plan.id,
+      periodEnd,
+      kind: "renew"
+    });
+    if (charge.alreadyCharged) {
+      // This period was already charged (a renewal that committed before a restart,
+      // now replayed against the stale in-memory period). Catch up the in-memory
+      // period WITHOUT charging or re-emitting the webhook.
+      this.deps.apiKeyService.update(keyId, { planPeriodEnd: periodEnd, planChargedAt: now });
+      this.deps.apiKeyService.setWalletMicroUsd(keyId, Math.round(charge.newBalanceUsd * 1_000_000));
+      this.resetMonthBuckets(keyId, plan);
+      return { changed: true, kind: "renewed" };
+    }
     if (!charge.ok) {
       // Underfunded → downgrade to Free, clear the period, notify.
       this.deps.apiKeyService.update(keyId, { planId: null, planChargedAt: null, planPeriodEnd: null });
@@ -144,9 +176,6 @@ export class PlanSubscriptionService {
       return { changed: true, kind: "downgraded", fromPlanId: plan.id };
     }
 
-    // Advance off the OLD period end (not `now`) so a late check doesn't drift the
-    // anchor forward.
-    const periodEnd = addOneCalendarMonth(key.planPeriodEnd);
     this.deps.apiKeyService.update(keyId, { planPeriodEnd: periodEnd, planChargedAt: now });
     this.deps.apiKeyService.setWalletMicroUsd(keyId, Math.round(charge.newBalanceUsd * 1_000_000));
     this.resetMonthBuckets(keyId, plan);

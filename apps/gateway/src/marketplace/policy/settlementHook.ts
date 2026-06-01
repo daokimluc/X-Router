@@ -169,10 +169,13 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
         }
       }
     } else if (billTrack === "tokenpack" && tokenPack) {
-      // Decrement the pack by the ACTUAL combined tokens (no buyer money moved).
-      // `collected` is the supply value consumed — it drives seller credit + the
-      // books, taking zero net platform margin on packs (the buyer paid Foza up
-      // front), while preserving collected === sellerCredit + platformMargin.
+      // Decrement the pack by the ACTUAL combined tokens (no buyer wallet money
+      // moved — the buyer prepaid the website for the pack). `collected` is set to
+      // the supply value consumed so the seller is credited for real supply; this
+      // value is NOT wallet cash, so it is excluded from wallet platform-margin
+      // (see below) and from wallet solvency (SettlementLedger.reconcilePlatform).
+      // Pack economics are reconciled separately against pricePaidUsd. Note: packs
+      // DO carry markup+commission margin — it just isn't backed by wallet cash.
       deps.tokenGrantService?.settle(tokenPack.id, ctx.promptTokens + ctx.completionTokens);
       collected = actualSellCost;
     }
@@ -187,7 +190,15 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       if (sellerCredit > 0) deps.sellerEarningsLedger.credit(sellerId, sellerCredit);
     }
     const platformMargin = collected - sellerCredit;
-    if (platformMargin !== 0) deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
+    // marketplace-money-hardening C2: do NOT fold token-pack margin into the
+    // wallet platform-margin counter — a pack request moved no wallet money (the
+    // buyer paid the website off-platform), so counting its sell-value as platform
+    // cash would inflate wallet solvency. Pack margin is reconciled separately from
+    // settlement_log (reconcilePacks) against the prepaid pricePaidUsd. The seller
+    // credit above is still recorded (real supply was consumed).
+    if (platformMargin !== 0 && billTrack !== "tokenpack") {
+      deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
+    }
 
     // Durable, auditable settlement row (enables reversal + reconciliation).
     // The returned id is the stable idempotency key surfaced to the website.

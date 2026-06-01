@@ -85,6 +85,13 @@ export function registerMarketplace(
   // `balance` field (and has no USD wallet) gets a provisioned $0 wallet, and a
   // warning is logged. Idempotent — keys already migrated (walletMicroUsd set,
   // no legacy balance) are untouched. Token counts are NOT converted to USD.
+  //
+  // marketplace-money-hardening H4: we deliberately do NOT reseed a wallet from
+  // the denormalized `walletMicroUsd` key snapshot. That snapshot is display-only
+  // and drifts (it isn't synced on the PAYG settle/release/refund paths), so
+  // trusting it to recreate a balance could restore phantom funds or lose funds.
+  // The SQLite `wallets` row is the sole money authority; if it is absent the
+  // wallet is simply unprovisioned ($0) until a real top-up.
   for (const key of deps.persistedState?.apiKeys ?? []) {
     const legacy = (key as { balance?: number }).balance;
     const hasWallet =
@@ -97,9 +104,6 @@ export function registerMarketplace(
         { key: key.id, legacyTokenBalance: legacy },
         "wallet-migration: legacy token balance dropped; re-topup in USD"
       );
-    } else if (key.walletMicroUsd !== undefined && !walletService.isProvisioned(key.id)) {
-      // Restore from the per-key persisted field if the slice didn't carry it.
-      walletService.topupUsd(key.id, key.walletMicroUsd / 1_000_000);
     }
   }
 
@@ -249,6 +253,28 @@ export function registerMarketplace(
       webhookService: app.webhookService
     })
   );
+
+  // marketplace-money-hardening H1: release any reservation still held when a
+  // request finishes via an early-return path (cache hit, direct-route 404,
+  // no-provider) that bypassed the settlement hook. The hook nulls these on the
+  // normal path, so this only fires for leaks. Mirrors the failure-release logic.
+  app.marketplaceSeam.setReservationReleaser((request) => {
+    const payg = request.payg;
+    if (payg) {
+      const [walletRes, dayRes] = payg.id.split("|");
+      if (walletRes) walletService.releaseUsd(walletRes);
+      if (dayRes) app.spendLedgerService.release(dayRes);
+      request.payg = undefined;
+    }
+    if (request.planReservation) {
+      app.spendLedgerService.release(request.planReservation.id);
+      request.planReservation = undefined;
+    }
+    if (request.tokenPack) {
+      tokenGrantService.release(request.tokenPack.id);
+      request.tokenPack = undefined;
+    }
+  });
 
   // ── provision-webhook (#7) ────────────────────────────────────────────────
   // Restore the business webhook config (separate from the ops Discord/Slack one).

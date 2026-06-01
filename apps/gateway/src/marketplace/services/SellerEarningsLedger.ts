@@ -109,15 +109,28 @@ export class SellerEarningsLedger {
     return microToUsd(row?.margin_micro ?? 0);
   }
 
-  /** Reduce unpaid after an off-platform payout. Floored at 0. Logs a payout row. */
+  /**
+   * Reduce unpaid after an off-platform payout. Floored at 0. Logs a payout row.
+   * marketplace-money-hardening H2: idempotent on `payoutRef` (the `payouts`
+   * payout_ref UNIQUE index dedupes a retried webhook) — a replay logs nothing and
+   * does not reduce unpaid twice. The unknown-seller guard runs BEFORE the insert
+   * so a phantom payout is never logged for a seller with no earnings row.
+   */
   markPaid(sellerId: string, usd: number, payoutRef?: string): SellerEarningsSnapshot {
     const sub = usdToMicro(usd);
     this.tx(() => {
       const r = this.rolled(sellerId);
+      if (!r) return; // unknown seller → no payout row, no-op
+      // Idempotent replay: a payout with this ref already exists → do nothing.
+      if (payoutRef) {
+        const dup = this.db.prepare(
+          "SELECT 1 FROM payouts WHERE payout_ref = ?"
+        ).get(payoutRef);
+        if (dup) return;
+      }
       this.db.prepare(
         "INSERT INTO payouts (id, seller_id, usd_micro, ts, payout_ref, kind) VALUES (?, ?, ?, ?, ?, 'paid')"
       ).run(`po_${randomUUID()}`, sellerId, sub, Date.now(), payoutRef ?? null);
-      if (!r) return;
       const next = Math.max(0, r.unpaid_micro - sub);
       this.db.prepare("UPDATE seller_earnings SET unpaid_micro = ? WHERE seller_id = ?").run(next, sellerId);
     });

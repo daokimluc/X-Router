@@ -86,6 +86,77 @@ export class WalletService {
     });
   }
 
+  /**
+   * Charge a subscription fee with a DURABLE per-period idempotency guard
+   * (marketplace-money-hardening C1). The wallet debit, the `wallet_ledger` row,
+   * AND a `plan_charges` row `(keyId, planId, periodEnd, kind)` all commit in ONE
+   * transaction. The `plan_charges` UNIQUE constraint is the integrity boundary:
+   * if a charge for this exact period already exists (e.g. a renewal that
+   * committed before a restart, replayed against a stale in-memory period), the
+   * insert conflicts → we roll back the would-be debit and return
+   * `{ ok:true, alreadyCharged:true }` so the caller treats it as an idempotent
+   * no-op instead of debiting twice. Underfunded → `{ ok:false }`, no mutation.
+   */
+  chargeForPeriod(
+    keyId: string,
+    usd: number,
+    period: { planId: string; periodEnd: number; kind: "subscribe" | "renew" }
+  ): { ok: boolean; alreadyCharged?: boolean; newBalanceUsd: number } {
+    return this.tx(() => {
+      // Already charged this exact period? → idempotent no-op (no second debit).
+      const existing = this.db.prepare(
+        "SELECT 1 FROM plan_charges WHERE key_id = ? AND plan_id = ? AND period_end = ? AND kind = ?"
+      ).get(keyId, period.planId, period.periodEnd, period.kind);
+      if (existing) {
+        return { ok: true, alreadyCharged: true, newBalanceUsd: this.getUsd(keyId) };
+      }
+      if (usd <= 0) {
+        // Free period: record the (zero) charge token so the period is still
+        // guarded against a duplicate, but move no money.
+        this.recordPlanCharge(keyId, period, 0);
+        return { ok: true, newBalanceUsd: this.getUsd(keyId) };
+      }
+      const cost = usdToMicro(usd);
+      const current = this.balanceMicro(keyId);
+      if (current === undefined || current < cost) {
+        return { ok: false, newBalanceUsd: current === undefined ? 0 : microToUsd(current) };
+      }
+      const next = current - cost;
+      this.db.prepare("UPDATE wallets SET balance_micro = ? WHERE key_id = ?").run(next, keyId);
+      this.db.prepare(
+        "INSERT INTO wallet_ledger (id, key_id, delta_micro, kind, reason, ts) VALUES (?, ?, ?, 'charge', ?, ?)"
+      ).run(`wl_${randomUUID()}`, keyId, -cost, `plan_${period.kind}:${period.planId}`, Date.now());
+      this.recordPlanCharge(keyId, period, cost);
+      return { ok: true, newBalanceUsd: microToUsd(next) };
+    });
+  }
+
+  private recordPlanCharge(
+    keyId: string,
+    period: { planId: string; periodEnd: number; kind: string },
+    amountMicro: number
+  ): void {
+    this.db.prepare(
+      "INSERT INTO plan_charges (id, key_id, plan_id, period_end, kind, amount_micro, ts) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(`pc_${randomUUID()}`, keyId, period.planId, period.periodEnd, period.kind, amountMicro, Date.now());
+  }
+
+  /**
+   * Durable subscribe idempotency (marketplace-money-hardening C1b). A subscribe
+   * computes its period from `now`, so an exact-period token can't dedupe a
+   * re-subscribe at a different time after a crash that lost the plan binding.
+   * This returns the period_end of an existing un-expired charge for
+   * `(keyId, planId)` — i.e. "the buyer already paid for a still-active period of
+   * this plan" — so the caller can rebind the plan WITHOUT charging again. Null if
+   * no active paid period exists (a genuine fresh subscribe).
+   */
+  activeChargedPeriodEnd(keyId: string, planId: string, now: number): number | null {
+    const row = this.db.prepare(
+      "SELECT period_end FROM plan_charges WHERE key_id = ? AND plan_id = ? AND period_end > ? ORDER BY period_end DESC LIMIT 1"
+    ).get(keyId, planId, now) as { period_end: number } | undefined;
+    return row?.period_end ?? null;
+  }
+
   /** Funds check — false for unprovisioned or underfunded. */
   hasFundsUsd(keyId: string, requiredUsd: number): boolean {
     const micro = this.balanceMicro(keyId);

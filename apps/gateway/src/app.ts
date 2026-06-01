@@ -512,15 +512,23 @@ export async function buildApp(
   // path; it only fires for paths that exited without settling.
   app.addHook("onResponse", async (request) => {
     const reservation = request.spendReservation;
-    if (!reservation) return;
-    request.spendReservation = undefined;
-    for (const id of reservation.id.split("|")) {
-      try {
-        spendLedgerService.release(id);
-      } catch {
-        // best-effort cleanup — never throw out of a response hook
+    if (reservation) {
+      request.spendReservation = undefined;
+      for (const id of reservation.id.split("|")) {
+        try {
+          spendLedgerService.release(id);
+        } catch {
+          // best-effort cleanup — never throw out of a response hook
+        }
       }
     }
+    // marketplace-money-hardening H1: release any marketplace reservation (PAYG
+    // wallet hold, plan bucket, token pack) still held when the response finishes.
+    // The settlement hook nulls these on the normal path, so this only fires for
+    // early returns (cache hit, direct-route 404, no-provider) that bypass it and
+    // would otherwise leak a real wallet hold until the next boot sweep. No-op
+    // when the marketplace is disabled.
+    app.marketplaceSeam.releaseLeakedReservations(request);
   });
 
   await registerRequestId(app);

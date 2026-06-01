@@ -44,6 +44,10 @@ export type SellerReconciliation = {
   sellerId: string;
   expectedUnpaid: number;
   actualUnpaid: number;
+  /** marketplace-money-hardening H3: amount the platform paid out beyond what it
+   *  now owes (e.g. a settlement reversed after payout — an unrecoverable
+   *  clawback). 0 when healthy. A positive value forces ok=false. */
+  overPaidUsd: number;
   ok: boolean;
 };
 
@@ -54,6 +58,20 @@ export type PlatformReconciliation = {
   expectedMargin: number;
   solvent: boolean;
   marginMatches: boolean;
+  ok: boolean;
+};
+
+/**
+ * Prepaid token-pack solvency (marketplace-money-hardening C2). Packs are paid to
+ * the website off-platform, so they are accounted SEPARATELY from wallet money:
+ * the recognized sell-value of pack-track settlements must not exceed the total
+ * `pricePaidUsd` of granted packs (else the platform recognized more value than
+ * was actually sold).
+ */
+export type PackReconciliation = {
+  totalPricePaid: number;
+  recognizedValue: number;
+  sellerCredit: number;
   ok: boolean;
 };
 
@@ -171,25 +189,38 @@ export class SettlementLedger {
       "SELECT COALESCE(SUM(usd_micro),0) AS s FROM earnings_reversals WHERE seller_id = ? AND kind = 'payout_reversal'"
     ).get(sellerId) as { s: number }).s;
 
-    // unpaid = credits − payouts + failed-payout-restorations − clawbacks
-    const expectedMicro = Math.max(0, credits - payouts + payoutReversals - reversals);
-    const expectedUnpaid = microToUsd(expectedMicro);
+    // unpaid = credits − payouts + failed-payout-restorations − clawbacks.
+    // marketplace-money-hardening H3: do NOT floor this at 0. A negative net means
+    // the platform has paid out more than it now owes — an unrecoverable clawback
+    // (a settlement reversed after the seller was already paid). The live ledger
+    // floors `unpaid` at 0 (you can't un-pay a wire), so flooring expected here too
+    // would make both agree and hide the loss. Keep expected signed: the live
+    // unpaid (0) won't match the signed expected (<0) → ok=false + overPaidUsd.
+    const netOwedMicro = credits - payouts + payoutReversals - reversals;
+    const expectedUnpaid = microToUsd(netOwedMicro);
     const actualUnpaid = this.earnings.snapshot(sellerId).unpaid;
+    const overPaidUsd = netOwedMicro < 0 ? microToUsd(-netOwedMicro) : 0;
     return {
       sellerId,
       expectedUnpaid,
       actualUnpaid,
-      ok: Math.abs(expectedUnpaid - actualUnpaid) < 1e-6
+      overPaidUsd,
+      ok: overPaidUsd === 0 && Math.abs(expectedUnpaid - actualUnpaid) < 1e-6
     };
   }
 
   /** Reconcile platform solvency from the log. */
   reconcilePlatform(): PlatformReconciliation {
+    // marketplace-money-hardening C2: wallet solvency counts ONLY money that
+    // entered the wallet system (plan + payg). Token-pack rows are excluded — the
+    // buyer paid the website off-platform, so a pack's sell-value was never wallet
+    // cash and must not inflate totalCollected / margin. Pack economics are proven
+    // separately by reconcilePacks().
     const totalCollectedMicro = (this.db.prepare(
-      "SELECT COALESCE(SUM(collected_micro),0) AS s FROM settlement_log WHERE reversed = 0"
+      "SELECT COALESCE(SUM(collected_micro),0) AS s FROM settlement_log WHERE reversed = 0 AND bill_track != 'tokenpack'"
     ).get() as { s: number }).s;
     const totalCreditMicro = (this.db.prepare(
-      "SELECT COALESCE(SUM(seller_credit_micro),0) AS s FROM settlement_log WHERE reversed = 0"
+      "SELECT COALESCE(SUM(seller_credit_micro),0) AS s FROM settlement_log WHERE reversed = 0 AND bill_track != 'tokenpack'"
     ).get() as { s: number }).s;
     const recordedMargin = this.earnings.getPlatformMargin();
     const expectedMargin = microToUsd(totalCollectedMicro - totalCreditMicro);
@@ -205,6 +236,31 @@ export class SettlementLedger {
       solvent,
       marginMatches,
       ok: solvent && marginMatches
+    };
+  }
+
+  /**
+   * Reconcile prepaid token-pack economics (marketplace-money-hardening C2),
+   * separately from wallet solvency. The recognized sell-value of pack-track
+   * settlements (and the seller credit funded from it) must not exceed the total
+   * `pricePaidUsd` the website remitted for granted packs.
+   */
+  reconcilePacks(): PackReconciliation {
+    const pricePaidMicro = (this.db.prepare(
+      "SELECT COALESCE(SUM(price_paid_micro),0) AS s FROM token_grants"
+    ).get() as { s: number }).s;
+    const recognizedMicro = (this.db.prepare(
+      "SELECT COALESCE(SUM(collected_micro),0) AS s FROM settlement_log WHERE reversed = 0 AND bill_track = 'tokenpack'"
+    ).get() as { s: number }).s;
+    const sellerCreditMicro = (this.db.prepare(
+      "SELECT COALESCE(SUM(seller_credit_micro),0) AS s FROM settlement_log WHERE reversed = 0 AND bill_track = 'tokenpack'"
+    ).get() as { s: number }).s;
+    return {
+      totalPricePaid: microToUsd(pricePaidMicro),
+      recognizedValue: microToUsd(recognizedMicro),
+      sellerCredit: microToUsd(sellerCreditMicro),
+      // Healthy when we have not recognized more pack value than was sold.
+      ok: recognizedMicro <= pricePaidMicro
     };
   }
 

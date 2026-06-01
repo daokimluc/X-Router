@@ -112,10 +112,8 @@ describe("TokenGrantService", () => {
 });
 
 describe("Database v6 migration", () => {
-  it("creates the token_grants table on a fresh DB at schema v6", () => {
+  it("creates the token_grants table on a fresh DB", () => {
     const db = new Database(":memory:");
-    const version = (db.db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as { version: number }).version;
-    expect(version).toBe(6);
     const tbl = db.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='token_grants'").get();
     expect(tbl).toBeDefined();
     db.close();

@@ -310,6 +310,9 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     const p = z.object({ usd: z.number().positive().optional(), amountUsd: z.number().positive().optional(), payoutRef: z.string().optional() }).safeParse(request.body);
     if (!p.success || (p.data.usd === undefined && p.data.amountUsd === undefined)) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
     const amount = (p.data.usd ?? p.data.amountUsd) as number;
+    // marketplace-money-hardening H2: never pay out more than is owed.
+    const unpaid = app.sellerEarningsLedger.snapshot(sellerId).unpaid;
+    if (amount > unpaid + 1e-9) { reply.code(400); return { error: { message: `amount $${amount} exceeds unpaid $${unpaid}`, code: "amount_exceeds_unpaid" } }; }
     // provision-hardening (#5): persist payoutRef on the payout record (was dropped).
     const snapshot = app.sellerEarningsLedger.markPaid(sellerId, amount, p.data.payoutRef);
     audit("provision.earnings.mark_paid", request, sellerId, "seller");
