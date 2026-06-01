@@ -354,3 +354,54 @@ After the 5 core-engine changes landed, shipped a series of releases (all commit
 **The "known-remaining" F1 queue-handoff + drain-swallow bugs ARE NOW FIXED** (acquireGlobalWithQueue re-queue loop; drain logs failed final save).
 
 **Ops state:** global `x-router` (v0.4.4) is the operational instance — port 3100, `~/.x-router/` data, marketplace ON. Do NOT use `npm run dev` (8080, apps/gateway/data/, different/older store) as operational. Key alignment: adminApiKeys=`admin`, provisionApiKeys=`provision-key-1`, internalApiKeys=`xrk_b9e0...`; Foza website `.env.local` synced to these. Full guide: `D:/Project/XRouter.ai/docs/XROUTER_CONFIG_SOURCE_OF_TRUTH.md`. Run gateway tests: `cd apps/gateway && rtk proxy npx vitest run --root .` (plain vitest picks up unrelated workspaces). Suite: 716 pass / 7 skip.
+
+## marketplace-plan-subscription — CODE DONE, not committed (2026-06-01)
+
+Fixed the "$0 wallet subscribes to a paid plan for free" bug: a paid plan is now a **monthly subscription** charged on grant + auto-renewed. OpenSpec change `marketplace-plan-subscription` (proposal+design+spec+tasks, `validate --strict` clean).
+
+**Engine neutral additions** (no subscription logic, boundary held):
+- `ApiKeyService`: +`planChargedAt?`/`planPeriodEnd?` (epoch-ms numbers; `update()` patch accepts `number|null`). Numbers round-trip JSON+ConfigStore with no date revival (apiKeySchema `.passthrough()`, reviveDates ignores them).
+- `SpendLedgerService.resetMonth(scope)`: zero month counter only, leave hour/day + calendar rollover.
+- `WebhookService` event union: +`plan.renewed`, +`plan.downgraded`.
+
+**Marketplace** (`apps/gateway/src/marketplace/`):
+- `utils/subscriptionPeriod.ts` `addOneCalendarMonth(fromMs)` — pure, Stripe-style clamp (Jan 31→Feb 28/29), UTC, preserves time-of-day.
+- `WalletService.chargeUsd(keyId,usd,reason)` — all-or-nothing debit + `wallet_ledger` `kind:'charge'` row in one tx (unlike `debitUsd` which floors at 0 + no ledger).
+- `utils/modelGroup.ts` `groupsForPlan(planGroups)` — group labels to reset (wildcard→ALL_GROUPS; resetMonth no-ops unseen scopes).
+- `services/PlanSubscriptionService.ts` — `subscribe`/`renewIfDue`/`cancel` + `resetMonthBuckets`; injectable `now` for tests. `renewIfDue` is the single renewal decision point (lazy + monitor converge), idempotent via `planPeriodEnd` guard; advances period off OLD end (no drift); legacy plan-bound-no-period key → grandfathered (set period, NO charge); underfunded renew → downgrade to Free (`planId=null`) + `plan.downgraded` webhook.
+- `services/PlanRenewalMonitor.ts` — modeled on SupplyHealthMonitor (setInterval+unref, public `scan()`), ~hourly, scans plan-bound keys past period → `renewIfDue`.
+
+**Wiring:** `marketplacePolicyCheck` calls `renewIfDue` BEFORE scope/bucket (downgrade→402 `plan_renewal_failed`); `POST /provision/grant` routes through subscribe/cancel (`planId` nullable; underfunded→402 `insufficient_funds`; idempotent same-active-plan; switch charges new plan in full, no proration); GET `/provision/keys`+`/provision/wallet/:keyId` expose `planPeriodEnd`/`planChargedAt`; `BUSINESS_EVENTS` +2; `registerMarketplace` constructs+decorates `planSubscriptionService`, injects into policy deps, starts/stops `PlanRenewalMonitor`.
+
+**BREAKING:** $0 wallet can no longer subscribe to a paid plan (402). Updated `provisionWebhook.test.ts` (topup before grant). Free ($0) plans bind with no charge/period.
+
+**Verify:** gateway tsc clean, full suite **743 pass / 7 skip** (was 716, +27: subscriptionPeriod 6, walletChargeAndResetMonth 6, planSubscription 13, planRenewalMonitor 2, +1 configStore period round-trip — minus shifts), boundary green, `openspec validate --strict` clean.
+
+**NOT committed** (uncommitted on main alongside earlier marketplace edits). Next: 7.3 manual smoke (user) + 7.4 commit one `feat(marketplace): plan subscription charge + monthly auto-renew`, bump version, push, `openspec archive marketplace-plan-subscription`. Then token-packs change (see [[marketplace-billing-build-inprogress]] §B).
+
+## marketplace-plan-subscription SHIPPED as v0.5.0 (2026-06-01)
+
+7.3 smoke automated instead of manual: `planSubscriptionE2E.test.ts` builds the real app (marketplace on, full registerMarketplace wiring) and drives subscribe/renew/downgrade/cancel through HTTP + the actual registered policy check. 5 e2e tests. Suite now **748 pass / 7 skip**.
+
+Released in the v0.4.x pattern (3 commits on main, pushed):
+- `1cd94e7` feat(marketplace): plan subscription charge + monthly auto-renew (BREAKING: $0 wallet can't subscribe to a paid plan)
+- `976e5ba` chore(release): 0.5.0 (root package.json 0.4.4→0.5.0; minor bump = new feature)
+- `3e7e52c` chore(openspec): archive marketplace-plan-subscription into specs/
+
+Tag `v0.5.0` pushed. `npx openspec list` = no active changes. **NOT published** to GitHub Packages yet, **global install NOT updated** (per [[feedback-dont-auto-update-global]] — user updates their own global). Next billing feature: token-packs (`marketplace-token-packs`, see [[marketplace-billing-build-inprogress]] §B).
+
+## marketplace-token-packs SHIPPED as v0.6.0 + PUBLISHED + global updated (2026-06-01)
+
+Third bill track `tokenpack` alongside plan/PAYG: a buyer prepays Foza for N tokens on a base model; requests consume the pack ahead of plan + wallet until exhausted/expired. Foza calls `POST /provision/token-pack` (idempotent) after collecting payment; x-router meters consumption + credits the serving seller, never charges the buyer wallet for a pack.
+
+- Database v6: `token_grants` (per-(key, base_model) balance, explicit expiresAt, UNIQUE idempotency_key).
+- `TokenGrantService`: grant/findUsable(most-remaining)/reserve/settle/release/listForKey. Pack balance = usage counter (in-memory reservation like SpendLedger; crash over-counts ≤1 estimate, no boot sweep).
+- Enforce: tokenpack step before plan/PAYG; covered → reserve + skip plan/wallet; oversized → no split, fall through; expired → fall through. Shared `estimateUpperBoundTokens`.
+- Settle: tokenpack branch decrements pack by actual prompt+completion; `collected = actualSellCost`; seller credited normally; zero net platform margin (Foza took the spread); conservation holds. Failure releases the reservation. `reverseSettlement` treats tokenpack as no-buyer-refund (no token re-credit, v1).
+- Endpoints: `POST /provision/token-pack` (400 past-expiry, 404 unknown key), `GET /provision/token-packs?keyId=`, `tokenPacks[]` on `GET /provision/keys`.
+
+Released (3 commits on main, pushed): `bf6827e` feat / `b6171df` release 0.6.0 / `f1fb14c` archive. Tag `v0.6.0` pushed. **PUBLISHED** to GitHub Packages (0.6.0) + **global updated** via `npm i -g .` (global symlinks to source, version 0.6.0). Suite **771 pass / 7 skip** (+23), tsc clean, boundary green, `openspec validate --strict` clean, `npx openspec list` = none.
+
+⚠️ **User must RESTART the global `x-router`** (port 3100) for v0.6.0 to take effect — the running instance is still the old build until restarted. Both features are BREAKING (paid-plan subscribe now requires funds; token-pack is a new track). `x-router --version` is not implemented (falls into launch+config-dump) — check via `npm ls -g @daokimluc/x-router`.
+
+The whole marketplace-billing series (subscription + token-packs) is now complete.
