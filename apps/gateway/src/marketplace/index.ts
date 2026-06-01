@@ -23,6 +23,7 @@ import { SettlementLedger } from "./services/SettlementLedger.js";
 import { SupplyHealthMonitor } from "./services/SupplyHealthMonitor.js";
 import { PlanSubscriptionService } from "./services/PlanSubscriptionService.js";
 import { PlanRenewalMonitor } from "./services/PlanRenewalMonitor.js";
+import { TokenGrantService } from "./services/TokenGrantService.js";
 import { type PaygDecision } from "./services/PaygDecision.js";
 import { RealPaygDecision } from "./services/RealPaygDecision.js";
 import { createMarketplacePolicyCheck } from "./policy/marketplacePolicyCheck.js";
@@ -55,6 +56,7 @@ declare module "fastify" {
     settlementLedger: SettlementLedger;
     paygDecision: PaygDecision;
     planSubscriptionService: PlanSubscriptionService;
+    tokenGrantService: TokenGrantService;
   }
 }
 
@@ -142,6 +144,13 @@ export function registerMarketplace(
   });
   app.decorate("planSubscriptionService", planSubscriptionService);
 
+  // ── marketplace-token-packs ───────────────────────────────────────────────
+  // Prepaid per-(key, baseModel) token balances, consumed ahead of plan + wallet.
+  // SQLite-backed (token_grants). Used by POST /provision/token-pack + the policy
+  // check (reserve before plan/PAYG) + the settlement hook (tokenpack track).
+  const tokenGrantService = new TokenGrantService(deps.database);
+  app.decorate("tokenGrantService", tokenGrantService);
+
   // ── seller-supply (#4) ────────────────────────────────────────────────────
   const sellerService = new SellerService();
   sellerService.load(deps.persistedState?.marketplace?.sellers as PersistedSellers | undefined ?? null);
@@ -181,6 +190,7 @@ export function registerMarketplace(
       marketPricingService,
       paygDecision,
       planSubscriptionService,
+      tokenGrantService,
       getBody: (req) => req.body as { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined,
       webhookService: app.webhookService
     })
@@ -235,6 +245,7 @@ export function registerMarketplace(
       sellerEarningsLedger,
       settlementLedger,
       modelPricingService: app.modelPricingService,
+      tokenGrantService,
       webhookService: app.webhookService
     })
   );

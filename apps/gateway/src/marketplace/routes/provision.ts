@@ -162,6 +162,32 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     };
   });
 
+  // ── Token packs (marketplace-token-packs) ─────────────────────────────────
+  // Prepaid per-(key, baseModel) token balances. Foza calls this AFTER collecting
+  // payment; x-router only issues the grant + stores pricePaidUsd for audit (it
+  // never charges the buyer's wallet for a pack). Idempotent on idempotencyKey.
+  app.post("/provision/token-pack", privOpts, async (request, reply) => {
+    const p = z.object({
+      keyId: z.string().min(1),
+      baseModel: z.string().min(1),
+      tokens: z.number().int().positive(),
+      pricePaidUsd: z.number().min(0),
+      expiresAt: z.number().int().positive(),
+      idempotencyKey: z.string().min(1)
+    }).safeParse(request.body);
+    if (!p.success) { reply.code(400); return { error: { message: "invalid token-pack grant", code: "validation_error" } }; }
+    if (p.data.expiresAt <= Date.now()) { reply.code(400); return { error: { message: "expiresAt must be in the future", code: "validation_error" } }; }
+    if (!app.apiKeyService.findById(p.data.keyId)) { reply.code(404); return { error: { message: `key ${p.data.keyId} not found`, code: "not_found" } }; }
+    const grant = app.tokenGrantService.grant(p.data);
+    audit("provision.token_pack.grant", request, p.data.keyId, "api_key");
+    return { grant };
+  });
+
+  app.get("/provision/token-packs", opts, async (request) => {
+    const q = z.object({ keyId: z.string().min(1) }).parse(request.query);
+    return { keyId: q.keyId, tokenPacks: app.tokenGrantService.listForKey(q.keyId) };
+  });
+
   // ── Wallet top-up ─────────────────────────────────────────────────────────
   app.post("/provision/wallet/topup", privOpts, async (request, reply) => {
     const p = z.object({ keyId: z.string().min(1), usd: z.number().positive().optional(), amountUsd: z.number().positive().optional() }).safeParse(request.body);
@@ -258,7 +284,12 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
         walletUsd: app.walletService.getUsd(k.id),
         provisioned: app.walletService.isProvisioned(k.id),
         planPeriodEnd: k.planPeriodEnd ?? null,
-        planChargedAt: k.planChargedAt ?? null
+        planChargedAt: k.planChargedAt ?? null,
+        tokenPacks: app.tokenGrantService.listForKey(k.id).map((g) => ({
+          baseModel: g.baseModel,
+          tokensRemaining: g.tokensRemaining,
+          expiresAt: g.expiresAt
+        }))
       }));
     return { keys };
   });

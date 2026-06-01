@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -177,6 +177,27 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+    `);
+  },
+  // v6 — marketplace-token-packs: prepaid per-(key, base_model) finite token
+  // balances. A pack is bought through Foza (which calls POST /provision/token-pack
+  // after collecting payment); x-router meters consumption and never charges the
+  // buyer's wallet for a pack. tokens_remaining is the live balance; price_paid_micro
+  // is audit-only; idempotency_key UNIQUE makes a retried grant a no-op.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS token_grants (
+        id TEXT PRIMARY KEY,
+        key_id TEXT NOT NULL,
+        base_model TEXT NOT NULL,
+        tokens_total INTEGER NOT NULL,
+        tokens_remaining INTEGER NOT NULL,
+        price_paid_micro INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_grants_lookup ON token_grants (key_id, base_model);
     `);
   }
 ];

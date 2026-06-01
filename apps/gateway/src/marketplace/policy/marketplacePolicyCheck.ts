@@ -27,6 +27,7 @@ import type { PlanService } from "../services/PlanService.js";
 import type { PaygDecision } from "../services/PaygDecision.js";
 import type { MarketPricingService } from "../services/MarketPricingService.js";
 import type { PlanSubscriptionService } from "../services/PlanSubscriptionService.js";
+import type { TokenGrantService } from "../services/TokenGrantService.js";
 import { modelGroupOf, matchesGroups } from "../utils/modelGroup.js";
 
 declare module "fastify" {
@@ -41,6 +42,13 @@ declare module "fastify" {
      * (or released) post-request by the route handler.
      */
     payg?: { id: string; reason: "month_overage" | "boost" };
+    /**
+     * marketplace-token-packs — prepaid pack reservation held in enforce when a
+     * request is covered by a usable token pack (consumed ahead of plan + wallet).
+     * Settled (or released) post-request on the `tokenpack` track. When set, the
+     * request touches neither the plan bucket nor the wallet.
+     */
+    tokenPack?: { id: string; grantId: string; baseModel: string };
   }
 }
 
@@ -64,20 +72,38 @@ export type MarketplacePolicyDeps = {
    * scope/bucket checks. Optional — absent in tests that don't exercise renewal.
    */
   planSubscriptionService?: PlanSubscriptionService;
+  /**
+   * marketplace-token-packs — prepaid token packs consumed BEFORE plan + wallet.
+   * When present, a request whose base model has a usable pack covering its
+   * estimate is reserved against the pack and skips the plan/PAYG path. Optional.
+   */
+  tokenGrantService?: TokenGrantService;
   getBody: (req: FastifyRequest) => { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined;
   /** provision-webhook (#7) — emit quota.blocked on a hard rejection. Optional. */
   webhookService?: WebhookService;
 };
+
+/**
+ * Upper-bound (prompt + output) token estimate for a request. Shared by the
+ * cost estimate (plan/PAYG) and the token-pack reserve so both agree on the same
+ * basis. Heuristic: input chars / 4 + (max_tokens || 1024).
+ */
+function estimateUpperBoundTokens(
+  body: { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined
+): { inputTokens: number; outputTokens: number; total: number } {
+  const messages = body?.messages ?? [];
+  const inputChars = JSON.stringify(messages).length;
+  const inputTokens = Math.ceil(inputChars / 4);
+  const outputTokens = body?.max_tokens && body.max_tokens > 0 ? body.max_tokens : 1024;
+  return { inputTokens, outputTokens, total: inputTokens + outputTokens };
+}
 
 function estimateUpperBoundCost(
   model: string,
   body: { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined,
   pricing: ModelPricingService
 ): number {
-  const messages = body?.messages ?? [];
-  const inputChars = JSON.stringify(messages).length;
-  const inputTokens = Math.ceil(inputChars / 4);
-  const outputTokens = body?.max_tokens && body.max_tokens > 0 ? body.max_tokens : 1024;
+  const { inputTokens, outputTokens } = estimateUpperBoundTokens(body);
   return pricing.calculateCost(model, inputTokens, outputTokens).totalCost;
 }
 
@@ -85,6 +111,24 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
   const evaluate = function marketplacePolicyCheck(ctx: Parameters<KeyPolicyCheck>[0]): KeyPolicyRejection | void {
     const { keyId, model, record } = ctx;
     const planId = record.planId;
+
+    // ── Token pack (marketplace-token-packs): consume BEFORE plan + wallet ────
+    // A prepaid pack covering this request's estimate is reserved and the request
+    // skips the plan/PAYG path entirely (touches neither bucket nor wallet). An
+    // oversized request (estimate > remaining) is left intact and falls through.
+    if (model && deps.tokenGrantService) {
+      ctx.request.buyerKeyId = keyId; // settlement needs it on the tokenpack track too
+      const grant = deps.tokenGrantService.findUsable(keyId, model);
+      if (grant) {
+        const estTokens = estimateUpperBoundTokens(deps.getBody(ctx.request)).total;
+        const r = deps.tokenGrantService.reserve({ grantId: grant.id, estTokens });
+        if (r.ok) {
+          ctx.request.tokenPack = { id: r.reservationId, grantId: grant.id, baseModel: model };
+          return; // allow — settled on the tokenpack track
+        }
+        // r.ok === false → oversized vs remaining; fall through (no split).
+      }
+    }
 
     // ── Lazy monthly renewal (marketplace-plan-subscription) ─────────────────
     // For a plan-bound key, settle any due renewal BEFORE scope/bucket checks.

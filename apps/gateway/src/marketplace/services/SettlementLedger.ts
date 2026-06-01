@@ -33,7 +33,7 @@ export type SettlementRecord = {
   collected: number;
   sellerCredit: number;
   platformMargin: number;
-  billTrack: "plan" | "payg";
+  billTrack: "plan" | "payg" | "tokenpack";
   /** Plan-bucket scope (for a plan-track reversal to credit the bucket back). */
   planScope?: string | null;
   /** Gateway requestId — correlates this row to its usage_log row. */
@@ -128,8 +128,11 @@ export class SettlementLedger {
 
       // Refund the buyer: wallet track → credit the wallet; plan track → credit
       // the plan bucket back (negative settle on the scope, no real money moved).
+      // tokenpack track → NO buyer refund (the buyer paid Foza up front, not the
+      // wallet) and pack tokens are not re-credited in v1 — only the seller credit
+      // + platform margin below are unwound.
       const collectedUsd = microToUsd(row.collected_micro);
-      if (collectedUsd > 0) {
+      if (collectedUsd > 0 && row.bill_track !== "tokenpack") {
         if (row.bill_track === "plan" && row.plan_scope) {
           this.spendLedger.credit(row.plan_scope, collectedUsd);
         } else if (row.buyer_key_id) {

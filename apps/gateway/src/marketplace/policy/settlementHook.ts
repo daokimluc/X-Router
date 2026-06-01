@@ -18,6 +18,7 @@ import type { SellerService } from "../services/SellerService.js";
 import type { MarketPricingService } from "../services/MarketPricingService.js";
 import type { SellerEarningsLedger } from "../services/SellerEarningsLedger.js";
 import type { SettlementLedger } from "../services/SettlementLedger.js";
+import type { TokenGrantService } from "../services/TokenGrantService.js";
 import type { CostPrice } from "../../account-pool/types.js";
 
 const HOUSE_SELLER_ID = "house";
@@ -40,7 +41,7 @@ declare module "fastify" {
       actualSellCost: number;
       sellerCredit: number;
       platformMargin: number;
-      billTrack: "plan" | "payg";
+      billTrack: "plan" | "payg" | "tokenpack";
     };
   }
 }
@@ -55,6 +56,8 @@ export type SettlementDeps = {
   settlementLedger: SettlementLedger;
   /** money-correctness (#2) — fallback cost basis for an unlisted route. */
   modelPricingService: ModelPricingService;
+  /** marketplace-token-packs — decrement the pack on the tokenpack track. Optional. */
+  tokenGrantService?: TokenGrantService;
   /** provision-webhook (#7) — emit usage.recorded after settlement. Optional. */
   webhookService?: WebhookService;
   /** provision-webhook (#7) — wallet.low threshold in USD (default 1.00). */
@@ -66,10 +69,11 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
     const { request } = ctx;
     const planRes = request.planReservation;
     const payg = request.payg;
+    const tokenPack = request.tokenPack;
     const routed = request.routed;
 
     // Nothing marketplace-related to settle (plan-less, non-marketplace request).
-    if (!planRes && !payg) return;
+    if (!planRes && !payg && !tokenPack) return;
 
     if (ctx.outcome === "failure") {
       // Release whatever was held; no seller credit.
@@ -79,6 +83,7 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
         if (walletRes) deps.walletService.releaseUsd(walletRes);
         if (dayRes) deps.spendLedgerService.release(dayRes);
       }
+      if (tokenPack) deps.tokenGrantService?.release(tokenPack.id);
       // provision-webhook (#7) — supply.unhealthy: a request routed to a
       // non-house seller failed terminally. Best-effort signal to the website.
       if (deps.webhookService && routed && routed.sellerId !== HOUSE_SELLER_ID) {
@@ -90,6 +95,7 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       }
       request.planReservation = undefined;
       request.payg = undefined;
+      request.tokenPack = undefined;
       return;
     }
 
@@ -98,7 +104,7 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
     // actually collected (a wallet can floor at zero), THEN derive seller credit
     // + platform margin from the collected amount so the books always conserve:
     //   collected === sellerCredit + platformMargin.
-    const billTrack: "plan" | "payg" = payg ? "payg" : "plan";
+    const billTrack: "plan" | "payg" | "tokenpack" = tokenPack ? "tokenpack" : payg ? "payg" : "plan";
     const sellerId = routed?.sellerId ?? HOUSE_SELLER_ID;
     const baseModel = routed?.baseModel ?? ctx.model;
 
@@ -162,6 +168,13 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
           void deps.webhookService.notifyBusiness("wallet.low", { keyId, balanceUsd, thresholdUsd: threshold });
         }
       }
+    } else if (billTrack === "tokenpack" && tokenPack) {
+      // Decrement the pack by the ACTUAL combined tokens (no buyer money moved).
+      // `collected` is the supply value consumed — it drives seller credit + the
+      // books, taking zero net platform margin on packs (the buyer paid Foza up
+      // front), while preserving collected === sellerCredit + platformMargin.
+      deps.tokenGrantService?.settle(tokenPack.id, ctx.promptTokens + ctx.completionTokens);
+      collected = actualSellCost;
     }
 
     // Derive credit + margin from COLLECTED (not intended): margin absorbs any
@@ -213,6 +226,7 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
 
     request.planReservation = undefined;
     request.payg = undefined;
+    request.tokenPack = undefined;
   };
 }
 
