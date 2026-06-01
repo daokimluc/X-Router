@@ -405,3 +405,37 @@ Released (3 commits on main, pushed): `bf6827e` feat / `b6171df` release 0.6.0 /
 ⚠️ **User must RESTART the global `x-router`** (port 3100) for v0.6.0 to take effect — the running instance is still the old build until restarted. Both features are BREAKING (paid-plan subscribe now requires funds; token-pack is a new track). `x-router --version` is not implemented (falls into launch+config-dump) — check via `npm ls -g @daokimluc/x-router`.
 
 The whole marketplace-billing series (subscription + token-packs) is now complete.
+
+## Money/revenue audit → v0.6.1 hardening (2026-06-01)
+
+Deep read-only audit (4 parallel subagents + self-verification) of ALL pay paths (wallet/plan/token-pack/seller-earnings) after v0.5/v0.6. Found + FIXED 2 CRITICAL + 4 HIGH; shipped v0.6.1. Detail in memory `project_marketplace_money_audit.md`.
+
+- **C1** subscription renewal double-charged on restart (durable charge, in-memory period guard never persisted on /v1 + monitor paths). Fix: Database v7 `plan_charges` UNIQUE(key_id,plan_id,period_end,kind); `WalletService.chargeForPeriod` writes the charge token in the SAME tx as the debit → replay no-ops. `activeChargedPeriodEnd` dedupes re-subscribe.
+- **C2** token-pack sell-value inflated wallet solvency + phantom margin. Fix: `reconcilePlatform` excludes bill_track='tokenpack'; new `reconcilePacks()` (recognized ≤ pricePaid); pack margin not folded into wallet margin counter. Seller still credited.
+- **H1** cache-hit/early-return leaked PAYG wallet reservation + plan bucket + token pack. Fix: `MarketplaceSeam.releaseLeakedReservations` seam called from `app.ts` onResponse backstop.
+- **H2** `markPaid` non-idempotent + uncapped + phantom payout. Fix: idempotent on payoutRef (payouts.payout_ref UNIQUE), guard-before-insert, both mark-paid routes reject amount>unpaid.
+- **H3** clawback-after-payout silently eaten. Fix: `reconcileSeller` no longer floors expected; reports ok=false + overPaidUsd.
+- **H4** stale `walletMicroUsd` snapshot used as boot reseed. Fix: removed reseed branch; SQLite wallets is sole authority.
+
+Verify: tsc clean, 783 pass / 7 skip (+12), boundary green, validate --strict clean. 3 commits (`5a3cb3e` fix / release 0.6.1 / archive) pushed; tag v0.6.1 pushed; published GitHub Packages; global updated to 0.6.1.
+
+⚠️ **User must RESTART global x-router** (port 3100) → v0.6.1 + auto-migrate SQLite to v7 (additive). DEFERRED MEDIUM/LOW (token-pack crash loses reserved tokens / conservation rounding / unlisted-route $0 floor / pack reversal token re-credit / findUsable expiry order / pack over-run / calendar drift / grandfather-free-month via create-with-planId / refundUsd idempotency / input upper bounds) — listed in the change proposal + memory, not yet fixed.
+
+## Money audit pass 2 → v0.6.2 (deferred MEDIUM/LOW ALL cleared, 2026-06-01)
+
+Change `marketplace-money-hardening-2`, Database v8. v0.6.2: commits `daccf21` fix + release + archive on main (pushed); tag v0.6.2; published GitHub Packages; global updated to 0.6.2.
+
+- **M1** pack reservations persisted (`token_grant_reservations`) + boot sweep — crash no longer loses buyer-paid tokens. **M2** exact integer-micro conservation + `record()` assertion. **M3** non-zero fallback floor (`FALLBACK_COST_PER_1K_USD`) — never serve free. **M4** pack reversal re-credits tokens (`settlement_log.grant_id` + `tokenGrants.recredit`). **M5** findUsable soonest-expiry first. **M6** over-run reported + ×1.3 reserve headroom. **Grandfather bounded** (`GRANDFATHER_CUTOFF_MS=2026-06-01`; post-cutoff paid-plan key charged not free; lazy renewal only on model-bearing requests). **refundUsd idempotent** (`wallet_ledger.idempotency_key`). **Input caps** (maxTopupUsd/maxPackTokens/maxPackHorizonMs) + commission clamp [0,1]. Calendar-drift left as-is (correct Stripe behavior).
+
+Verify: tsc clean, **795 pass / 7 skip** (+12), boundary green, validate --strict clean. ⚠️ **Restart global x-router** → v0.6.2 + auto-migrate SQLite to v8 (additive). The entire marketplace money path (subscription + token-packs + both hardening passes) is now audited and fixed; `npx openspec list` = no active changes.
+
+## v0.6.3 — Foza requests: idempotent top-up + settlement.reversed webhook (2026-06-01)
+
+Foza sent 2 question docs (`QUESTIONS_FOR_XROUTER_WALLET_TOPUP_IDEMPOTENCY.md`, `QUESTIONS_FOR_XROUTER_REVERSAL_WEBHOOK.md`); both verified-real gaps, both shipped in v0.6.3 (change `marketplace-topup-reversal-webhook`, Database v9). Commit `f9e4a49`; tag v0.6.3; pushed; published; global on 0.6.3.
+
+- **Topup idempotency:** `WalletService.topupUsdIdempotent(keyId,usd,idempotencyKey)` dedupes on `wallet_ledger.idempotency_key` (UNIQUE, one tx). `POST /provision/wallet/topup` + admin topup accept optional `idempotencyKey` → replay returns `{walletUsd, idempotent:true}`, no double-credit. No key → additive (unchanged). TTL = permanent.
+- **Reversal webhook:** `settlement.reversed` business event (in BUSINESS_EVENTS), emitted post-commit in `reverseSettlement` with `{settlementId,buyerKeyId,sellerId,collected,sellerCredit,platformMargin,billTrack,reason,reversedAt}`. Idempotent: re-reverse is a no-op + no second emit.
+- **Reversal query:** `settlement_log.reversed_at` (v9); `GET /provision/settlements?reversedSince=<ISO>` returns rows by reversal time (order by reversed_at), each row has `reversedAt`. Catch-up backstop if a webhook is missed — independent of original `ts`.
+- Answer doc: `D:/Project/XRouter.ai/docs/ANSWERS_FROM_XROUTER_TOPUP_REVERSAL.md`. X-Router still has NO auto cron-reconcile (Foza schedules its own reconcile via reversedSince); offered to add webhook-replay cron if Foza wants.
+
+Verify: tsc clean, **801 pass / 7 skip** (+6), boundary green, validate --strict clean. ⚠️ **Restart global x-router** → v0.6.3 + auto-migrate SQLite to v9 (additive).
