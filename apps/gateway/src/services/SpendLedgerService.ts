@@ -231,6 +231,23 @@ export class SpendLedgerService {
   }
 
   /**
+   * Zero a scope's MONTH counter immediately (marketplace-plan-subscription).
+   * Used when a subscription renews so the plan's published monthly allowance
+   * tracks the subscription period rather than the UTC calendar month. Hour/day
+   * windows (rate limits) are left untouched, and the calendar-month rollover
+   * still applies to this scope between renewals. No-op when the scope was never
+   * seen (its month bucket is already zero).
+   */
+  resetMonth(scope: ScopeKey): void {
+    const entry = this.entries.get(scope);
+    if (!entry) return;
+    rollover(entry);
+    entry.month = 0;
+    entry.monthKey = monthKey();
+    this.scheduleSave();
+  }
+
+  /**
    * Read-only snapshot of current spend for a scope. Returns zero entry if
    * scope was never seen.
    */

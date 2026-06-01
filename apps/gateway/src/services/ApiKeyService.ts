@@ -39,6 +39,18 @@ export type InternalApiKeyRecord = {
   overageEnabled?: boolean;
   /** marketplace-plans (#3) — user-set PAYG wallet daily limit (USD). */
   paygDailyLimitUsd?: number;
+  /**
+   * marketplace-plan-subscription — epoch-ms of the last successful subscribe/
+   * renew charge. Neutral data field: the engine persists it, the marketplace
+   * drives it. Undefined for Free/plan-less keys.
+   */
+  planChargedAt?: number;
+  /**
+   * marketplace-plan-subscription — epoch-ms at which the current subscription
+   * period ends (renewal due at/after this). Neutral data field. Undefined for
+   * Free/plan-less keys.
+   */
+  planPeriodEnd?: number;
   /** two-sided-settlement (#6) — opt in to boost (PAYG past a speed-limit). */
   boostEnabled?: boolean;
   createdAt: Date;
@@ -170,6 +182,8 @@ export class ApiKeyService {
     overageEnabled?: boolean | null;
     paygDailyLimitUsd?: number | null;
     boostEnabled?: boolean | null;
+    planChargedAt?: number | null;
+    planPeriodEnd?: number | null;
   }): InternalApiKeyRecord | null {
     const record = Array.from(this.keys.values()).find((r) => r.id === id);
     if (!record) return null;
@@ -191,6 +205,8 @@ export class ApiKeyService {
     if (patch.overageEnabled !== undefined) record.overageEnabled = patch.overageEnabled ?? undefined;
     if (patch.paygDailyLimitUsd !== undefined) record.paygDailyLimitUsd = (patch.paygDailyLimitUsd ?? -1) >= 0 ? (patch.paygDailyLimitUsd as number) : undefined;
     if (patch.boostEnabled !== undefined) record.boostEnabled = patch.boostEnabled ?? undefined;
+    if (patch.planChargedAt !== undefined) record.planChargedAt = patch.planChargedAt ?? undefined;
+    if (patch.planPeriodEnd !== undefined) record.planPeriodEnd = patch.planPeriodEnd ?? undefined;
     const { key: _key, ...safeRecord } = record;
     return structuredClone(safeRecord);
   }

@@ -26,6 +26,7 @@ import type { WalletService } from "../services/WalletService.js";
 import type { PlanService } from "../services/PlanService.js";
 import type { PaygDecision } from "../services/PaygDecision.js";
 import type { MarketPricingService } from "../services/MarketPricingService.js";
+import type { PlanSubscriptionService } from "../services/PlanSubscriptionService.js";
 import { modelGroupOf, matchesGroups } from "../utils/modelGroup.js";
 
 declare module "fastify" {
@@ -57,6 +58,12 @@ export type MarketplacePolicyDeps = {
    * wallet to the floor at settle). Optional — falls back to raw list cost.
    */
   marketPricingService?: MarketPricingService;
+  /**
+   * marketplace-plan-subscription — lazy monthly renewal. When present, a
+   * plan-bound key whose period has elapsed is renewed (or downgraded) before the
+   * scope/bucket checks. Optional — absent in tests that don't exercise renewal.
+   */
+  planSubscriptionService?: PlanSubscriptionService;
   getBody: (req: FastifyRequest) => { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined;
   /** provision-webhook (#7) — emit quota.blocked on a hard rejection. Optional. */
   webhookService?: WebhookService;
@@ -78,6 +85,24 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
   const evaluate = function marketplacePolicyCheck(ctx: Parameters<KeyPolicyCheck>[0]): KeyPolicyRejection | void {
     const { keyId, model, record } = ctx;
     const planId = record.planId;
+
+    // ── Lazy monthly renewal (marketplace-plan-subscription) ─────────────────
+    // For a plan-bound key, settle any due renewal BEFORE scope/bucket checks.
+    // A renewal may charge the wallet (period advances) or downgrade the key to
+    // Free when underfunded — in which case the request is rejected and the key
+    // falls to the plan-less path on its next request.
+    if (planId && deps.planSubscriptionService) {
+      const r = deps.planSubscriptionService.renewIfDue(keyId);
+      if (r.changed && r.kind === "downgraded") {
+        return reject(402, {
+          error: {
+            type: "insufficient_balance",
+            message: "Plan renewal failed: wallet underfunded. Subscription downgraded to Free. Top up and re-subscribe.",
+            code: "plan_renewal_failed"
+          }
+        });
+      }
+    }
 
     // ── Plan-less key: legacy wallet-empty gate (usd-wallet #1) ──────────────
     if (!planId) {

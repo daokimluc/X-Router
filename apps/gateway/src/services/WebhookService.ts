@@ -28,7 +28,10 @@ export type WebhookEvent =
   | "grant.exhausted"
   | "wallet.low"
   | "quota.blocked"
-  | "supply.unhealthy";
+  | "supply.unhealthy"
+  // marketplace-plan-subscription — subscription lifecycle
+  | "plan.renewed"
+  | "plan.downgraded";
 
 /** Business webhook target — separate from the ops (Discord/Slack) config. */
 export type BusinessWebhookConfig = {

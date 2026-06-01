@@ -53,17 +53,20 @@ describe("provision-webhook endpoints", () => {
     const keyId = key.json().id;
     expect(typeof key.json().key).toBe("string");
 
-    // grant a plan
+    // fund the wallet first — a paid plan is a subscription, charged on grant
+    const top = await app.inject({ method: "POST", url: "/provision/wallet/topup", headers: prov, payload: { keyId, usd: 25 } });
+    expect(top.json().walletUsd).toBe(25);
+
+    // grant (subscribe to) a plan → charges priceUsd ($10) + sets the period
     const grant1 = await app.inject({ method: "POST", url: "/provision/grant", headers: prov, payload: { keyId, planId: "plan_claude" } });
     expect(grant1.statusCode).toBe(200);
     expect(grant1.json().planId).toBe("plan_claude");
-    // idempotent re-grant
+    expect(grant1.json().walletUsd).toBe(15); // 25 − 10
+    expect(typeof grant1.json().planPeriodEnd).toBe("number");
+    // idempotent re-grant → no second charge
     const grant2 = await app.inject({ method: "POST", url: "/provision/grant", headers: prov, payload: { keyId, planId: "plan_claude" } });
     expect(grant2.json().idempotent).toBe(true);
-
-    // wallet topup
-    const top = await app.inject({ method: "POST", url: "/provision/wallet/topup", headers: prov, payload: { keyId, usd: 7.5 } });
-    expect(top.json().walletUsd).toBe(7.5);
+    expect(grant2.json().walletUsd).toBe(15);
 
     // markup
     const mk = await app.inject({ method: "PUT", url: "/provision/markup", headers: prov, payload: { defaultMarkup: 0.2 } });

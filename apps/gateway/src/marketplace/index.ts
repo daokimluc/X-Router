@@ -21,6 +21,8 @@ import { MarketPricingService, type PersistedMarketPricing } from "./services/Ma
 import { SellerEarningsLedger, type PersistedSellerEarnings } from "./services/SellerEarningsLedger.js";
 import { SettlementLedger } from "./services/SettlementLedger.js";
 import { SupplyHealthMonitor } from "./services/SupplyHealthMonitor.js";
+import { PlanSubscriptionService } from "./services/PlanSubscriptionService.js";
+import { PlanRenewalMonitor } from "./services/PlanRenewalMonitor.js";
 import { type PaygDecision } from "./services/PaygDecision.js";
 import { RealPaygDecision } from "./services/RealPaygDecision.js";
 import { createMarketplacePolicyCheck } from "./policy/marketplacePolicyCheck.js";
@@ -52,6 +54,7 @@ declare module "fastify" {
     sellerEarningsLedger: SellerEarningsLedger;
     settlementLedger: SettlementLedger;
     paygDecision: PaygDecision;
+    planSubscriptionService: PlanSubscriptionService;
   }
 }
 
@@ -125,6 +128,20 @@ export function registerMarketplace(
   // Admin plan endpoints + key plan assignment.
   registerPlanAdminRoutes(app, deps.config, planService);
 
+  // ── marketplace-plan-subscription ─────────────────────────────────────────
+  // Paid plans are monthly subscriptions: charge on subscribe, auto-renew from
+  // the wallet each period, downgrade to Free when underfunded. Drives the engine
+  // key's neutral planChargedAt/planPeriodEnd fields. Used by POST /provision/grant
+  // (subscribe/cancel), the policy check (lazy renew), and PlanRenewalMonitor.
+  const planSubscriptionService = new PlanSubscriptionService({
+    apiKeyService: app.apiKeyService,
+    walletService,
+    planService,
+    spendLedgerService: app.spendLedgerService,
+    webhookService: app.webhookService
+  });
+  app.decorate("planSubscriptionService", planSubscriptionService);
+
   // ── seller-supply (#4) ────────────────────────────────────────────────────
   const sellerService = new SellerService();
   sellerService.load(deps.persistedState?.marketplace?.sellers as PersistedSellers | undefined ?? null);
@@ -163,6 +180,7 @@ export function registerMarketplace(
       modelPricingService: app.modelPricingService,
       marketPricingService,
       paygDecision,
+      planSubscriptionService,
       getBody: (req) => req.body as { messages?: Array<{ content?: unknown }>; max_tokens?: number } | undefined,
       webhookService: app.webhookService
     })
@@ -268,4 +286,15 @@ export function registerMarketplace(
   });
   supplyHealth.start();
   app.addHook("onClose", () => supplyHealth.stop());
+
+  // Background subscription renewal (marketplace-plan-subscription): catches idle
+  // plan-bound keys whose period elapsed without traffic. Lazy renewal in the
+  // policy check remains the source of truth for trafficked keys; both converge on
+  // PlanSubscriptionService.renewIfDue, guarded by planPeriodEnd (no double-charge).
+  const renewalMonitor = new PlanRenewalMonitor({
+    listKeys: () => app.apiKeyService.list().map((k) => ({ id: k.id, planId: k.planId, planPeriodEnd: k.planPeriodEnd })),
+    renewIfDue: (keyId) => planSubscriptionService.renewIfDue(keyId)
+  });
+  renewalMonitor.start();
+  app.addHook("onClose", () => renewalMonitor.stop());
 }

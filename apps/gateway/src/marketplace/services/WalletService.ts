@@ -94,6 +94,31 @@ export class WalletService {
   }
 
   /**
+   * Charge USD all-or-nothing (marketplace-plan-subscription): a subscription
+   * fee must be charged in full or not at all — unlike `debitUsd`, this never
+   * floors a partial charge to zero. Funds-check + debit + an audited
+   * `wallet_ledger` row (`kind:'charge'`) happen in one transaction so a
+   * concurrent reserve can't pass the check then drain the balance. `ok:false`
+   * leaves the wallet untouched and writes no ledger row.
+   */
+  chargeUsd(keyId: string, usd: number, reason: string): { ok: boolean; newBalanceUsd: number } {
+    if (usd <= 0) return { ok: true, newBalanceUsd: this.getUsd(keyId) };
+    const cost = usdToMicro(usd);
+    return this.tx(() => {
+      const current = this.balanceMicro(keyId);
+      if (current === undefined || current < cost) {
+        return { ok: false, newBalanceUsd: current === undefined ? 0 : microToUsd(current) };
+      }
+      const next = current - cost;
+      this.db.prepare("UPDATE wallets SET balance_micro = ? WHERE key_id = ?").run(next, keyId);
+      this.db.prepare(
+        "INSERT INTO wallet_ledger (id, key_id, delta_micro, kind, reason, ts) VALUES (?, ?, ?, 'charge', ?, ?)"
+      ).run(`wl_${randomUUID()}`, keyId, -cost, reason, Date.now());
+      return { ok: true, newBalanceUsd: microToUsd(next) };
+    });
+  }
+
+  /**
    * Reserve an upper-bound estimate atomically: check funds, debit, insert the
    * reservation row — one transaction. ok:false if unprovisioned/underfunded.
    */

@@ -108,30 +108,58 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     return { deleted: id };
   });
 
-  // ── Plan grant (idempotent) ───────────────────────────────────────────────
+  // ── Plan grant / subscribe (marketplace-plan-subscription) ────────────────
+  // A paid plan is a monthly subscription: binding it charges the wallet and sets
+  // the renewal period. `planId: null` cancels (unbind, stop renewal, no refund).
   app.post("/provision/grant", privOpts, async (request, reply) => {
     const p = z.object({
       keyId: z.string().min(1),
-      planId: z.string().min(1),
+      planId: z.string().min(1).nullable(),
       overageEnabled: z.boolean().optional(),
       paygDailyLimitUsd: z.number().min(0).optional()
     }).safeParse(request.body);
     if (!p.success) { reply.code(400); return { error: { message: "invalid grant", code: "validation_error" } }; }
-    if (!app.planService.get(p.data.planId)) { reply.code(400); return { error: { message: `plan ${p.data.planId} not found`, code: "validation_error" } }; }
+    if (p.data.planId !== null && !app.planService.get(p.data.planId)) { reply.code(400); return { error: { message: `plan ${p.data.planId} not found`, code: "validation_error" } }; }
 
     const existing = app.apiKeyService.findById(p.data.keyId);
     if (!existing) { reply.code(404); return { error: { message: `key ${p.data.keyId} not found`, code: "not_found" } }; }
-    // Idempotent: same plan already bound with no other changes → return as-is.
-    if (existing.planId === p.data.planId && p.data.overageEnabled === undefined && p.data.paygDailyLimitUsd === undefined) {
-      return { id: p.data.keyId, planId: existing.planId, overageEnabled: existing.overageEnabled ?? null, paygDailyLimitUsd: existing.paygDailyLimitUsd ?? null, idempotent: true };
+
+    // Apply the (non-money) overage / PAYG-limit prefs first, independent of the
+    // subscription charge so a re-grant can still tweak them.
+    if (p.data.overageEnabled !== undefined || p.data.paygDailyLimitUsd !== undefined) {
+      app.apiKeyService.update(p.data.keyId, {
+        overageEnabled: p.data.overageEnabled === undefined ? undefined : p.data.overageEnabled,
+        paygDailyLimitUsd: p.data.paygDailyLimitUsd === undefined ? undefined : p.data.paygDailyLimitUsd
+      });
     }
-    const updated = app.apiKeyService.update(p.data.keyId, {
-      planId: p.data.planId,
-      overageEnabled: p.data.overageEnabled === undefined ? undefined : p.data.overageEnabled,
-      paygDailyLimitUsd: p.data.paygDailyLimitUsd === undefined ? undefined : p.data.paygDailyLimitUsd
-    });
+
+    // Cancel: unbind plan, stop renewal, no refund.
+    if (p.data.planId === null) {
+      app.planSubscriptionService.cancel(p.data.keyId);
+      audit("provision.grant", request, p.data.keyId, "api_key");
+      const after = app.apiKeyService.findById(p.data.keyId);
+      return { id: p.data.keyId, planId: null, planPeriodEnd: null, planChargedAt: null, walletUsd: app.walletService.getUsd(p.data.keyId), overageEnabled: after?.overageEnabled ?? null, paygDailyLimitUsd: after?.paygDailyLimitUsd ?? null };
+    }
+
+    const plan = app.planService.get(p.data.planId)!;
+    const result = app.planSubscriptionService.subscribe(p.data.keyId, plan);
+    if (!result.ok) {
+      reply.code(402);
+      return { error: { message: `wallet underfunded: plan costs $${result.priceUsd}, balance $${result.walletUsd}`, code: "insufficient_funds" } };
+    }
+    app.apiKeyService.setWalletMicroUsd(p.data.keyId, Math.round(result.walletUsd * 1_000_000));
     audit("provision.grant", request, p.data.keyId, "api_key");
-    return { id: p.data.keyId, planId: updated?.planId ?? null, overageEnabled: updated?.overageEnabled ?? null, paygDailyLimitUsd: updated?.paygDailyLimitUsd ?? null };
+    const after = app.apiKeyService.findById(p.data.keyId);
+    return {
+      id: p.data.keyId,
+      planId: result.planId,
+      planPeriodEnd: result.planPeriodEnd ?? null,
+      planChargedAt: result.planChargedAt ?? null,
+      walletUsd: result.walletUsd,
+      overageEnabled: after?.overageEnabled ?? null,
+      paygDailyLimitUsd: after?.paygDailyLimitUsd ?? null,
+      ...(result.idempotent ? { idempotent: true } : {})
+    };
   });
 
   // ── Wallet top-up ─────────────────────────────────────────────────────────
@@ -228,7 +256,9 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
         // walletUsd inline to avoid an N+1 GET /provision/wallet/:id per key.
         // provisioned:false → walletUsd:0 (never opened a wallet).
         walletUsd: app.walletService.getUsd(k.id),
-        provisioned: app.walletService.isProvisioned(k.id)
+        provisioned: app.walletService.isProvisioned(k.id),
+        planPeriodEnd: k.planPeriodEnd ?? null,
+        planChargedAt: k.planChargedAt ?? null
       }));
     return { keys };
   });
@@ -261,10 +291,14 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
 
   app.get("/provision/wallet/:keyId", opts, async (request) => {
     const { keyId } = z.object({ keyId: z.string().min(1) }).parse(request.params);
+    const key = app.apiKeyService.findById(keyId);
     return {
       keyId,
       walletUsd: app.walletService.getUsd(keyId),
-      provisioned: app.walletService.isProvisioned(keyId)
+      provisioned: app.walletService.isProvisioned(keyId),
+      planId: key?.planId ?? null,
+      planPeriodEnd: key?.planPeriodEnd ?? null,
+      planChargedAt: key?.planChargedAt ?? null
     };
   });
 
@@ -446,7 +480,7 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
   });
 
   // ── Self-service business webhook config (provision-read-api) ─────────────
-  const BUSINESS_EVENTS = ["usage.recorded", "grant.exhausted", "wallet.low", "quota.blocked", "supply.unhealthy"] as const;
+  const BUSINESS_EVENTS = ["usage.recorded", "grant.exhausted", "wallet.low", "quota.blocked", "supply.unhealthy", "plan.renewed", "plan.downgraded"] as const;
 
   app.get("/provision/webhook", opts, async () => {
     const cfg = app.webhookService.getBusinessConfig();

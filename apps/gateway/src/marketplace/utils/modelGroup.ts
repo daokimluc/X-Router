@@ -94,15 +94,39 @@ export function modelsForPlanGroups(
 }
 
 /**
- * Whether a model is granted by a plan's `modelGroups` list. An entry in the
- * list may be either a GROUP label (`"claude"`, `"free"`, `"*"`) or a specific
- * MODEL name (`"claude-opus-4-8"`) — admins set both forms. `"*"` matches every
- * group. The model's own name (when provided) is matched literally so a plan
- * scoped to explicit models works too.
+ * Resolve a plan's `modelGroups` into the set of GROUP labels whose per-group
+ * ledger scope (`key:<id>:grp:<group>`) the plan touches — for the subscription
+ * monthly-bucket reset (marketplace-plan-subscription). Each plan entry may be a
+ * group label or a specific model name:
+ *   - `"*"` (grant-all) → every group in {@link ALL_GROUPS}.
+ *   - a known group key → that group.
+ *   - anything else → treated as a model name, classified via {@link modelGroupOf}.
+ * The caller resets each scope; `resetMonth` is a no-op for an unseen scope, so a
+ * wildcard plan harmlessly resets only the groups the key actually used.
  */
 export function matchesGroups(group: string, planGroups: string[], model?: string): boolean {
   if (planGroups.includes("*")) return true;
   if (planGroups.includes(group)) return true;
   if (model && planGroups.includes(model)) return true;
   return false;
+}
+
+/**
+ * Resolve a plan's `modelGroups` into the set of GROUP labels whose per-group
+ * ledger scope (`key:<id>:grp:<group>`) the plan touches — for the subscription
+ * monthly-bucket reset (marketplace-plan-subscription). Each plan entry may be a
+ * group label or a specific model name:
+ *   - `"*"` (grant-all) → every group in {@link ALL_GROUPS}.
+ *   - a known group key → that group.
+ *   - anything else → treated as a model name, classified via {@link modelGroupOf}.
+ * The caller resets each scope; `resetMonth` is a no-op for an unseen scope, so a
+ * wildcard plan harmlessly resets only the groups the key actually used.
+ */
+export function groupsForPlan(planGroups: string[]): string[] {
+  if (planGroups.includes("*")) return [...ALL_GROUPS];
+  const seen = new Set<string>();
+  for (const entry of planGroups) {
+    seen.add(ALL_GROUPS.includes(entry) ? entry : modelGroupOf(entry));
+  }
+  return Array.from(seen);
 }

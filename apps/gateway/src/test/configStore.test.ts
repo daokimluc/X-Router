@@ -126,6 +126,26 @@ describe("ConfigStore (non-money-state-to-sqlite)", () => {
     db.close();
   });
 
+  it("round-trips subscription period fields (epoch-ms) on api keys", async () => {
+    const db = new Database(":memory:");
+    const store = new ConfigStore(db);
+    const periodEnd = Date.UTC(2026, 6, 1, 12, 0, 0, 0);
+    const chargedAt = Date.UTC(2026, 5, 1, 12, 0, 0, 0);
+    const state = makeState();
+    (state.apiKeys[0] as Record<string, unknown>).planId = "plan_claude";
+    (state.apiKeys[0] as Record<string, unknown>).planPeriodEnd = periodEnd;
+    (state.apiKeys[0] as Record<string, unknown>).planChargedAt = chargedAt;
+    store.importFrom(state);
+
+    const loaded = (await store.load())!;
+    const k = loaded.apiKeys[0] as Record<string, unknown>;
+    expect(k.planId).toBe("plan_claude");
+    // Numbers stay numbers (no spurious date revival on these keys).
+    expect(k.planPeriodEnd).toBe(periodEnd);
+    expect(k.planChargedAt).toBe(chargedAt);
+    db.close();
+  });
+
   it("deletes rows that disappear from the saved state", async () => {
     const db = new Database(":memory:");
     const store = new ConfigStore(db);
