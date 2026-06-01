@@ -21,6 +21,7 @@ import { microToUsd, usdToMicro } from "../utils/money.js";
 import type { WalletService } from "./WalletService.js";
 import type { SellerEarningsLedger } from "./SellerEarningsLedger.js";
 import type { SpendLedgerService } from "../../services/SpendLedgerService.js";
+import type { TokenGrantService } from "./TokenGrantService.js";
 
 const HOUSE_SELLER_ID = "house";
 
@@ -38,6 +39,9 @@ export type SettlementRecord = {
   planScope?: string | null;
   /** Gateway requestId — correlates this row to its usage_log row. */
   requestId?: string | null;
+  /** Token-pack grant id (marketplace-money-hardening-2 M4) — lets a tokenpack
+   *  reversal re-credit the consumed tokens back to the originating grant. */
+  grantId?: string | null;
 };
 
 export type SellerReconciliation = {
@@ -78,6 +82,9 @@ export type PackReconciliation = {
 export class SettlementLedger {
   private readonly db: SqliteDatabase;
   private readonly tx: <T>(fn: () => T) => T;
+  /** Optional — set after construction so a tokenpack reversal can re-credit the
+   *  consumed tokens to the originating grant (money-hardening-2 M4). */
+  private tokenGrants?: TokenGrantService;
 
   constructor(
     database: Database,
@@ -89,15 +96,30 @@ export class SettlementLedger {
     this.tx = database.transaction.bind(database);
   }
 
+  /** Wire the token-grant service used to re-credit reversed pack settlements. */
+  setTokenGrantService(svc: TokenGrantService): void {
+    this.tokenGrants = svc;
+  }
+
   /** Append one settlement row. Returns its id. Asserts conservation. */
   record(rec: SettlementRecord): string {
     const id = `stl_${randomUUID()}`;
+    // marketplace-money-hardening-2 M2: conservation must hold in integer micro,
+    // not float — the caller derives margin as collected−credit on rounded ints.
+    const collectedMicro = usdToMicro(rec.collected);
+    const creditMicro = usdToMicro(rec.sellerCredit);
+    const marginMicro = usdToMicro(rec.platformMargin);
+    if (collectedMicro !== creditMicro + marginMicro) {
+      throw new Error(
+        `settlement conservation violated: collected ${collectedMicro} != credit ${creditMicro} + margin ${marginMicro}`
+      );
+    }
     this.db.prepare(
       `INSERT INTO settlement_log
         (id, ts, buyer_key_id, base_model, seller_id, prompt_tokens, completion_tokens,
          actual_sell_cost_micro, seller_credit_micro, platform_margin_micro, bill_track,
-         reversed, plan_scope, collected_micro, request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+         reversed, plan_scope, collected_micro, request_id, grant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
     ).run(
       id,
       Date.now(),
@@ -106,13 +128,14 @@ export class SettlementLedger {
       rec.sellerId,
       rec.promptTokens,
       rec.completionTokens,
-      usdToMicro(rec.collected),
-      usdToMicro(rec.sellerCredit),
-      usdToMicro(rec.platformMargin),
+      collectedMicro,
+      creditMicro,
+      marginMicro,
       rec.billTrack,
       rec.planScope ?? null,
-      usdToMicro(rec.collected),
-      rec.requestId ?? null
+      collectedMicro,
+      rec.requestId ?? null,
+      rec.grantId ?? null
     );
     return id;
   }
@@ -126,7 +149,8 @@ export class SettlementLedger {
     return this.tx(() => {
       const row = this.db.prepare(
         `SELECT buyer_key_id, seller_id, collected_micro, seller_credit_micro,
-                platform_margin_micro, bill_track, plan_scope, reversed
+                platform_margin_micro, bill_track, plan_scope, reversed,
+                grant_id, prompt_tokens, completion_tokens
          FROM settlement_log WHERE id = ?`
       ).get(settlementId) as
         | {
@@ -138,11 +162,21 @@ export class SettlementLedger {
             bill_track: string;
             plan_scope: string | null;
             reversed: number;
+            grant_id: string | null;
+            prompt_tokens: number;
+            completion_tokens: number;
           }
         | undefined;
       if (!row || row.reversed) return false;
 
       this.db.prepare("UPDATE settlement_log SET reversed = 1 WHERE id = ?").run(settlementId);
+
+      // money-hardening-2 M4: a reversed token-pack request re-credits the consumed
+      // tokens to the originating grant (the buyer paid for them off-platform and
+      // gets no wallet refund, so returning the tokens is the correct make-whole).
+      if (row.bill_track === "tokenpack" && row.grant_id && this.tokenGrants) {
+        this.tokenGrants.recredit(row.grant_id, row.prompt_tokens + row.completion_tokens);
+      }
 
       // Refund the buyer: wallet track → credit the wallet; plan track → credit
       // the plan bucket back (negative settle on the scope, no real money moved).

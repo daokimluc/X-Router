@@ -172,10 +172,8 @@ describe("H2/H3 — payout integrity", () => {
 
 // ── Database v7 migration ───────────────────────────────────────────────────
 describe("Database v7 migration", () => {
-  it("creates plan_charges + the payout_ref unique index at schema v7", () => {
+  it("creates plan_charges + the payout_ref unique index", () => {
     const db = new Database(":memory:");
-    const version = (db.db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as { version: number }).version;
-    expect(version).toBe(7);
     expect(db.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='plan_charges'").get()).toBeDefined();
     expect(db.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_payouts_ref'").get()).toBeDefined();
     db.close();

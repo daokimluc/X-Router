@@ -177,6 +177,8 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     }).safeParse(request.body);
     if (!p.success) { reply.code(400); return { error: { message: "invalid token-pack grant", code: "validation_error" } }; }
     if (p.data.expiresAt <= Date.now()) { reply.code(400); return { error: { message: "expiresAt must be in the future", code: "validation_error" } }; }
+    if (p.data.tokens > config.maxPackTokens) { reply.code(400); return { error: { message: `tokens exceeds the maximum of ${config.maxPackTokens}`, code: "amount_too_large" } }; }
+    if (p.data.expiresAt > Date.now() + config.maxPackHorizonMs) { reply.code(400); return { error: { message: "expiresAt is beyond the maximum horizon", code: "validation_error" } }; }
     if (!app.apiKeyService.findById(p.data.keyId)) { reply.code(404); return { error: { message: `key ${p.data.keyId} not found`, code: "not_found" } }; }
     const grant = app.tokenGrantService.grant(p.data);
     audit("provision.token_pack.grant", request, p.data.keyId, "api_key");
@@ -193,6 +195,7 @@ export function registerProvisionRoutes(app: FastifyInstance, config: AppConfig)
     const p = z.object({ keyId: z.string().min(1), usd: z.number().positive().optional(), amountUsd: z.number().positive().optional() }).safeParse(request.body);
     if (!p.success || (p.data.usd === undefined && p.data.amountUsd === undefined)) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
     const amount = (p.data.usd ?? p.data.amountUsd) as number;
+    if (amount > config.maxTopupUsd) { reply.code(400); return { error: { message: `amount exceeds the maximum of $${config.maxTopupUsd}`, code: "amount_too_large" } }; }
     const walletUsd = app.walletService.topupUsd(p.data.keyId, amount);
     app.apiKeyService.setWalletMicroUsd(p.data.keyId, Math.round(walletUsd * 1_000_000));
     audit("provision.wallet.topup", request, p.data.keyId, "api_key");

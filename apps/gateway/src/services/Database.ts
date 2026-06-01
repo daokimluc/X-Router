@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqliteDatabase = DatabaseSync;
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 /** Ordered migrations. Index+1 == version applied. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
@@ -218,6 +218,26 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       );
       CREATE INDEX IF NOT EXISTS idx_plan_charges_key ON plan_charges (key_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_payouts_ref ON payouts (payout_ref) WHERE payout_ref IS NOT NULL;
+    `);
+  },
+  // v8 — marketplace-money-hardening-2: durable token-pack reservations (so a
+  // crash between reserve and settle doesn't permanently consume buyer-paid
+  // tokens — swept back to the grant at boot, like wallet reservations); a
+  // grant_id on settlement rows so a pack-track reversal can re-credit the
+  // consumed tokens; and a wallet_ledger idempotency key so a retried admin
+  // refund credits only once.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS token_grant_reservations (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL,
+        est_tokens INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_grant_res_grant ON token_grant_reservations (grant_id);
+      ALTER TABLE settlement_log ADD COLUMN grant_id TEXT;
+      ALTER TABLE wallet_ledger ADD COLUMN idempotency_key TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_ledger_idem ON wallet_ledger (idempotency_key) WHERE idempotency_key IS NOT NULL;
     `);
   }
 ];

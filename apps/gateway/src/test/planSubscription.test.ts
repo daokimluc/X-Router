@@ -151,14 +151,15 @@ describe("PlanSubscriptionService.renewIfDue", () => {
   });
 
   it("grandfathers a legacy plan-bound key (no period) with no charge", () => {
-    const { svc, wallet, keys, keyId } = setup(() => T0);
-    wallet.topupUsd(keyId, 25);
-    // simulate an old free-subscribe: plan bound, NO period fields
-    keys.update(keyId, { planId: "plan_claude" });
-    const r = svc.renewIfDue(keyId);
+    const { svc, wallet, keys } = setup(() => T0);
+    // A genuine pre-subscription legacy key: plan bound, NO period, created BEFORE
+    // the grandfather cutoff. Built directly via addRecord (single map entry).
+    keys.addRecord({ id: "k_legacy", key: "igw_legacy", keyHash: "hl", enabled: true, planId: "plan_claude", createdAt: new Date(Date.UTC(2026, 4, 1)) });
+    wallet.topupUsd("k_legacy", 25);
+    const r = svc.renewIfDue("k_legacy");
     expect(r.changed && r.kind).toBe("grandfathered");
-    expect(wallet.getUsd(keyId)).toBe(25); // not billed retroactively
-    expect(keys.findById(keyId)!.planPeriodEnd).toBe(addOneCalendarMonth(T0));
+    expect(wallet.getUsd("k_legacy")).toBe(25); // not billed retroactively
+    expect(keys.findById("k_legacy")!.planPeriodEnd).toBe(addOneCalendarMonth(T0));
   });
 
   it("never double-charges: a second renewIfDue at the same instant sees the advanced period", () => {

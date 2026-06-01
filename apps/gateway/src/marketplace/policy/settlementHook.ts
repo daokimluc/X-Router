@@ -20,6 +20,7 @@ import type { SellerEarningsLedger } from "../services/SellerEarningsLedger.js";
 import type { SettlementLedger } from "../services/SettlementLedger.js";
 import type { TokenGrantService } from "../services/TokenGrantService.js";
 import type { CostPrice } from "../../account-pool/types.js";
+import { microToUsd, usdToMicro } from "../utils/money.js";
 
 const HOUSE_SELLER_ID = "house";
 
@@ -62,6 +63,9 @@ export type SettlementDeps = {
   webhookService?: WebhookService;
   /** provision-webhook (#7) — wallet.low threshold in USD (default 1.00). */
   walletLowWaterUsd?: number;
+  /** money-hardening-2 M3 — non-zero per-1k-token floor so an unlisted, unpriced
+   *  metered request is never served free. Default 0.001/1k when unset. */
+  fallbackCostPer1kUsd?: number;
 };
 
 export function createSettlementHook(deps: SettlementDeps): SettlementHook {
@@ -137,6 +141,7 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
 
     // Settle the buyer side against the track chosen at reserve; capture collected.
     let collected = 0;
+    let packOverDelivered = 0; // tokens served beyond what the pack could cover (M6)
     const planScope = planRes?.scope ?? null;
     if (billTrack === "plan" && planRes) {
       collected = deps.spendLedgerService.settle(planRes.id, actualSellCost);
@@ -176,27 +181,40 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       // (see below) and from wallet solvency (SettlementLedger.reconcilePlatform).
       // Pack economics are reconciled separately against pricePaidUsd. Note: packs
       // DO carry markup+commission margin — it just isn't backed by wallet cash.
-      deps.tokenGrantService?.settle(tokenPack.id, ctx.promptTokens + ctx.completionTokens);
+      const consumed = ctx.promptTokens + ctx.completionTokens;
+      packOverDelivered = deps.tokenGrantService?.settle(tokenPack.id, consumed) ?? 0;
+      if (packOverDelivered > 0) {
+        request.log?.warn(
+          { grantId: tokenPack.grantId, consumed, overDelivered: packOverDelivered },
+          "token-pack over-run: served more tokens than the pack could cover"
+        );
+      }
       collected = actualSellCost;
     }
 
     // Derive credit + margin from COLLECTED (not intended): margin absorbs any
     // shortfall before the seller is shorted; the seller is never over-credited.
-    let sellerCredit = 0;
+    // marketplace-money-hardening-2 M2: do the split in INTEGER micro-USD so the
+    // stored figures conserve exactly — margin is collected − credit on the
+    // already-rounded integers, never rounded independently.
+    const collectedMicro = usdToMicro(collected);
+    let creditMicro = 0;
     if (sellerId !== HOUSE_SELLER_ID) {
       const commissionPct = deps.sellerService.getSeller(sellerId)?.commissionPct ?? 0;
-      const intendedCredit = actualBaseCost * (1 - commissionPct);
-      sellerCredit = Math.min(intendedCredit, collected);
-      if (sellerCredit > 0) deps.sellerEarningsLedger.credit(sellerId, sellerCredit);
+      const intendedCreditMicro = usdToMicro(actualBaseCost * (1 - commissionPct));
+      creditMicro = Math.min(intendedCreditMicro, collectedMicro);
+      if (creditMicro > 0) deps.sellerEarningsLedger.credit(sellerId, microToUsd(creditMicro));
     }
-    const platformMargin = collected - sellerCredit;
+    const marginMicro = collectedMicro - creditMicro;
+    const sellerCredit = microToUsd(creditMicro);
+    const platformMargin = microToUsd(marginMicro);
     // marketplace-money-hardening C2: do NOT fold token-pack margin into the
     // wallet platform-margin counter — a pack request moved no wallet money (the
     // buyer paid the website off-platform), so counting its sell-value as platform
     // cash would inflate wallet solvency. Pack margin is reconciled separately from
     // settlement_log (reconcilePacks) against the prepaid pricePaidUsd. The seller
     // credit above is still recorded (real supply was consumed).
-    if (platformMargin !== 0 && billTrack !== "tokenpack") {
+    if (marginMicro !== 0 && billTrack !== "tokenpack") {
       deps.sellerEarningsLedger.recordPlatformMargin(platformMargin);
     }
 
@@ -213,7 +231,10 @@ export function createSettlementHook(deps: SettlementDeps): SettlementHook {
       platformMargin,
       billTrack,
       planScope,
-      requestId: request.id
+      requestId: request.id,
+      // money-hardening-2 M4: record the grant so a tokenpack reversal can
+      // re-credit the consumed tokens back to the originating pack.
+      grantId: tokenPack?.grantId ?? null
     });
 
     request.settlement = {
@@ -258,7 +279,9 @@ function fallbackCostPrice(deps: SettlementDeps, baseModel: string): CostPrice {
     if (pricing.cachedInputRate !== undefined) cost.cachedInputPerM = pricing.cachedInputRate;
     return cost;
   }
-  // No price anywhere — a conservative non-zero floor so the buyer is still
-  // charged something and operators see it in the warn log.
-  return { inputPerM: 0, outputPerM: 0 };
+  // No price anywhere — apply a real non-zero floor (money-hardening-2 M3) so a
+  // metered request is never served free. Per-1k → per-M = ×1000.
+  const per1k = deps.fallbackCostPer1kUsd ?? 0.001;
+  const perM = per1k * 1000;
+  return { inputPerM: perM, outputPerM: perM };
 }

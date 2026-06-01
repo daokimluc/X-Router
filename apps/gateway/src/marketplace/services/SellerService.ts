@@ -90,13 +90,18 @@ export class SellerService {
 
   register(input: { displayName: string; payoutRef?: string; commissionPct?: number; externalRef?: string }): Seller {
     const id = `seller_${input.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${Date.now().toString(36)}`;
+    // money-hardening-2: clamp commission to [0,1] like updateSeller, so a bad
+    // value can't produce a negative seller credit or over-100% commission.
+    const commissionPct = input.commissionPct === undefined
+      ? undefined
+      : Math.min(1, Math.max(0, input.commissionPct));
     const seller: Seller = {
       id,
       displayName: input.displayName,
       status: "pending",
       payoutRef: input.payoutRef,
       externalRef: input.externalRef,
-      commissionPct: input.commissionPct,
+      commissionPct,
       createdAt: new Date().toISOString()
     };
     this.sellers.set(id, seller);

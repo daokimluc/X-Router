@@ -259,18 +259,26 @@ export class WalletService {
    * if absent, appends an audited `wallet_ledger` row, and returns the new
    * balance. Non-negative amounts only. Used by admin refund + full settlement
    * reversal.
+   *
+   * money-hardening-2: when `idempotencyKey` is given, a repeated refund with the
+   * same key is a no-op (the wallet_ledger idempotency_key UNIQUE index dedupes a
+   * retried admin refund so it credits only once).
    */
-  refundUsd(keyId: string, usd: number, reason?: string): number {
+  refundUsd(keyId: string, usd: number, reason?: string, idempotencyKey?: string): number {
     if (usd <= 0) return this.getUsd(keyId);
     const add = usdToMicro(usd);
     return this.tx(() => {
+      if (idempotencyKey) {
+        const dup = this.db.prepare("SELECT 1 FROM wallet_ledger WHERE idempotency_key = ?").get(idempotencyKey);
+        if (dup) return microToUsd(this.balanceMicro(keyId) ?? 0); // already refunded
+      }
       this.db.prepare(
         `INSERT INTO wallets (key_id, balance_micro) VALUES (?, ?)
          ON CONFLICT(key_id) DO UPDATE SET balance_micro = balance_micro + excluded.balance_micro`
       ).run(keyId, add);
       this.db.prepare(
-        "INSERT INTO wallet_ledger (id, key_id, delta_micro, kind, reason, ts) VALUES (?, ?, ?, 'refund', ?, ?)"
-      ).run(`wl_${randomUUID()}`, keyId, add, reason ?? null, Date.now());
+        "INSERT INTO wallet_ledger (id, key_id, delta_micro, kind, reason, ts, idempotency_key) VALUES (?, ?, ?, 'refund', ?, ?, ?)"
+      ).run(`wl_${randomUUID()}`, keyId, add, reason ?? null, Date.now(), idempotencyKey ?? null);
       return microToUsd(this.balanceMicro(keyId) ?? 0);
     });
   }

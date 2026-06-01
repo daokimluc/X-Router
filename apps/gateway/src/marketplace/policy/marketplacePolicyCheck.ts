@@ -118,9 +118,15 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
     // oversized request (estimate > remaining) is left intact and falls through.
     if (model && deps.tokenGrantService) {
       ctx.request.buyerKeyId = keyId; // settlement needs it on the tokenpack track too
-      const grant = deps.tokenGrantService.findUsable(keyId, model);
+      // M6: reserve with safety headroom (×1.3) over the honest estimate, since the
+      // chars/4 heuristic under-counts CJK/code and an under-reserve would serve the
+      // overrun free. The actual is corrected at settle; any residual over-run is
+      // recorded there (not silently floored).
+      const estTokens = Math.ceil(estimateUpperBoundTokens(deps.getBody(ctx.request)).total * 1.3);
+      // M5: pass the estimate so findUsable prefers the SOONEST-expiring pack that
+      // can cover it (near-expiry buyer-paid tokens burn down first).
+      const grant = deps.tokenGrantService.findUsable(keyId, model, estTokens);
       if (grant) {
-        const estTokens = estimateUpperBoundTokens(deps.getBody(ctx.request)).total;
         const r = deps.tokenGrantService.reserve({ grantId: grant.id, estTokens });
         if (r.ok) {
           ctx.request.tokenPack = { id: r.reservationId, grantId: grant.id, baseModel: model };
@@ -135,7 +141,11 @@ export function createMarketplacePolicyCheck(deps: MarketplacePolicyDeps): KeyPo
     // A renewal may charge the wallet (period advances) or downgrade the key to
     // Free when underfunded — in which case the request is rejected and the key
     // falls to the plan-less path on its next request.
-    if (planId && deps.planSubscriptionService) {
+    //
+    // Only on a billable (model-bearing) request: a metadata route like /v1/models
+    // has no model and must not trigger a charge/downgrade — idle keys are renewed
+    // by the background PlanRenewalMonitor instead.
+    if (planId && model && deps.planSubscriptionService) {
       const r = deps.planSubscriptionService.renewIfDue(keyId);
       if (r.changed && r.kind === "downgraded") {
         return reject(402, {

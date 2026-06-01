@@ -19,6 +19,10 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     logLevel: "silent",
     marketplaceEnabled: false,
     encryptionKey: "development-local-secret-key",
+    fallbackCostPer1kUsd: 0.001,
+    maxTopupUsd: 100_000,
+    maxPackTokens: 10_000_000_000,
+    maxPackHorizonMs: 2 * 365 * 24 * 60 * 60_000,
     ...overrides
   };
 }

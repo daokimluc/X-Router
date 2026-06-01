@@ -24,6 +24,14 @@ import type { Plan, PlanService } from "./PlanService.js";
 import { addOneCalendarMonth } from "../utils/subscriptionPeriod.js";
 import { groupsForPlan } from "../utils/modelGroup.js";
 
+/**
+ * money-hardening-2: keys created on/after this instant are NOT eligible for the
+ * no-charge "grandfather" period when bound to a paid plan with no subscription
+ * period — they are charged on first renewal instead. Set to the ship date of the
+ * subscription-charge change so genuine pre-subscription keys stay grandfathered.
+ */
+export const GRANDFATHER_CUTOFF_MS = Date.UTC(2026, 5, 1, 0, 0, 0, 0); // 2026-06-01T00:00Z
+
 export type SubscribeResult =
   | { ok: true; idempotent?: boolean; planId: string | null; planPeriodEnd?: number; planChargedAt?: number; walletUsd: number }
   | { ok: false; reason: "insufficient_funds"; priceUsd: number; walletUsd: number };
@@ -129,11 +137,31 @@ export class PlanSubscriptionService {
 
     const now = this.now();
 
-    // Legacy grandfather: plan bound before this change has no period. Set one a
-    // month out WITHOUT charging (it was granted under the old free behavior).
+    // Legacy grandfather (bounded — money-hardening-2): a plan-bound key with NO
+    // period that was created BEFORE this change is genuine legacy (granted under
+    // the old free-subscribe behavior) → set a period one month out WITHOUT
+    // charging. A key bound to a paid plan AFTER the cutoff (e.g. via /provision/key
+    // create-with-planId or admin assign-plan) must NOT get a free month — charge
+    // it now (or downgrade if underfunded), as if it had just subscribed.
     if (typeof key.planPeriodEnd !== "number") {
-      this.deps.apiKeyService.update(keyId, { planPeriodEnd: addOneCalendarMonth(now), planChargedAt: now });
-      return { changed: true, kind: "grandfathered" };
+      const createdMs = key.createdAt instanceof Date ? key.createdAt.getTime() : new Date(key.createdAt as unknown as string).getTime();
+      const isLegacy = Number.isFinite(createdMs) && createdMs < GRANDFATHER_CUTOFF_MS;
+      if (isLegacy || plan.priceUsd <= 0) {
+        this.deps.apiKeyService.update(keyId, { planPeriodEnd: addOneCalendarMonth(now), planChargedAt: now });
+        return { changed: true, kind: "grandfathered" };
+      }
+      // Post-cutoff paid plan with no period → charge a fresh period now.
+      const freshEnd = addOneCalendarMonth(now);
+      const c = this.deps.walletService.chargeForPeriod(keyId, plan.priceUsd, { planId: plan.id, periodEnd: freshEnd, kind: "subscribe" });
+      if (c.ok) {
+        this.deps.apiKeyService.update(keyId, { planPeriodEnd: freshEnd, planChargedAt: now });
+        this.deps.apiKeyService.setWalletMicroUsd(keyId, Math.round(c.newBalanceUsd * 1_000_000));
+        this.resetMonthBuckets(keyId, plan);
+        return { changed: true, kind: "renewed" };
+      }
+      this.deps.apiKeyService.update(keyId, { planId: null, planChargedAt: null, planPeriodEnd: null });
+      void this.deps.webhookService?.notifyBusiness("plan.downgraded", { keyId, fromPlanId: plan.id, reason: "renewal_underfunded", walletUsd: this.deps.walletService.getUsd(keyId) });
+      return { changed: true, kind: "downgraded", fromPlanId: plan.id };
     }
 
     if (now < key.planPeriodEnd) return { changed: false, reason: "not_due" };

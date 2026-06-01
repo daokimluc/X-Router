@@ -48,6 +48,10 @@ export function registerWalletAdminRoutes(
           error: { message: "amountUsd must be a positive number", code: "validation_error" }
         };
       }
+      if (body.amountUsd > config.maxTopupUsd) {
+        reply.code(400);
+        return { error: { message: `amountUsd exceeds the maximum of $${config.maxTopupUsd}`, code: "amount_too_large" } };
+      }
 
       const record = app.apiKeyService.findById(params.id);
       if (!record) {
@@ -79,11 +83,11 @@ export function registerWalletAdminRoutes(
     { preHandler: adminAuth },
     async (request, reply) => {
       const params = z.object({ id: z.string().min(1) }).parse(request.params);
-      const body = z.object({ usd: z.number().positive(), reason: z.string().optional() }).safeParse(request.body);
+      const body = z.object({ usd: z.number().positive(), reason: z.string().optional(), idempotencyKey: z.string().optional() }).safeParse(request.body);
       if (!body.success) { reply.code(400); return { error: { message: "usd must be positive", code: "validation_error" } }; }
       const record = app.apiKeyService.findById(params.id);
       if (!record) { reply.code(404); return { error: { message: `API key "${params.id}" not found`, code: "not_found" } }; }
-      const walletUsd = walletService.refundUsd(params.id, body.data.usd, body.data.reason);
+      const walletUsd = walletService.refundUsd(params.id, body.data.usd, body.data.reason, body.data.idempotencyKey);
       app.apiKeyService.setWalletMicroUsd(params.id, Math.round(walletUsd * 1_000_000));
       app.adminAuditService.record({ action: "api_key.wallet.refund", actorKeyHash: request.adminAuth?.apiKeyHash, targetType: "api_key", targetId: params.id });
       return { id: params.id, walletUsd, refundedUsd: body.data.usd };

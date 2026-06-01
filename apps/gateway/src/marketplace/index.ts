@@ -153,6 +153,9 @@ export function registerMarketplace(
   // SQLite-backed (token_grants). Used by POST /provision/token-pack + the policy
   // check (reserve before plan/PAYG) + the settlement hook (tokenpack track).
   const tokenGrantService = new TokenGrantService(deps.database);
+  // Boot sweep: release any pack reservation orphaned by a crash between reserve
+  // and settle, returning the held tokens to the grant (marketplace-money-hardening-2 M1).
+  tokenGrantService.sweepReservations();
   app.decorate("tokenGrantService", tokenGrantService);
 
   // ── seller-supply (#4) ────────────────────────────────────────────────────
@@ -234,6 +237,8 @@ export function registerMarketplace(
     sellerEarningsLedger,
     app.spendLedgerService
   );
+  // money-hardening-2 M4: re-credit reversed token-pack settlements to their grant.
+  settlementLedger.setTokenGrantService(tokenGrantService);
   app.decorate("settlementLedger", settlementLedger);
 
   registerEarningsAdminRoutes(app, deps.config, sellerEarningsLedger, settlementLedger);
@@ -250,7 +255,8 @@ export function registerMarketplace(
       settlementLedger,
       modelPricingService: app.modelPricingService,
       tokenGrantService,
-      webhookService: app.webhookService
+      webhookService: app.webhookService,
+      fallbackCostPer1kUsd: deps.config.fallbackCostPer1kUsd
     })
   );
 

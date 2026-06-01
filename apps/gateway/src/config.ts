@@ -39,6 +39,14 @@ export type AppConfig = {
    * ciphertext unreadable (re-enter secrets).
    */
   encryptionKey: string;
+  /** Non-zero per-1k-token fallback cost so an unlisted, unpriced metered request
+   *  is never served free (marketplace-money-hardening-2 M3). */
+  fallbackCostPer1kUsd: number;
+  /** Max single wallet top-up (USD), max token-pack size, max pack expiry horizon
+   *  (ms from now) — bounds on privileged money input. */
+  maxTopupUsd: number;
+  maxPackTokens: number;
+  maxPackHorizonMs: number;
 };
 
 const envSchema = z.object({
@@ -60,6 +68,11 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false"),
   ENCRYPTION_KEY: z.string().optional(),
+  // marketplace-money-hardening-2 — money guardrails (generous but finite defaults).
+  FALLBACK_COST_PER_1K_USD: z.coerce.number().min(0).default(0.001),
+  MAX_TOPUP_USD: z.coerce.number().positive().default(100_000),
+  MAX_PACK_TOKENS: z.coerce.number().int().positive().default(10_000_000_000),
+  MAX_PACK_HORIZON_MS: z.coerce.number().int().positive().default(2 * 365 * 24 * 60 * 60_000),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info")
@@ -129,6 +142,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     internalDailyTokenQuota: parsed.INTERNAL_DAILY_TOKEN_QUOTA,
     addAccountRateLimitPerMinute: parseAddAccountRateLimit(parsed.ADD_ACCOUNT_RATE_LIMIT_PER_MIN),
     marketplaceEnabled: parsed.MARKETPLACE_ENABLED === "true",
-    encryptionKey
+    encryptionKey,
+    fallbackCostPer1kUsd: parsed.FALLBACK_COST_PER_1K_USD,
+    maxTopupUsd: parsed.MAX_TOPUP_USD,
+    maxPackTokens: parsed.MAX_PACK_TOKENS,
+    maxPackHorizonMs: parsed.MAX_PACK_HORIZON_MS
   };
 }
