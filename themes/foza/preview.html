@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foza — Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --background:#f6f8fb;--foreground:#111827;--card:#fff;
+  --primary:#1473ff;--primary-foreground:#fff;--secondary:#e9ecf0;--secondary-foreground:#374151;
+  --muted:#e9ecf0;--muted-foreground:#6b7280;--accent:#e8f1ff;--accent-foreground:#0d55c4;
+  --border:#dde1e7;--ring:#1473ff;--success:#16a34a;--warning:#d97706;--destructive:#dc2626;
+  --code-bg:#0d1117;--code-header:#161b22;--code-fg:#e6edf3;--code-muted:#8b949e;
+  --radius:.3rem;--radius-xl:.75rem;--radius-2xl:1rem;
+  --font-sans:"Lexend","Lexend Fallback",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+}
+::selection{background:#1473ff33;color:#0d55c4}
+html{scroll-behavior:smooth}
+body{font-family:var(--font-sans);background:var(--background);color:var(--foreground);
+  font-size:16px;line-height:1.6;letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+.page{max-width:1080px;margin:0 auto;padding:0 32px 120px}
+/* nav */
+.nav{display:flex;justify-content:space-between;align-items:center;height:64px;position:sticky;top:0;z-index:100;
+  background:rgba(246,248,251,.85);backdrop-filter:blur(14px);border-bottom:1px solid var(--border)}
+.nav-brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:18px;letter-spacing:-.02em}
+.nav-brand .logo{width:26px;height:26px;border-radius:7px;background:var(--primary);color:#fff;display:grid;place-items:center;font-size:14px}
+.nav-anchors{display:flex;gap:22px;font-size:13px;font-weight:500}
+.nav-anchors a{color:var(--muted-foreground)}
+.nav-anchors a:hover{color:var(--foreground)}
+/* sections */
+section{padding:72px 0;border-top:1px solid var(--border)}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--primary)}
+h2.sec{font-size:30px;font-weight:700;letter-spacing:-.025em;margin:12px 0 8px}
+.sec-desc{color:var(--muted-foreground);margin-bottom:36px;max-width:640px}
+/* hero */
+.hero{padding:88px 0 64px;text-align:center;border-top:none}
+.hero .badge{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--accent-foreground);
+  border-radius:9999px;padding:5px 13px;font-size:12px;font-weight:500;letter-spacing:.03em}
+.hero h1{font-size:clamp(40px,7vw,68px);font-weight:700;letter-spacing:-.03em;margin:20px 0 0;line-height:1.1}
+.hero p{color:var(--muted-foreground);font-size:18px;max-width:560px;margin:18px auto 0}
+.hero .tags{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:28px}
+.hero .tags span{font-size:12px;font-weight:500;background:var(--card);border:1px solid var(--border);
+  border-radius:9999px;padding:6px 14px;color:var(--muted-foreground)}
+.dlbar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:28px}
+.dl{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;background:var(--card);
+  border:1px solid var(--border);border-radius:var(--radius);padding:9px 15px;transition:.15s}
+.dl:hover{border-color:var(--primary);color:var(--primary)}
+/* color grid */
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+.sw{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden}
+.sw .chip{height:72px;border-bottom:1px solid var(--border)}
+.sw .meta{padding:12px 14px}
+.sw .nm{font-size:14px;font-weight:600}
+.sw .hex{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground);margin-top:2px}
+.sw .role{font-size:12px;color:var(--muted-foreground);margin-top:6px;line-height:1.45}
+/* type scale */
+.type-row{display:flex;align-items:baseline;gap:20px;padding:16px 0;border-bottom:1px solid var(--border)}
+.type-row:last-child{border-bottom:none}
+.type-row .label{flex:0 0 150px;font-size:12px;font-family:var(--font-mono);color:var(--muted-foreground)}
+.type-row .sample{font-weight:600;letter-spacing:-.025em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.weights{display:flex;gap:24px;flex-wrap:wrap;margin-top:28px}
+.weights div{font-size:24px}
+.weights span{display:block;font-size:12px;font-family:var(--font-mono);color:var(--muted-foreground);margin-top:4px;font-weight:400;letter-spacing:0}
+/* spacing & radius */
+.bars{display:flex;flex-direction:column;gap:10px}
+.bar-row{display:flex;align-items:center;gap:14px;font-size:13px;color:var(--muted-foreground)}
+.bar{height:14px;background:var(--primary);border-radius:3px}
+.bar-row .tk{font-family:var(--font-mono);flex:0 0 100px}
+.radii{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
+.radii div{text-align:center;font-size:12px;color:var(--muted-foreground);font-family:var(--font-mono)}
+.radii .box{width:80px;height:80px;background:var(--accent);border:1px solid var(--primary);margin-bottom:8px}
+/* surfaces */
+.surfaces{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px}
+.surf{border:1px solid var(--border);border-radius:var(--radius-xl);padding:18px;height:120px;
+  display:flex;flex-direction:column;justify-content:flex-end}
+.surf .lv{font-size:12px;font-family:var(--font-mono)}
+.surf .nm{font-size:13px;font-weight:600;margin-top:2px}
+/* component preview */
+.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+.comp{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:22px}
+.comp .ct{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:16px}
+.comp .demo{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:500;border-radius:var(--radius);
+  padding:9px 16px;cursor:pointer;border:1px solid transparent;transition:.15s}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:#0f63e6}
+.btn-ghost{background:transparent;border-color:var(--border)}.btn-ghost:hover{background:var(--background)}
+.btn-sec{background:var(--secondary);color:var(--secondary-foreground)}
+.badge2{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--accent-foreground);
+  border-radius:9999px;padding:5px 12px;font-size:12px;font-weight:500}
+.badge-suc{background:#16a34a1a;color:var(--success)}
+.input{width:100%;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;font-size:14px;font-family:var(--font-sans);color:var(--foreground)}
+.input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px #1473ff33}
+.codecard{background:var(--code-bg);border-radius:var(--radius-xl);overflow:hidden}
+.codecard .h{background:var(--code-header);padding:9px 14px;font-size:12px;color:var(--code-muted);font-family:var(--font-mono)}
+.codecard pre{padding:16px;color:var(--code-fg);font-family:var(--font-mono);font-size:13px;line-height:1.6}
+.codecard .b{color:#79c0ff}.codecard .s{color:#7ee787}
+/* dos donts */
+.dd{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.dd-col{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:24px}
+.dd-col h3{font-size:16px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.dd-col.do h3{color:var(--success)}.dd-col.dont h3{color:var(--destructive)}
+.dd-col ul{list-style:none;display:flex;flex-direction:column;gap:11px}
+.dd-col li{font-size:14px;color:var(--muted-foreground);line-height:1.5;padding-left:22px;position:relative}
+.dd-col li::before{position:absolute;left:0;top:0}
+.dd-col.do li::before{content:"✓";color:var(--success);font-weight:700}
+.dd-col.dont li::before{content:"✕";color:var(--destructive);font-weight:700}
+footer.pf{text-align:center;padding:48px 0 0;color:var(--muted-foreground);font-size:13px}
+@media(max-width:760px){.nav-anchors{display:none}.dd{grid-template-columns:1fr}.code-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="page" style="padding:0 32px;width:100%;display:flex;justify-content:space-between;align-items:center">
+    <a class="nav-brand" href="#"><span class="logo">F</span> Foza Design System</a>
+    <div class="nav-anchors">
+      <a href="#colors">Colors</a><a href="#type">Type</a><a href="#space">Space</a>
+      <a href="#surfaces">Surfaces</a><a href="#components">Components</a><a href="#rules">Rules</a>
+    </div>
+  </div>
+</nav>
+
+<div class="page">
+  <!-- HERO -->
+  <header class="hero">
+    <span class="badge">● Reverse-engineered from foza.ai</span>
+    <h1>Bright, frictionless<br>developer console</h1>
+    <p>A calm blue marketplace for AI — pure-white cards on a cool canvas, one confident blue, Lexend throughout, and depth from hairline borders instead of shadows.</p>
+    <div class="tags">
+      <span>Light theme</span><span>Lexend</span><span>#1473ff accent</span><span>Tailwind v4</span><span>shadcn tokens</span>
+    </div>
+    <div class="dlbar">
+      <a class="dl" href="DESIGN.md">↓ DESIGN.md</a>
+      <a class="dl" href="tokens.json">↓ tokens.json</a>
+      <a class="dl" href="variables.css">↓ variables.css</a>
+      <a class="dl" href="theme.css">↓ theme.css</a>
+      <a class="dl" href="index.html">↗ Live clone</a>
+    </div>
+  </header>
+
+  <!-- COLORS -->
+  <section id="colors">
+    <div class="eyebrow">Tokens</div>
+    <h2 class="sec">Colors</h2>
+    <p class="sec-desc">A near-white surface system carried by a single brand blue. Status hues are reserved for state only; the dark GitHub surface is for code.</p>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#f6f8fb"></div><div class="meta"><div class="nm">Canvas</div><div class="hex">#f6f8fb</div><div class="role">Page background</div></div></div>
+      <div class="sw"><div class="chip" style="background:#ffffff"></div><div class="meta"><div class="nm">Card</div><div class="hex">#ffffff</div><div class="role">Panels, cards, nav</div></div></div>
+      <div class="sw"><div class="chip" style="background:#111827"></div><div class="meta"><div class="nm">Ink</div><div class="hex">#111827</div><div class="role">Primary text</div></div></div>
+      <div class="sw"><div class="chip" style="background:#6b7280"></div><div class="meta"><div class="nm">Ink Muted</div><div class="hex">#6b7280</div><div class="role">Secondary text</div></div></div>
+      <div class="sw"><div class="chip" style="background:#1473ff"></div><div class="meta"><div class="nm">Primary Blue</div><div class="hex">#1473ff</div><div class="role">Action, links, ring</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e8f1ff"></div><div class="meta"><div class="nm">Accent Wash</div><div class="hex">#e8f1ff</div><div class="role">Badge background</div></div></div>
+      <div class="sw"><div class="chip" style="background:#0d55c4"></div><div class="meta"><div class="nm">On Accent</div><div class="hex">#0d55c4</div><div class="role">Badge text</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e9ecf0"></div><div class="meta"><div class="nm">Secondary</div><div class="hex">#e9ecf0</div><div class="role">Chips, muted fills</div></div></div>
+      <div class="sw"><div class="chip" style="background:#dde1e7"></div><div class="meta"><div class="nm">Hairline</div><div class="hex">#dde1e7</div><div class="role">Borders, dividers</div></div></div>
+      <div class="sw"><div class="chip" style="background:#16a34a"></div><div class="meta"><div class="nm">Success</div><div class="hex">#16a34a</div><div class="role">Positive status</div></div></div>
+      <div class="sw"><div class="chip" style="background:#d97706"></div><div class="meta"><div class="nm">Warning</div><div class="hex">#d97706</div><div class="role">Warning status</div></div></div>
+      <div class="sw"><div class="chip" style="background:#dc2626"></div><div class="meta"><div class="nm">Destructive</div><div class="hex">#dc2626</div><div class="role">Error / delete</div></div></div>
+      <div class="sw"><div class="chip" style="background:#0d1117"></div><div class="meta"><div class="nm">Code Surface</div><div class="hex">#0d1117</div><div class="role">Terminal / code bg</div></div></div>
+      <div class="sw"><div class="chip" style="background:#0d0d14"></div><div class="meta"><div class="nm">Dark Canvas</div><div class="hex">#0d0d14</div><div class="role">Dark theme bg</div></div></div>
+    </div>
+  </section>
+
+  <!-- TYPOGRAPHY -->
+  <section id="type">
+    <div class="eyebrow">Tokens</div>
+    <h2 class="sec">Typography — Lexend</h2>
+    <p class="sec-desc">One humanist variable sans across the whole product. Headings tracked tight (-0.025em) at 600–700; body relaxed at 400. Monospace only for code.</p>
+    <div class="type-row"><span class="label">7xl · 72px</span><span class="sample" style="font-size:72px">Foza</span></div>
+    <div class="type-row"><span class="label">6xl · 60px</span><span class="sample" style="font-size:60px">Every AI Model</span></div>
+    <div class="type-row"><span class="label">4xl · 36px</span><span class="sample" style="font-size:36px">Use AI at scale</span></div>
+    <div class="type-row"><span class="label">2xl · 24px</span><span class="sample" style="font-size:24px">One Key, Every Model</span></div>
+    <div class="type-row"><span class="label">lg · 18px</span><span class="sample" style="font-size:18px;font-weight:600">Verified Providers</span></div>
+    <div class="type-row"><span class="label">base · 16px</span><span class="sample" style="font-size:16px;font-weight:400">Pay only for the tokens you actually consume.</span></div>
+    <div class="type-row"><span class="label">sm · 14px</span><span class="sample" style="font-size:14px;font-weight:400;color:var(--muted-foreground)">Competitive pricing from verified providers.</span></div>
+    <div class="type-row"><span class="label">xs · 12px · caps</span><span class="sample" style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--primary)">Marketplace</span></div>
+    <div class="weights">
+      <div style="font-weight:400">Aa<span>400 normal</span></div>
+      <div style="font-weight:500">Aa<span>500 medium</span></div>
+      <div style="font-weight:600">Aa<span>600 semibold</span></div>
+      <div style="font-weight:700">Aa<span>700 bold</span></div>
+    </div>
+  </section>
+  <!-- SPACING & SHAPES -->
+  <section id="space">
+    <div class="eyebrow">Tokens</div>
+    <h2 class="sec">Spacing &amp; Shapes</h2>
+    <p class="sec-desc">A 4px base scale; sections breathe at 96–128px. Small 0.3rem radius on controls, larger on cards, pills on badges.</p>
+    <div class="bars">
+      <div class="bar-row"><span class="tk">--spacing-1</span><span class="bar" style="width:4px"></span> 4px</div>
+      <div class="bar-row"><span class="tk">--spacing-2</span><span class="bar" style="width:8px"></span> 8px</div>
+      <div class="bar-row"><span class="tk">--spacing-4</span><span class="bar" style="width:16px"></span> 16px · element gap</div>
+      <div class="bar-row"><span class="tk">--spacing-6</span><span class="bar" style="width:24px"></span> 24px · card padding</div>
+      <div class="bar-row"><span class="tk">--spacing-12</span><span class="bar" style="width:48px"></span> 48px</div>
+      <div class="bar-row"><span class="tk">--spacing-24</span><span class="bar" style="width:96px"></span> 96px · section gap</div>
+      <div class="bar-row"><span class="tk">--spacing-32</span><span class="bar" style="width:128px"></span> 128px · hero gap</div>
+    </div>
+    <div class="radii">
+      <div><div class="box" style="border-radius:.3rem"></div>--radius · .3rem</div>
+      <div><div class="box" style="border-radius:.75rem"></div>--radius-xl · 12px</div>
+      <div><div class="box" style="border-radius:1rem"></div>--radius-2xl · 16px</div>
+      <div><div class="box" style="border-radius:9999px"></div>--radius-full · pill</div>
+    </div>
+  </section>
+
+  <!-- SURFACES -->
+  <section id="surfaces">
+    <div class="eyebrow">Depth</div>
+    <h2 class="sec">Surfaces</h2>
+    <p class="sec-desc">Elevation is carried by surface color steps and a 1px hairline border — not by shadows. The dark theme is a distinct mode.</p>
+    <div class="surfaces">
+      <div class="surf" style="background:#f6f8fb"><div class="lv">Level 0</div><div class="nm">Canvas · #f6f8fb</div></div>
+      <div class="surf" style="background:#ffffff"><div class="lv">Level 1</div><div class="nm">Card · #ffffff</div></div>
+      <div class="surf" style="background:#e9ecf0"><div class="lv">Level 2</div><div class="nm">Muted · #e9ecf0</div></div>
+      <div class="surf" style="background:#0d1117;border-color:#1f2630"><div class="lv" style="color:#8b949e">Code</div><div class="nm" style="color:#e6edf3">Code · #0d1117</div></div>
+      <div class="surf" style="background:#0d0d14;border-color:#252535"><div class="lv" style="color:#6b7280">Dark 0</div><div class="nm" style="color:#f1f1f4">Dark · #0d0d14</div></div>
+      <div class="surf" style="background:#1c1c2e;border-color:#252535"><div class="lv" style="color:#6b7280">Dark 1</div><div class="nm" style="color:#f1f1f4">Dark card · #1c1c2e</div></div>
+    </div>
+  </section>
+
+  <!-- COMPONENTS -->
+  <section id="components">
+    <div class="eyebrow">Library</div>
+    <h2 class="sec">Components</h2>
+    <p class="sec-desc">Compact, quiet, border-led. Live previews using the real tokens.</p>
+    <div class="comp-grid">
+      <div class="comp"><div class="ct">Buttons</div><div class="demo">
+        <button class="btn btn-primary">Start for free</button>
+        <button class="btn btn-ghost">Browse models</button>
+        <button class="btn btn-sec">Sign in</button>
+      </div></div>
+      <div class="comp"><div class="ct">Badges</div><div class="demo">
+        <span class="badge2">● Live</span>
+        <span class="badge2">Flagship</span>
+        <span class="badge2 badge-suc">+12.4%</span>
+      </div></div>
+      <div class="comp"><div class="ct">Input · focus</div><div class="demo">
+        <input class="input" placeholder="sk-foza-xxxx" />
+      </div></div>
+      <div class="comp"><div class="ct">Stat block</div><div class="demo" style="gap:28px">
+        <div><div style="font-size:30px;font-weight:700;letter-spacing:-.03em">120M+</div><div style="font-size:13px;color:var(--muted-foreground)">Requests / day</div></div>
+        <div><div style="font-size:30px;font-weight:700;letter-spacing:-.03em">150+</div><div style="font-size:13px;color:var(--muted-foreground)">Models</div></div>
+      </div></div>
+      <div class="comp" style="grid-column:span 2"><div class="ct">Code / terminal card</div>
+        <div class="codecard">
+          <div class="h">config</div>
+<pre>{
+  <span class="b">"base_url"</span>: <span class="s">"https://api.foza.ai/v1"</span>,
+  <span class="b">"api_key"</span>: <span class="s">"sk-foza-xxxx"</span>
+}</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RULES -->
+  <section id="rules">
+    <div class="eyebrow">Guidance</div>
+    <h2 class="sec">Do's &amp; Don'ts</h2>
+    <div class="dd">
+      <div class="dd-col do"><h3>✓ Do</h3><ul>
+        <li>Use #f6f8fb canvas with pure #ffffff cards so panels read as floating.</li>
+        <li>Reserve #1473ff for primary action, links, and focus rings only.</li>
+        <li>Separate surfaces with the #dde1e7 hairline border, not shadows.</li>
+        <li>Set headings in Lexend with -0.025em tracking at weight 600–700.</li>
+        <li>Render code and API keys on the #0d1117 surface with monospace.</li>
+        <li>Use pill badges (#e8f1ff / #0d55c4) for eyebrows and pricing tags.</li>
+      </ul></div>
+      <div class="dd-col dont"><h3>✕ Don't</h3><ul>
+        <li>Don't add gradients or glows — the source has none.</li>
+        <li>Don't use #1473ff for large fills or body text.</li>
+        <li>Don't drop heavy shadows; a 1px border is the elevation cue.</li>
+        <li>Don't mix the dark .dark palette into the light theme.</li>
+        <li>Don't set headings without tight tracking — it breaks Lexend's voice.</li>
+        <li>Don't enlarge button radius into pills; pills are for badges only.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <footer class="pf">Foza design system · extracted from <a href="https://foza.ai/" style="color:var(--primary)">foza.ai</a> with rico-design-md</footer>
+</div>
+</body>
+</html>

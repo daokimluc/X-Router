@@ -1,0 +1,326 @@
+        <header .sticky.top-0.z-50.border-b>
+          <nav .mx-auto.flex.h-16.w-full>
+            <a .flex.items-center.gap-2.5>
+              <div .hidden.items-center.gap-7.text-sm>
+                <a .font-semibold.text-foreground.transition-colors.hover:text-primary>
+                <a .font-semibold.text-foreground.transition-colors.hover:text-primary>
+                <a .font-semibold.text-foreground.transition-colors.hover:text-primary>
+                <a .font-semibold.text-foreground.transition-colors.hover:text-primary>
+                <a .font-semibold.text-foreground.transition-colors.hover:text-primary>
+                <div .flex.items-center.gap-2>
+                <button>
+                <button>
+                <a>
+                <a>
+                <section .mx-auto.w-full.max-w-7xl.px-4>
+                <div .grid.items-start.gap-8.lg:grid-cols-[1.1fr_1fr]>
+                <span>
+                <h1 .mb-5.text-4xl.font-bold.tracking-tight>
+                <div .mb-8.flex.flex-wrap.items-center>
+                <a>
+                <a>
+                <div .grid.grid-cols-2.gap-3.sm:grid-cols-4>
+                <div .rounded-xl.border.bg-card.text-card-foreground>
+                <div .rounded-xl.border.bg-card.text-card-foreground>
+                <div .rounded-xl.border.bg-card.text-card-foreground>
+                <div .rounded-xl.border.bg-card.text-card-foreground>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .flex.items-start.justify-between.gap-4>
+                <div .mb-2.flex.items-center.gap-2>
+                <span .flex.h-6.w-6.items-center>
+                <span>
+                <div>
+                <div .flex.h-10.w-10.items-center>
+                <div .ml-1.flex.h-7.w-7>
+                <div .relative.grid.grid-cols-2.gap-3>
+                <div>
+                <div .mb-3.flex.items-start.justify-between>
+                <div .flex.items-center.gap-2.5>
+                <div>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <div>
+                <div .mb-3.flex.items-start.justify-between>
+                <div .flex.items-center.gap-2.5>
+                <div>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <div>
+                <div .mb-3.flex.items-start.justify-between>
+                <div .flex.items-center.gap-2.5>
+                <div>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <div>
+                <div .mb-3.flex.items-start.justify-between>
+                <div .flex.items-center.gap-2.5>
+                <div>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <div>
+                <div .mb-3.flex.items-start.justify-between>
+                <div .flex.items-center.gap-2.5>
+                <div>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <div>
+                <div .mb-3.flex.items-start.justify-between>
+                <div .flex.items-center.gap-2.5>
+                <div>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <div>
+                <a>
+                <section .mx-auto.w-full.max-w-7xl.px-4>
+                <h2 .mb-4.text-3xl.font-bold.sm:text-4xl>
+                <div .grid.grid-cols-1.gap-5.md:grid-cols-2>
+                <div>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div .mt-4.flex.items-center.text-xs>
+                <div>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div .mt-4.flex.items-center.text-xs>
+                <div>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div .mt-4.flex.items-center.text-xs>
+                <div>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div .mt-4.flex.items-center.text-xs>
+                <div>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div .mt-4.flex.items-center.text-xs>
+                <div>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div .mt-4.flex.items-center.text-xs>
+                <section .mx-auto.w-full.max-w-7xl.px-4>
+                <div .mb-10.flex.flex-col.gap-3>
+                <h2 .mb-3.text-3xl.font-bold.sm:text-4xl>
+                <a>
+                <div .rounded-xl.border.border-border.bg-card>
+                <table .w-full.text-sm>
+                <thead>
+                <tbody>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .flex.items-center.gap-2.5>
+                <span>
+                <span>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-3.flex.items-start.justify-between>
+                <p .flex.items-center.gap-2.text-sm>
+                <span>
+                <span>
+                <div .grid.grid-cols-2.gap-2.text-xs>
+                <section #integrations .mx-auto.w-full.max-w-7xl.px-4>
+                <span>
+                <h2 .mb-4.text-3xl.font-bold.sm:text-4xl>
+                <div .grid.grid-cols-1.gap-4.sm:grid-cols-2>
+                <div>
+                <div .flex.items-start.justify-between.gap-3>
+                <div .flex.items-center.gap-3>
+                <div>
+                <span>
+                <span>
+                <div .mx-4.mb-5.flex-1.overflow-hidden>
+                <div .flex.items-center.gap-1.5.border-b>
+                <div>
+                <div .flex.items-start.justify-between.gap-3>
+                <div .flex.items-center.gap-3>
+                <div>
+                <span>
+                <span>
+                <div .mx-4.mb-5.flex-1.overflow-hidden>
+                <div .flex.items-center.gap-1.5.border-b>
+                <div>
+                <div .flex.items-start.justify-between.gap-3>
+                <div .flex.items-center.gap-3>
+                <div>
+                <span>
+                <span>
+                <div .mx-4.mb-5.flex-1.overflow-hidden>
+                <div .flex.items-center.gap-1.5.border-b>
+                <div>
+                <div .flex.items-start.justify-between.gap-3>
+                <div .flex.items-center.gap-3>
+                <div>
+                <span>
+                <span>
+                <div .mx-4.mb-5.flex-1.overflow-hidden>
+                <div .flex.items-center.gap-1.5.border-b>
+                <div>
+                <div .flex.items-start.justify-between.gap-3>
+                <div .flex.items-center.gap-3>
+                <div>
+                <span>
+                <span>
+                <div .mx-4.mb-5.flex-1.overflow-hidden>
+                <div .flex.items-center.gap-1.5.border-b>
+                <div>
+                <div .flex.items-start.justify-between.gap-3>
+                <div .flex.items-center.gap-3>
+                <div>
+                <span>
+                <span>
+                <div .mx-4.mb-5.flex-1.overflow-hidden>
+                <div .flex.items-center.gap-1.5.border-b>
+                <div>
+                <div .flex-1>
+                <a>
+                <section #how-it-works .mx-auto.w-full.max-w-7xl.px-4>
+                <h2 .mb-4.text-3xl.font-bold.sm:text-4xl>
+                <div .grid.grid-cols-1.gap-5.md:grid-cols-2>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <div>
+                <h3 .mb-2.font-semibold.text-foreground>
+                <section #providers .mx-auto.w-full.max-w-7xl.px-4>
+                <div .grid.grid-cols-1.items-center.gap-14>
+                <span>
+                <h2 .mb-5.text-3xl.font-bold.sm:text-4xl>
+                <ul .mb-10.space-y-3>
+                <li .flex.items-center.gap-3.text-foreground>
+                <li .flex.items-center.gap-3.text-foreground>
+                <li .flex.items-center.gap-3.text-foreground>
+                <li .flex.items-center.gap-3.text-foreground>
+                <li .flex.items-center.gap-3.text-foreground>
+                <li .flex.items-center.gap-3.text-foreground>
+                <div .flex.flex-wrap.items-center.gap-3>
+                <a>
+                <a>
+                <div .rounded-xl.border.border-border.bg-card>
+                <div .mb-6.flex.items-center.gap-2.5>
+                <div .flex.h-9.w-9.items-center>
+                <div .flex.items-center.justify-between.border-b>
+                <div .flex.items-center.gap-2.5.text-sm>
+                <div .flex.items-center.justify-between.border-b>
+                <div .flex.items-center.gap-2.5.text-sm>
+                <div .flex.items-center.justify-between.border-b>
+                <div .flex.items-center.gap-2.5.text-sm>
+                <div .flex.items-center.justify-between.border-b>
+                <div .flex.items-center.gap-2.5.text-sm>
+                <div .mb-1.5.flex.items-center.justify-between>
+                <span>
+                <div .mt-2.flex.items-center.gap-1.5>
+                <section .mx-auto.w-full.max-w-7xl.px-4>
+                <div .rounded-xl.border.border-border.bg-card>
+                <h2 .mb-4.text-3xl.font-bold.sm:text-4xl>
+                <div .flex.flex-wrap.items-center.justify-center>
+                <a>
+                <a>
+                <footer .border-t.border-border>
+                <div>
+                <div .flex.items-center.gap-2>
+                <div .flex.flex-wrap.items-center.justify-center>
+                <a .transition-colors.hover:text-foreground>
+                <a .transition-colors.hover:text-foreground>
+                <a .transition-colors.hover:text-foreground>
+                <a .transition-colors.hover:text-foreground>
+                <a .transition-colors.hover:text-foreground>
+                <div .flex.items-center.gap-3>
+                <button>
+                <button>
+                <div .fixed.bottom-5.right-4.z-[80]>
+                <a>
+                <a>
+                <ol>

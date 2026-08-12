@@ -1,0 +1,224 @@
+@import "tailwindcss";
+
+/* Dark mode driven by a `.dark` class on <html> (next-themes) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ===== Foza tokens — light (default) ===== */
+:root {
+  --background: #f6f8fb;
+  --foreground: #111827;
+  --card: #ffffff;
+  --card-foreground: #111827;
+  --popover: #ffffff;
+  --popover-foreground: #111827;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #374151;
+  --primary: #1473ff;
+  --primary-foreground: #ffffff;
+  --secondary: #e9ecf0;
+  --secondary-foreground: #374151;
+  --muted: #e9ecf0;
+  --muted-foreground: #6b7280;
+  --accent: #e8f1ff;
+  --accent-foreground: #0d55c4;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #dde1e7;
+  --input: #dde1e7;
+  --ring: #1473ff;
+  --success: #16a34a;
+  --warning: #d97706;
+
+  /* GitHub-style code surface (theme-independent) */
+  --code-bg: #0d1117;
+  --code-header: #161b22;
+  --code-foreground: #e6edf3;
+  --code-muted: #8b949e;
+
+  --radius: 0.5rem;
+
+  /* Theme-aware elevation */
+  --shadow-card: 0 1px 2px 0 rgb(17 24 39 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(17 24 39 / 0.08), 0 2px 4px -2px rgb(17 24 39 / 0.04);
+}
+
+/* ===== Foza tokens — dark ===== */
+.dark {
+  --background: #0d0d14;
+  --foreground: #f1f1f4;
+  --card: #1c1c2e;
+  --card-foreground: #f1f1f4;
+  --popover: #1c1c2e;
+  --popover-foreground: #f1f1f4;
+  --sidebar: #0f0f1a;
+  --sidebar-foreground: #c9c9d9;
+  --primary: #4d8eff;
+  --primary-foreground: #ffffff;
+  --secondary: #1c1c2e;
+  --secondary-foreground: #c9c9d9;
+  --muted: #1c1c2e;
+  --muted-foreground: #9ca3af;
+  --accent: #0c1f45;
+  --accent-foreground: #80aeff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #252535;
+  --input: #252535;
+  --ring: #4d8eff;
+  --success: #22c55e;
+  --warning: #f59e0b;
+
+  /* Stronger elevation in dark so cards read against near-black */
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 16px -2px rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.3);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-code-bg: var(--code-bg);
+  --color-code-header: var(--code-header);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-muted: var(--code-muted);
+
+  --font-sans: var(--font-lexend), "Lexend Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-elevated: var(--shadow-md);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* ===== Motion ===== */
+@keyframes foza-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes foza-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes foza-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-fade-in {
+  animation: foza-fade-in 0.3s ease-out both;
+}
+
+.animate-fade-in-up {
+  /* `backwards` (not `both`): keeps the start state before/at frame 0 so there's
+     no flash, but does NOT retain the end-state transform. A retained
+     `transform` (even translateY(0)) would create a containing block that breaks
+     `position: fixed` descendants (e.g. modals rendered inside an animated page
+     wrapper would clip to the content area instead of the viewport). Letting the
+     transform revert to `none` after the animation avoids that. */
+  animation: foza-fade-in-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+/* Skeleton placeholder block with a sweeping shimmer highlight. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--foreground) 6%, transparent),
+    transparent
+  );
+  animation: foza-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Subtle elevation on hover for cards/tiles. */
+.hover-lift {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-elevated);
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
