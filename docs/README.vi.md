@@ -46,6 +46,144 @@ chảy đi đâu. X-Router đặt một proxy thông minh duy nhất đứng tr�
 
 ## Bắt đầu nhanh
 
+### Foza — control plane mở cho nguồn cung AI
+
+> **Public beta · Đang phát triển · Đã có một nhóm nhỏ người dùng nội bộ sử dụng**
+
+X-Router không chỉ là một proxy. Đây là nền tảng mã nguồn mở giúp việc sử dụng AI giữa
+nhiều provider trở nên ổn định, linh hoạt và có thể kiểm soát. Repository này gồm hai
+lớp được tách biệt rõ ràng:
+
+| Lớp | Trách nhiệm |
+| --- | --- |
+| **X-Router core** | Gateway tương thích OpenAI/Anthropic, provider account, routing, pooling, fallback, quota, spend control, usage, catalog, provisioning và settlement API. |
+| **Foza** | Marketplace và control plane cho buyer, provider và maintainer: identity, API key, plan, wallet, token pack, seller workflow, admin operation, signed webhook và money mirror cục bộ. |
+
+#### Bài toán
+
+Developer AI ngày càng phụ thuộc vào nhiều provider, model family, coding tool,
+subscription và API key. Với maintainer open source, bài toán khó không chỉ là chuyển
+tiếp request mà là giữ toàn bộ hệ thống nhất quán:
+
+- provider gặp sự cố không được làm ứng dụng dừng theo;
+- team cần kiểm soát chi phí trước khi gọi upstream;
+- buyer cần usage, plan, wallet và prepaid capacity minh bạch;
+- provider cần cách publish nguồn cung an toàn, không truy cập được dữ liệu seller khác;
+- money event phải idempotent, audit được và có thể khôi phục sau khi lỡ webhook; và
+- maintainer cần một hệ thống nhỏ, self-host được thay vì một nền tảng đóng, khó kiểm tra.
+
+#### Giải pháp
+
+X-Router đặt một gateway thông minh, self-hosted trước nhiều provider. Foza bổ sung lớp
+sản phẩm và vận hành quanh gateway. Hai phần tạo thành luồng mở từ **nguồn cung model →
+truy cập an toàn → usage → billing → settlement**, giúp tool, provider và maintainer
+không phải tự xây lại cùng một hạ tầng.
+
+#### Những gì đang hoạt động
+
+**Marketplace và trải nghiệm buyer**
+
+- Khi bật live integration, marketplace đọc listing, pricing, markup và metrics theo
+  listing từ X-Router.
+- Buyer có thể tạo, tắt, bật lại, thu hồi và xoay vòng API key; kết nối model vào key;
+  đăng ký plan từ wallet; và xem usage theo key/model.
+- Buyer có thể tạo top-up VietQR/SePay và mua gói 1M, 5M hoặc 10M token. Server tự tính
+  lại giá từ listing và markup live, không tin giá do client gửi.
+
+**Luồng provider, admin và money**
+
+- Provider có thể đăng ký và tạo listing model kèm provider-account reference; mutation
+  listing được giới hạn theo owner và kiểm tra lại ownership ở server.
+- Admin/moderator có server-side gate cho seller moderation, catalog, markup, plan, role,
+  webhook configuration và platform-owned listing.
+- Foza lưu mapping identity, payment intent, webhook event, billing, payable, payout
+  idempotency và reconciliation checkpoint trong SQLite.
+- Ledger dùng micro-USD nguyên; signed X-Router webhook và reconciliation định kỳ là
+  backstop cho usage, wallet, supply và reversal event.
+
+#### Kiến trúc
+
+```mermaid
+flowchart LR
+    U["Buyer · Provider · Maintainer"] --> F["Foza Web App\nNext.js + Auth.js"]
+    F --> A["Foza adapter chỉ chạy server\nHTTP + typed contract"]
+    A <--> X["X-Router core\nGateway · catalog · provisioning · settlement"]
+    X --> P["Provider account\nvà nguồn cung model"]
+    X --> W["X-Router webhook có chữ ký"]
+    S["SePay payment webhook"] --> F
+    W --> D["Foza SQLite\nidentity · payment · ledger · dedupe"]
+    D --> R["Reconciliation backstop"]
+    R --> X
+```
+
+Ranh giới này là có chủ đích: X-Router sở hữu gateway, catalog, provisioning và
+settlement; Foza sở hữu web app, identity, console buyer/provider/admin, payment
+coordination, webhook ingestion và SQLite mirror ledger. Foza gọi core qua HTTP bằng các
+path server-only `/provision/*`, `/admin/v1/*` và `/v1/*`; Foza không chứa gateway runtime
+thứ hai.
+
+#### Vì sao dự án có ý nghĩa với open source
+
+Dự án lấp khoảng trống giữa một gateway cấp thấp và một nền tảng mở có thể sử dụng thật.
+Nó biến sự đa dạng của provider thành một public service có thể kết hợp, trong khi
+deployment, pricing, routing và operational state vẫn có thể được maintainer kiểm tra.
+Mục tiêu không phải che giấu độ phức tạp sau một hosted API, mà làm cho nó reviewable và
+reusable bởi cộng đồng.
+
+#### Trạng thái trung thực
+
+Foza đang ở public beta và được phát triển tích cực, với một nhóm nhỏ người dùng nội bộ.
+Implementation là thật và đã tích hợp, nhưng chưa được trình bày như một marketplace đã
+hoàn thiện ở production scale:
+
+- search/filter hiện mới là UI;
+- provider earnings detail và một số admin surface cần hoàn thiện;
+- seller approval synchronization và một số payment crash-state reconciliation còn nằm
+  trong roadmap; và
+- fixture, marketing card, capacity target và fallback data không phải production telemetry.
+
+#### Ranh giới bảo mật
+
+- Secret provision, admin, internal, webhook, payment và Auth.js chỉ được dùng ở server.
+- Browser không import X-Router adapter và không nhận admin/provision secret.
+- X-Router webhook dùng HMAC-SHA256 trên raw body và dedupe event bền vững.
+- Callback SePay dùng authenticated header và constant-time comparison.
+- Key, seller và listing ID do user gửi lên được kiểm tra ownership trước mutation.
+
+#### Chạy toàn bộ stack
+
+Khởi động X-Router trước, sau đó chạy Foza ở terminal thứ hai:
+
+```bash
+# Terminal 1 — X-Router core
+npm install
+npm run build:all
+ADMIN_API_KEYS=admin npm start
+
+# Terminal 2 — Foza control plane
+cd apps/foza
+npm install
+copy .env.example .env.local   # PowerShell / Windows
+npm run dev
+```
+
+Để phát triển UI local, giữ `MARKETPLACE_ENABLED=false` và dùng typed mock fixture.
+Để live integration, cấu hình các giá trị server-only sau trong `apps/foza/.env.local`:
+
+```dotenv
+MARKETPLACE_ENABLED=true
+XROUTER_URL=http://localhost:3100
+XROUTER_PROVISION_KEY=your-provision-key
+XROUTER_ADMIN_KEY=your-admin-key
+XROUTER_INTERNAL_KEY=your-internal-key
+XROUTER_WEBHOOK_SECRET=your-webhook-secret
+```
+
+Không commit `.env.local`, credential thật, payment secret hoặc webhook secret.
+
+Xem [README Foza tiếng Việt](../apps/foza/README.vi.md) để đọc implementation status,
+limitations, script, hướng dẫn contribution và các path quan trọng.
+
 ### npm (nhanh nhất)
 
 ```bash
@@ -305,4 +443,3 @@ TypeScript, dashboard React) và không sử dụng lại mã nguồn từ các 
 ## Giấy phép
 
 MIT - Luc DK. Xem [LICENSE](../LICENSE).
-
