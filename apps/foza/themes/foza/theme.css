@@ -1,0 +1,105 @@
+/* Foza — Tailwind v4 @theme
+ * Source: https://foza.ai/  ·  Reverse-engineered with rico DESIGN.md
+ * Usage: import in your global stylesheet. Default theme is light;
+ * map the dark palette to a `.dark` variant via @custom-variant if needed.
+ */
+
+@import "tailwindcss";
+
+@theme {
+  /* ---- Colors ---- */
+  --color-background: #f6f8fb;
+  --color-foreground: #111827;
+  --color-card: #ffffff;
+  --color-card-foreground: #111827;
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #374151;
+  --color-primary: #1473ff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e9ecf0;
+  --color-secondary-foreground: #374151;
+  --color-muted: #e9ecf0;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #e8f1ff;
+  --color-accent-foreground: #0d55c4;
+  --color-border: #dde1e7;
+  --color-input: #dde1e7;
+  --color-ring: #1473ff;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-destructive: #dc2626;
+
+  /* Code surface */
+  --color-code-bg: #0d1117;
+  --color-code-header: #161b22;
+  --color-code-foreground: #e6edf3;
+  --color-code-muted: #8b949e;
+
+  /* ---- Font Families ---- */
+  --font-sans: "Lexend", "Lexend Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* ---- Type Scale ---- */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+  --text-5xl: 3rem;
+  --text-6xl: 3.75rem;
+  --text-7xl: 4.5rem;
+
+  /* ---- Weights ---- */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ---- Tracking & Leading ---- */
+  --tracking-tight: -0.025em;
+  --tracking-wider: 0.05em;
+  --tracking-widest: 0.1em;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ---- Spacing (Tailwind 4px base; key section steps) ---- */
+  --spacing: 4px;
+
+  /* ---- Border Radius ---- */
+  --radius: 0.3rem;
+  --radius-sm: calc(0.3rem - 2px);
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+}
+
+/* Dark mode as a custom variant driven by a .dark class on <html> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+.dark {
+  --color-background: #0d0d14;
+  --color-foreground: #f1f1f4;
+  --color-card: #1c1c2e;
+  --color-card-foreground: #f1f1f4;
+  --color-sidebar: #0f0f1a;
+  --color-sidebar-foreground: #c9c9d9;
+  --color-primary: #4d8eff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #1c1c2e;
+  --color-secondary-foreground: #c9c9d9;
+  --color-muted: #1c1c2e;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #0c1f45;
+  --color-accent-foreground: #80aeff;
+  --color-border: #252535;
+  --color-input: #252535;
+  --color-ring: #4d8eff;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-destructive: #ef4444;
+}

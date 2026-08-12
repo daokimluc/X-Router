@@ -1,0 +1,124 @@
+/* Foza — Design Tokens (CSS Custom Properties)
+ * Source: https://foza.ai/  ·  Reverse-engineered with rico DESIGN.md
+ * Default theme: light. Dark theme is distinct — apply via .dark
+ */
+
+:root {
+  /* ---- Colors (light, default) ---- */
+  --color-background: #f6f8fb;
+  --color-foreground: #111827;
+  --color-card: #ffffff;
+  --color-card-foreground: #111827;
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #374151;
+  --color-primary: #1473ff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e9ecf0;
+  --color-secondary-foreground: #374151;
+  --color-muted: #e9ecf0;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #e8f1ff;
+  --color-accent-foreground: #0d55c4;
+  --color-border: #dde1e7;
+  --color-input: #dde1e7;
+  --color-ring: #1473ff;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-destructive: #dc2626;
+
+  /* ---- Code surface (theme-independent) ---- */
+  --docs-code-bg: #0d1117;
+  --docs-code-header: #161b22;
+  --docs-code-foreground: #e6edf3;
+  --docs-code-muted: #8b949e;
+  --docs-code-hover: rgba(255, 255, 255, 0.1);
+  --docs-code-highlight: rgba(77, 142, 255, 0.1);
+
+  /* ---- Font Families ---- */
+  --font-sans: "Lexend", "Lexend Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* ---- Type Scale ---- */
+  --text-xs: 0.75rem;    /* 12px — eyebrow / labels */
+  --text-sm: 0.875rem;   /* 14px — caption / table data */
+  --text-base: 1rem;     /* 16px — body */
+  --text-lg: 1.125rem;   /* 18px — card title */
+  --text-xl: 1.25rem;    /* 20px — subheading */
+  --text-2xl: 1.5rem;    /* 24px — heading-sm */
+  --text-3xl: 1.875rem;  /* 30px — heading / stat */
+  --text-4xl: 2.25rem;   /* 36px — heading-lg */
+  --text-5xl: 3rem;      /* 48px — display-sm */
+  --text-6xl: 3.75rem;   /* 60px — display / hero */
+  --text-7xl: 4.5rem;    /* 72px — display-lg */
+
+  /* ---- Weights ---- */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ---- Tracking & Leading ---- */
+  --tracking-tight: -0.025em;
+  --tracking-wider: 0.05em;
+  --tracking-widest: 0.1em;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ---- Spacing ---- */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-20: 80px;
+  --spacing-24: 96px;
+  --spacing-32: 128px;
+
+  /* ---- Layout ---- */
+  --section-gap: 96px;
+  --card-padding: 24px;
+  --element-gap: 16px;
+  --max-content-width: 1200px;
+
+  /* ---- Border Radius ---- */
+  --radius: 0.3rem;
+  --radius-sm: calc(0.3rem - 2px);
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+
+  /* ---- Shadows (borders carry elevation; shadows are minimal) ---- */
+  --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.04);
+  --shadow-none: none;
+}
+
+/* ---- Dark theme (distinct mode) ---- */
+.dark {
+  --color-background: #0d0d14;
+  --color-foreground: #f1f1f4;
+  --color-card: #1c1c2e;
+  --color-card-foreground: #f1f1f4;
+  --color-sidebar: #0f0f1a;
+  --color-sidebar-foreground: #c9c9d9;
+  --color-primary: #4d8eff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #1c1c2e;
+  --color-secondary-foreground: #c9c9d9;
+  --color-muted: #1c1c2e;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #0c1f45;
+  --color-accent-foreground: #80aeff;
+  --color-border: #252535;
+  --color-input: #252535;
+  --color-ring: #4d8eff;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-destructive: #ef4444;
+}
