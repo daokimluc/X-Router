@@ -46,14 +46,85 @@ where the money goes. X-Router puts a single smart proxy in front of everything.
 
 ## Quick Start
 
-### Foza control plane
+### Foza control plane / Control plane Foza
 
-This repository also contains the Foza web/control plane under
-[`apps/foza/`](apps/foza/). Foza provides the marketplace, buyer/provider
-console, wallet and token-pack flows, admin controls, signed webhooks, and the
-server-side integration layer around this gateway.
+> **Public beta · Active development · Built for open-source maintainers**
+>
+> **Public beta · Đang phát triển · Xây dựng cho maintainer mã nguồn mở**
 
-Run the gateway first, then start Foza in a second terminal:
+This repository now contains both the X-Router gateway core and the Foza web/control
+plane under [`apps/foza/`](apps/foza/). Foza is the product and operations layer around
+X-Router: it gives buyers, providers, and maintainers one place to discover model
+supply, manage API keys, connect models to keys, manage plans and wallets, buy prepaid
+token packs, and monitor usage and settlement data.
+
+Repository này hiện bao gồm cả X-Router gateway core và Foza web/control plane tại
+[`apps/foza/`](apps/foza/). Foza là lớp sản phẩm và vận hành bao quanh X-Router: buyer,
+provider và maintainer có một nơi thống nhất để khám phá nguồn cung model, quản lý API
+key, kết nối model vào key, quản lý plan và wallet, mua gói token trả trước, theo dõi
+usage và settlement.
+
+#### What Foza provides / Foza cung cấp
+
+**English**
+
+- **Working marketplace:** live listings, pricing, markup, and per-listing metrics from
+  X-Router when integration is enabled; buyers can connect models to existing or new keys
+  and start prepaid token-pack purchases.
+- **Buyer workflows:** create, disable, enable, revoke, and rotate keys; subscribe to
+  wallet-backed plans; manage wallet balance; start VietQR/SePay top-ups; buy 1M, 5M,
+  or 10M token packs; and inspect usage by key and model.
+- **Provider and admin workflows:** provider registration and model listings with
+  owner-scoped mutations; server-side gates for seller moderation, catalog controls,
+  markup, plans, roles, webhook configuration, and platform-owned listings.
+- **Money and reliability:** SQLite state for identity mappings, payments, billing,
+  payables, payout idempotency, and reconciliation checkpoints; integer micro-USD ledger
+  values; signed X-Router webhooks; SePay verification; and reconciliation backstops.
+
+**Tiếng Việt**
+
+- **Marketplace đang hoạt động:** listing, giá, markup và metrics theo listing được đọc
+  từ X-Router khi bật live integration; buyer có thể kết nối model vào key hiện có hoặc
+  tạo key mới và bắt đầu mua gói token trả trước.
+- **Luồng buyer:** tạo, tắt, bật lại, thu hồi và xoay vòng key; đăng ký plan tính phí từ
+  wallet; quản lý số dư; nạp tiền qua VietQR/SePay; mua gói 1M, 5M hoặc 10M token; và
+  xem usage theo key/model.
+- **Luồng provider và admin:** provider đăng ký và tạo listing model với mutation giới
+  hạn theo owner; server-side permission cho seller moderation, catalog, markup, plan,
+  role, webhook và listing thuộc platform.
+- **Money và reliability:** SQLite lưu mapping identity, payment, billing, payable,
+  payout idempotency và reconciliation checkpoint; ledger dùng micro-USD nguyên; webhook
+  X-Router có chữ ký; SePay được xác thực; có reconciliation backstop.
+
+#### Architecture / Kiến trúc
+
+```mermaid
+flowchart LR
+    U["Buyers · Providers · Maintainers"] --> F["Foza Web App\nNext.js + Auth.js"]
+    F --> A["Server-only Foza adapter\nHTTP + typed contracts"]
+    A <--> X["X-Router core\nGateway · catalog · provisioning · settlement"]
+    X --> P["Provider accounts\nand model supply"]
+    X --> W["Signed X-Router webhooks"]
+    S["SePay payment webhook"] --> F
+    W --> D["Foza SQLite\nidentity · payments · ledger · dedupe"]
+    D --> R["Reconciliation backstop"]
+    R --> X
+```
+
+X-Router core remains the gateway, catalog, provisioning, and settlement authority.
+Foza owns the web app, identity, buyer/provider/admin console, payment coordination,
+webhook ingestion, and local SQLite mirror ledger. Foza calls the core over HTTP through
+server-only `/provision/*`, `/admin/v1/*`, and `/v1/*` integration paths; it does not
+contain a second gateway runtime.
+
+X-Router core vẫn là nơi sở hữu gateway, catalog, provisioning và settlement. Foza sở
+hữu web app, identity, console buyer/provider/admin, payment coordination, webhook
+ingestion và SQLite mirror ledger. Foza gọi core qua HTTP thông qua các path server-only
+`/provision/*`, `/admin/v1/*` và `/v1/*`; Foza không chứa một gateway runtime thứ hai.
+
+#### Run both applications / Chạy cả hai ứng dụng
+
+Start X-Router first, then Foza in a second terminal:
 
 ```bash
 # Terminal 1 — X-Router core
@@ -61,20 +132,72 @@ npm install
 npm run build:all
 ADMIN_API_KEYS=admin npm start
 
-# Terminal 2 — Foza web/control plane
+# Terminal 2 — Foza control plane
 cd apps/foza
 npm install
 copy .env.example .env.local   # PowerShell / Windows
 npm run dev
 ```
 
-Foza expects the gateway at `XROUTER_URL=http://localhost:3100`. Set
-`MARKETPLACE_ENABLED=true` in `apps/foza/.env.local` for live integration;
-leave it `false` to use Foza's local mock fixtures.
+Foza expects `XROUTER_URL=http://localhost:3100`. For local UI work, leave
+`MARKETPLACE_ENABLED=false` and use deterministic typed mock fixtures. For live
+integration, set the server-only values below in `apps/foza/.env.local`:
 
-See the [Foza English README](apps/foza/README.md) or
-[Foza Vietnamese README](apps/foza/README.vi.md) for its detailed scope and
-configuration.
+```dotenv
+MARKETPLACE_ENABLED=true
+XROUTER_URL=http://localhost:3100
+XROUTER_PROVISION_KEY=your-provision-key
+XROUTER_ADMIN_KEY=your-admin-key
+XROUTER_INTERNAL_KEY=your-internal-key
+XROUTER_WEBHOOK_SECRET=your-webhook-secret
+```
+
+Never commit `.env.local`, real credentials, payment secrets, or webhook secrets.
+
+#### Security, status, and roadmap / Bảo mật, trạng thái và roadmap
+
+Foza keeps X-Router and Auth.js secrets server-only, masks buyer keys, verifies signed
+webhooks with HMAC-SHA256, authenticates SePay callbacks with constant-time comparison,
+and re-checks ownership before key, seller, or listing mutations. Read paths can fall
+back to typed mock/empty data when integration is unavailable; writes return typed
+gateway errors instead of pretending success.
+
+Foza giữ secret X-Router và Auth.js ở server, mask buyer key, xác thực webhook bằng
+HMAC-SHA256, xác thực callback SePay bằng constant-time comparison và kiểm tra ownership
+trước mutation key/seller/listing. Read path có thể fallback về mock/empty data khi
+integration không khả dụng; write trả typed gateway error thay vì giả vờ thành công.
+
+Foza is in public beta and active development, with a small group of internal users.
+The immediate roadmap is public-beta hardening, live-integration reliability, payment
+and settlement correctness, seller approval synchronization, provider earnings detail,
+marketplace discovery/filtering, clearer live/fallback indicators, and stronger
+regression coverage. Seeded fixtures, marketing cards, capacity targets, and fallback
+data are not production telemetry.
+
+Foza đang ở public beta và được phát triển tích cực, với một nhóm nhỏ người dùng nội
+bộ. Roadmap gần là hardening public beta, reliability của live integration, correctness
+của payment/settlement, đồng bộ seller approval, provider earnings detail, marketplace
+discovery/filtering, live/fallback indicator rõ hơn và regression coverage mạnh hơn.
+Fixture, marketing card, capacity target và fallback data không phải production telemetry.
+
+#### Codex for Open Source / Codex cho mã nguồn mở
+
+Codex support would be applied to concrete maintainer bottlenecks: security and
+reliability regression coverage around signed webhooks, payments, reversals, ownership,
+and reconciliation; repository-aware issue/PR triage and review; documentation-drift
+detection; and gateway/marketplace expansion without weakening money or security
+boundaries. The project is in public beta and this application does not imply acceptance
+into the program.
+
+Hỗ trợ từ Codex sẽ tập trung vào các điểm nghẽn cụ thể của maintainer: regression
+coverage cho webhook có chữ ký, payment, reversal, ownership và reconciliation; triage
+issue/PR có context repository; phát hiện documentation drift; và mở rộng
+gateway/marketplace mà không làm yếu ranh giới money/security. Dự án đang ở public beta
+và việc đăng ký này không có nghĩa là đã được chấp nhận vào chương trình.
+
+See the detailed [Foza English README](apps/foza/README.md) and
+[Foza Vietnamese README](apps/foza/README.vi.md) for the full implementation status,
+limitations, scripts, contribution guidance, and useful paths.
 
 ### npm (fastest)
 
