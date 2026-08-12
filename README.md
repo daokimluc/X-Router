@@ -46,6 +46,36 @@ where the money goes. X-Router puts a single smart proxy in front of everything.
 
 ## Quick Start
 
+### Foza control plane
+
+This repository also contains the Foza web/control plane under
+[`apps/foza/`](apps/foza/). Foza provides the marketplace, buyer/provider
+console, wallet and token-pack flows, admin controls, signed webhooks, and the
+server-side integration layer around this gateway.
+
+Run the gateway first, then start Foza in a second terminal:
+
+```bash
+# Terminal 1 — X-Router core
+npm install
+npm run build:all
+ADMIN_API_KEYS=admin npm start
+
+# Terminal 2 — Foza web/control plane
+cd apps/foza
+npm install
+copy .env.example .env.local   # PowerShell / Windows
+npm run dev
+```
+
+Foza expects the gateway at `XROUTER_URL=http://localhost:3100`. Set
+`MARKETPLACE_ENABLED=true` in `apps/foza/.env.local` for live integration;
+leave it `false` to use Foza's local mock fixtures.
+
+See the [Foza English README](apps/foza/README.md) or
+[Foza Vietnamese README](apps/foza/README.vi.md) for its detailed scope and
+configuration.
+
 ### npm (fastest)
 
 ```bash
@@ -305,4 +335,3 @@ React dashboard) and does not reuse source code from these projects.
 ## License
 
 MIT - Luc DK. See [LICENSE](LICENSE).
-
