@@ -404,7 +404,7 @@ export class TTSHandler implements MediaKindHandler {
       ...this.buildAuthHeaders(config, credentials),
     };
     const body: Record<string, unknown> = {
-      model_id: model || "sonic-2",
+      model_id: model || "sonic-3.6",
       transcript: req.input,
       output_format: { container: "mp3", bit_rate: 128000, sample_rate: 44100 },
     };
